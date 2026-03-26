@@ -44,7 +44,7 @@ Recommendation:
 - current public migration status:
   - migrated: `skills/handoff-impl`, `skills/handoff-review`, `commands/cmsg.md`
   - still private: `skills/summarize-youtube`, `settings.json`, `CLAUDE.md`
-  - chezmoi should link the migrated Claude assets back to this public repo
+  - chezmoi now links the migrated Claude assets back to this public repo
 
 ### Pi
 
