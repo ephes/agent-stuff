@@ -52,10 +52,9 @@ Current chezmoi-managed items:
 
 - `dot_pi/agent/AGENTS.md`
 - `dot_pi/agent/keybindings.json`
-- `dot_pi/agent/skills/commit-ready/SKILL.md`
-- `dot_pi/agent/skills/commit-workflow/SKILL.md`
-- `dot_pi/agent/skills/review-handoff/SKILL.md`
-- `dot_pi/agent/skills/review-handoff/scripts/executable_gather-changes.sh`
+- `dot_pi/agent/skills/symlink_commit-ready.tmpl`
+- `dot_pi/agent/skills/symlink_commit-workflow.tmpl`
+- `dot_pi/agent/skills/symlink_review-handoff.tmpl`
 
 Recommendation:
 
@@ -63,6 +62,10 @@ Recommendation:
 - keep `keybindings.json` private unless you explicitly want to publish your preferred defaults
 - do not publish `dot_pi/agent/AGENTS.md` unchanged because it is mostly about local chezmoi management
 - move whole skill directories when a skill includes helper scripts, not just `SKILL.md`
+- current public migration status:
+  - migrated: `commit-ready`, `commit-workflow`, `review-handoff`
+  - still private: `AGENTS.md`, `keybindings.json`
+  - chezmoi now links the migrated Pi skill directories back to this public repo so the installed `~/.pi/agent/skills/...` layout resolves through directory symlinks
 
 ### Private Project Glue
 
