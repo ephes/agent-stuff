@@ -12,11 +12,11 @@ Current migrated assets:
 
 - `skills/handoff-impl`
 - `skills/handoff-review`
+- `skills/summarize-youtube`
 - `commands/cmsg.md`
 
 Not migrated yet:
 
-- `skills/summarize-youtube`
 - `settings.json`
 - `CLAUDE.md`
 

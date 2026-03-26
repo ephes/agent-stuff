@@ -33,7 +33,7 @@ Current chezmoi-managed items:
 - `dot_claude/settings.json`
 - `dot_claude/skills/symlink_handoff-impl.tmpl`
 - `dot_claude/skills/symlink_handoff-review.tmpl`
-- `dot_claude/skills/summarize-youtube/SKILL.md`
+- `dot_claude/skills/symlink_summarize-youtube.tmpl`
 
 Recommendation:
 
@@ -42,8 +42,8 @@ Recommendation:
 - treat `settings.json` as private by default unless you want to publish an intentionally curated example version
 - do not publish `dot_claude/CLAUDE.md` unchanged because it is mostly local operating guidance
 - current public migration status:
-  - migrated: `skills/handoff-impl`, `skills/handoff-review`, `commands/cmsg.md`
-  - still private: `skills/summarize-youtube`, `settings.json`, `CLAUDE.md`
+  - migrated: `skills/handoff-impl`, `skills/handoff-review`, `skills/summarize-youtube`, `commands/cmsg.md`
+  - still private: `settings.json`, `CLAUDE.md`
   - chezmoi now links the migrated Claude assets back to this public repo
 
 ### Pi
