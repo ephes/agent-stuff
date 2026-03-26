@@ -9,16 +9,20 @@ This document captures the current agent-related assets found in the private che
 Current chezmoi-managed items:
 
 - `dot_codex/AGENTS.md`
-- `dot_codex/skills/commit-workflow/SKILL.md`
-- `dot_codex/skills/implement-handoff/SKILL.md`
+- `dot_codex/skills/commit-workflow/symlink_SKILL.md.tmpl`
+- `dot_codex/skills/implement-handoff/symlink_SKILL.md.tmpl`
 - `dot_codex/skills/local-dev-orchestration/SKILL.md`
-- `dot_codex/skills/review-handoff/SKILL.md`
+- `dot_codex/skills/review-handoff/symlink_SKILL.md.tmpl`
 
 Recommendation:
 
 - move the reusable skills into [`codex/skills/`](../codex/skills)
 - do not publish the current `dot_codex/AGENTS.md` as-is because it mostly documents your private chezmoi workflow
 - replace private installation instructions with a public repo-level install story
+- current public migration status:
+  - migrated: `commit-workflow`, `implement-handoff`, `review-handoff`
+  - still private: `local-dev-orchestration`
+  - chezmoi now links the migrated `SKILL.md` files back to this public repo
 
 ### Claude Code
 
