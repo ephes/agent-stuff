@@ -29,10 +29,10 @@ Recommendation:
 Current chezmoi-managed items:
 
 - `dot_claude/CLAUDE.md`
-- `dot_claude/commands/cmsg.md`
+- `dot_claude/commands/symlink_cmsg.md.tmpl`
 - `dot_claude/settings.json`
-- `dot_claude/skills/handoff-impl/SKILL.md`
-- `dot_claude/skills/handoff-review/SKILL.md`
+- `dot_claude/skills/symlink_handoff-impl.tmpl`
+- `dot_claude/skills/symlink_handoff-review.tmpl`
 - `dot_claude/skills/summarize-youtube/SKILL.md`
 
 Recommendation:
@@ -41,6 +41,10 @@ Recommendation:
 - move reusable command prompts into [`claude/commands/`](../claude/commands)
 - treat `settings.json` as private by default unless you want to publish an intentionally curated example version
 - do not publish `dot_claude/CLAUDE.md` unchanged because it is mostly local operating guidance
+- current public migration status:
+  - migrated: `skills/handoff-impl`, `skills/handoff-review`, `commands/cmsg.md`
+  - still private: `skills/summarize-youtube`, `settings.json`, `CLAUDE.md`
+  - chezmoi should link the migrated Claude assets back to this public repo
 
 ### Pi
 

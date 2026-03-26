@@ -8,4 +8,16 @@ Expected contents:
 - `commands/` for reusable command prompts
 - optional example configs when they are intentionally public and sanitized
 
+Current migrated assets:
+
+- `skills/handoff-impl`
+- `skills/handoff-review`
+- `commands/cmsg.md`
+
+Not migrated yet:
+
+- `skills/summarize-youtube`
+- `settings.json`
+- `CLAUDE.md`
+
 Keep personal settings and private overrides in chezmoi unless they are deliberately published examples.
