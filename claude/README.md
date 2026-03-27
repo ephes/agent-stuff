@@ -8,6 +8,7 @@ Skills and command prompts for Claude Code.
 |-------|---------|
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |
+| `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 
 ## Commands

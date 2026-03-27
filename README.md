@@ -12,6 +12,7 @@ chezmoi symlinks.
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
+| Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 | Claude | `cmsg` (command) | Commit with a clean message, no self-references |
 | Pi | `commit-ready` | Assess commit readiness without creating a commit |
@@ -33,6 +34,7 @@ agent-stuff/
     skills/
       handoff-impl/
       handoff-review/
+      mermaid-marked2-markdown/
       summarize-youtube/
     commands/
       cmsg.md
