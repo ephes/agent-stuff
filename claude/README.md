@@ -1,23 +1,22 @@
-# Claude Code Assets
+# Claude Code Skills and Commands
 
-Use this directory for Claude Code-specific public assets.
+Skills and command prompts for Claude Code.
 
-Expected contents:
+## Skills
 
-- `skills/` for reusable Claude skills
-- `commands/` for reusable command prompts
-- optional example configs when they are intentionally public and sanitized
+| Skill | Purpose |
+|-------|---------|
+| `handoff-impl` | Generate an implementation prompt for a second agent |
+| `handoff-review` | Generate a code review prompt for a second agent |
+| `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 
-Current migrated assets:
+## Commands
 
-- `skills/handoff-impl`
-- `skills/handoff-review`
-- `skills/summarize-youtube`
-- `commands/cmsg.md`
+| Command | Purpose |
+|---------|---------|
+| `cmsg.md` | Commit with a clean message, no self-references |
 
-Not migrated yet:
+## What stays private in chezmoi
 
-- `settings.json`
-- `CLAUDE.md`
-
-Keep personal settings and private overrides in chezmoi unless they are deliberately published examples.
+- `settings.json` — personal Claude Code configuration
+- `CLAUDE.md` — local operating guidance

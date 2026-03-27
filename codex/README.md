@@ -1,20 +1,16 @@
-# Codex Assets
+# Codex Skills
 
-Use this directory for Codex-specific public assets.
+Skills for the Codex coding agent.
 
-Expected contents:
+## Skills
 
-- `skills/` for reusable Codex skills
-- optional examples or docs that explain Codex-specific install mechanics
+| Skill | Purpose |
+|-------|---------|
+| `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| `implement-handoff` | Generate an implementation prompt for a second agent |
+| `review-handoff` | Generate a code review prompt for a second agent |
 
-Current migrated skills:
+## What stays private in chezmoi
 
-- `commit-workflow`
-- `implement-handoff`
-- `review-handoff`
-
-Not migrated yet:
-
-- `local-dev-orchestration`, which still depends on local project paths and workstation-specific commands
-
-Do not put machine-specific installation glue here. Keep that in chezmoi.
+- `AGENTS.md` — local operating guidance for the chezmoi workflow
+- `local-dev-orchestration` — depends on local project paths and workstation-specific commands

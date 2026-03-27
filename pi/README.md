@@ -1,26 +1,22 @@
-# Pi Assets
+# Pi Skills
 
-Use this directory for Pi-specific public assets.
+Skills for the Pi coding agent.
 
-Expected contents:
+## Skills
 
-- `skills/` for reusable Pi skills
-- optional example keybindings or settings when they are intentionally public
+| Skill | Purpose |
+|-------|---------|
+| `commit-ready` | Assess commit readiness without creating a commit |
+| `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| `review-handoff` | Generate a code review prompt for a second agent (includes `scripts/gather-changes.sh`) |
 
-Current migrated assets:
+## Install note
 
-- `skills/commit-ready`
-- `skills/commit-workflow`
-- `skills/review-handoff`, including `scripts/gather-changes.sh`
+Skills with helper scripts (like `review-handoff/scripts/`) must be symlinked
+as whole directories, not file-by-file. The chezmoi symlink templates already
+handle this correctly.
 
-Still private in chezmoi:
+## What stays private in chezmoi
 
-- `~/.pi/agent/AGENTS.md`
-- `~/.pi/agent/keybindings.json`
-- Pi-specific install glue that links the installed `~/.pi/agent/skills/...` paths back to this repo
-
-Install strategy:
-
-- reusable Pi skills live in this public repo
-- chezmoi manages private Pi config and directory-level symlinks from `~/.pi/agent/skills/<skill>` to `~/projects/agent-stuff/pi/skills/<skill>`
-- skills with helper assets, such as `review-handoff/scripts/gather-changes.sh`, are linked as whole directories rather than file-by-file
+- `AGENTS.md` — local operating guidance
+- `keybindings.json` — personal keybinding preferences
