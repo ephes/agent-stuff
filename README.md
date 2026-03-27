@@ -1,91 +1,114 @@
 # agent-stuff
 
-`agent-stuff` is the public home for reusable assets that support agentic coding workflows.
+Public home for reusable coding agent skills, distributed to each agent via
+chezmoi symlinks.
 
-This repo is intended to hold things like:
+## Skill inventory
 
-- skills for Codex, Claude Code, Pi, and similar agents
-- reusable prompt assets and handoff patterns
-- shared command snippets and lightweight helper scripts
-- documented install conventions for local agent setups
+| Agent | Skill | Purpose |
+|-------|-------|---------|
+| Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
+| Codex | `review-handoff` | Generate a code review prompt for a second agent |
+| Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
+| Claude | `handoff-review` | Generate a code review prompt for a second agent |
+| Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
+| Claude | `cmsg` (command) | Commit with a clean message, no self-references |
+| Pi | `commit-ready` | Assess commit readiness without creating a commit |
+| Pi | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| Pi | `review-handoff` | Generate a code review prompt for a second agent |
 
-This repo is not the place for:
+## Repo structure
 
-- secrets
-- machine-specific paths
-- personal overrides that only make sense on one workstation
-- private project context that should stay in a private dotfiles repo
+```text
+agent-stuff/
+  codex/
+    README.md
+    skills/
+      commit-workflow/
+      implement-handoff/
+      review-handoff/
+  claude/
+    README.md
+    skills/
+      handoff-impl/
+      handoff-review/
+      summarize-youtube/
+    commands/
+      cmsg.md
+  pi/
+    README.md
+    skills/
+      commit-ready/
+      commit-workflow/
+      review-handoff/
+  README.md
+```
 
-## Recommended Model
+Each agent directory has its own README with agent-specific details (what stays
+private, install constraints). Skills may include supporting files beyond
+`SKILL.md` — for example, `pi/skills/review-handoff/scripts/gather-changes.sh`.
 
-Use this repository as the public source of truth for reusable agent assets.
+## How skills get installed
 
-Keep your private chezmoi repo as the machine-specific integration layer that:
+Skills are installed via chezmoi symlinks. The dotfiles repo
+(`~/.local/share/chezmoi`) handles two things:
 
-- clones or updates this repo
-- symlinks or copies the right files into `~/.codex`, `~/.claude`, `~/.pi`, or similar homes
-- applies private overrides
-- wires in local-only commands, paths, and automation hooks
+**1. Cloning this repo** via `.chezmoiexternal.toml`:
 
-Recommendation:
+```toml
+["projects/agent-stuff"]
+    type = "git-repo"
+    url = "git@github.com:ephes/agent-stuff.git"
+    refreshPeriod = "168h"
+```
 
-1. Publish reusable assets here.
-2. Keep agent installation glue in chezmoi.
-3. Run a small chezmoi-managed sync script after updates.
+This clones the repo on first `chezmoi apply` and pulls updates weekly.
+chezmoi processes external entries before deploying managed files, so the
+repo is guaranteed to exist before symlinks are created.
 
-That gives you a clean split:
+**2. Creating symlinks** via templates like:
 
-- public repo: reusable content
-- private repo: private wiring
+```
+# Example: dot_claude/skills/symlink_handoff-impl.tmpl
+{{ .chezmoi.homeDir }}/projects/agent-stuff/claude/skills/handoff-impl
+```
 
-## Starter Layout
+The concrete clone path is a dotfiles-level choice. This repo is path-agnostic.
 
-The initial layout is intentionally small:
+## Adding or updating a skill
 
-- [`codex/`](codex) for Codex-specific assets
-- [`claude/`](claude) for Claude Code-specific assets
-- [`pi/`](pi) for Pi-specific assets
-- [`shared/`](shared) for assets that should be adapted across agents
-- [`docs/chezmoi-integration.md`](docs/chezmoi-integration.md) for installation and sync options
-- [`docs/migration-plan.md`](docs/migration-plan.md) for the current inventory and move plan
-- [`scripts/install-agent-stuff.example.sh`](scripts/install-agent-stuff.example.sh) for a starter sync script pattern
+1. Create or edit the skill under the appropriate agent directory
+   (e.g., `claude/skills/my-skill/SKILL.md`)
+2. If this is a new skill, add a symlink template to the dotfiles repo
+   (e.g., `dot_claude/skills/symlink_my-skill.tmpl`)
+3. Run `chezmoi apply`
+4. Update the agent's README and the skill inventory table above
 
-## What Moves Here First
+Similar skills across agents are intentionally kept separate so each version
+can be tuned to its agent's model, tool names, and interaction patterns.
 
-Based on the current chezmoi-managed setup under `~/.local/share/chezmoi`, the first migration candidates are the clearly reusable agent assets:
+## Design decisions
 
-- Codex skills in `dot_codex/skills/`
-- Claude skills in `dot_claude/skills/`
-- Claude command prompts in `dot_claude/commands/`
-- Pi skills in `dot_pi/agent/skills/`
-- shared instructions that can be published without exposing private paths or private project details
+**Per-agent skills, not shared.** The 10-30% that differs between agents is
+prompt engineering tuned to each agent's model and tooling. A shared template
+system is not worth the complexity. Revisit if cross-agent duplication becomes
+a real maintenance problem.
 
-The items that should usually stay private or be rewritten before publishing are:
+**Not every agent needs every skill.** Skills exist only where they are useful.
+No gap-filling for symmetry.
 
-- raw `settings.json` files with personal preferences or local plugin choices
-- `AGENTS.md` or `CLAUDE.md` files that mainly describe your private chezmoi workflow
-- symlink templates that point at your home directory layout
-- project-specific private instructions such as `private_dot_config/emerge/*`
+**Chezmoi symlinks over alternatives.** Chosen over `--add-dir` (Claude Code
+only), plugins (overkill for personal use), rsync scripts, and git submodules.
+One mechanism across all agents.
 
-## Migration Strategy
+**`.chezmoiexternal.toml` for bootstrap.** Declarative, handles both initial
+clone and periodic updates, and guarantees ordering (repo exists before
+symlinks are created).
 
-Do not move everything at once. Move by category:
+## When to revisit this structure
 
-1. Copy the reusable asset into this repo.
-2. Remove machine-specific assumptions from the public version.
-3. Keep a thin chezmoi wrapper that installs or symlinks it locally.
-4. Leave private overrides in chezmoi.
-
-The detailed plan and current inventory are in [`docs/migration-plan.md`](docs/migration-plan.md).
-
-## Integration Options
-
-The realistic integration options are:
-
-- chezmoi externals via `.chezmoiexternal.toml`
-- a chezmoi-managed sync script
-- a git submodule inside the private dotfiles repo
-- direct GitHub install where the agent supports it
-- manual clone plus symlink as a simple fallback
-
-The recommended default is documented in [`docs/chezmoi-integration.md`](docs/chezmoi-integration.md).
+- Substantial duplication across agents causes real maintenance pain
+- A new coding agent is added and the per-agent pattern does not scale
+- Chezmoi symlinks hit reliability issues
+- The Agent Skills spec matures enough for a cross-tool shared format
