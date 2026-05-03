@@ -60,7 +60,23 @@ Use this skill when the user asks for things like:
    - docs/specs are in sync with the current implementation state
    - there are no known unresolved blockers
 
-7. If the user asked to commit and the work is ready:
+7. Check whether the repo has workflow-learning capture instructions.
+   If `AGENTS.md`, project docs, or the user's request mention commands such as
+   `pipy-session workflow`, make sure important implementation/review/subagent
+   facts from the current session are not lost before committing:
+   - record or remind the user to record implementer/reviewer roles and models
+   - record or remind the user to record review finding counts and closure
+     counts when a review happened
+   - record or remind the user to record material subagent use
+   - record or remind the user to add a workflow evaluation when the session
+     taught something about an agent/model pattern
+   Do not include prompts, transcript bodies, tool output, secrets,
+   credentials, or sensitive personal data in workflow-learning fields.
+   Do not block an otherwise ready commit solely because private session
+   capture is unavailable; prefer a concise note in the final response when
+   the workflow event cannot be appended from the current context.
+
+8. If the user asked to commit and the work is ready:
    - create the commit using a non-interactive git command
    - respect repo-specific rules for split commits across repos
    - if files under `specs/` belong to a separate docs or specs repo in this codebase, commit them in that repo rather than assuming the code-repo commit is sufficient
@@ -76,6 +92,7 @@ Use this skill when the user asks for things like:
 - If multiple repos are involved, commit them separately when required and report both hashes.
 - If `specs/` files live in a separate docs or specs repo for the current project, commit them there and do not treat that as satisfied by a code-repo commit alone.
 - Never commit while known sync gaps or validation blockers remain.
+- Treat workflow-learning capture as session hygiene when the project asks for it, but do not invent uncertain model names, review counts, or subagent facts.
 
 ## Output Contract
 
@@ -84,6 +101,7 @@ When responding to the user, clearly state:
 - what you fixed before commit, if anything
 - what tests or checks ran
 - whether docs/specs were already in sync or were updated
+- whether workflow-learning capture was recorded, was not applicable, or still needs a follow-up
 - any blockers that prevented committing
 
 If a commit was created, report:

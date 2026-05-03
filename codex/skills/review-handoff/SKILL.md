@@ -51,6 +51,16 @@ Use this skill when the user asks for things like:
 
 5. If tests were run in the current session, include the commands and results.
 
+6. When the reviewed project uses `pipy-session workflow` or similar
+   workflow-learning capture, ask the reviewer to report review metrics that
+   can be recorded later:
+   - finding counts by severity
+   - accepted, fixed, rejected, and deferred counts when known
+   - reviewer agent/model and implementer agent/model when known
+   - whether subagents materially affected the review
+   Keep this request summary-safe; do not ask for prompts, transcripts, tool
+   output, secrets, or credentials.
+
 ## Generated Prompt Must Include
 
 - a one-line review task statement
@@ -77,6 +87,7 @@ The reviewer output contract should ask for:
 - open questions or assumptions
 - whether the change appears complete
 - the next best follow-up
+- summary-safe review metrics suitable for workflow-learning capture when applicable
 
 ## Prompt Template
 
@@ -154,6 +165,7 @@ Structure your output as follows:
 4. Open questions or assumptions - anything you could not verify.
 5. Completeness - whether the change appears complete for the stated scope.
 6. Next best follow-up - the most useful next action.
+7. Workflow-learning metrics - when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 ```
 
 ## Rules
@@ -173,6 +185,7 @@ Structure your output as follows:
 - Tell the reviewer to inspect surrounding file context, not only diff hunks, when changed functions, classes, or shared helpers have meaningful callers or callees.
 - Tell the reviewer to verify docs or release notes when the change needs them, and to treat missing or stale docs as findings.
 - Tell the reviewer what not to flag so the review stays high-signal.
+- When the target repo records workflow-learning events, ask for review metrics that map to `pipy-session workflow review-outcome` and `workflow evaluation`.
 - If the change is mostly tests, emphasize behavior preservation, helper design quality, and accidental semantics changes.
 - If the change introduces shared helpers, ask the reviewer to check for over-abstraction, misleading names, and hidden coupling.
 - If you cannot determine enough context from the worktree, say so briefly and draft the best prompt from the observable changes.
