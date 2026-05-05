@@ -29,18 +29,19 @@ Use this skill when the user asks for things like:
    - targeted reads of files named by the user
    - targeted reads of prior review notes or follow-up findings already established in the session
    - targeted reads of changed files when needed
+   - discoverable project-local planning docs, specs, ADRs, backlog files, release notes, or design docs that define intended behavior
 
 2. Determine the review scope with this source-of-truth order:
    - the user's explicit ask
    - prior session findings, decisions, or iterative review-cycle context
-   - relevant specs, feature files, ADRs, backlog items, terminology docs, or companion-repo docs already known in context
+   - relevant project-local instructions, specs, feature files, ADRs, backlog items, terminology docs, release notes, or companion-repo docs already known or discoverable from the repo context
    - the current diff and worktree as evidence, changed-file discovery, and collateral-impact detection
    If it is materially unclear which context defines the review target, ask the user a concise question instead of guessing.
 
 3. Load the minimum relevant context.
    Usually include:
    - `AGENTS.md`
-   - the concrete specs or docs that define intended behavior
+   - the concrete planning docs, specs, ADRs, or docs that define intended behavior
    - the primary files to inspect first
    - prior findings or review targets to re-check when this is a follow-up review
    - an explicit review lens when the user wants one, such as correctness, regression risk, maintainability, performance, security, or docs
@@ -51,11 +52,11 @@ Use this skill when the user asks for things like:
 
 5. If tests were run in the current session, include the commands and results.
 
-6. When the reviewed project uses `pipy-session workflow` or similar
+6. When the reviewed project uses a workflow-learning capture command or similar
    workflow-learning capture, ask the reviewer to report review metrics that
    can be recorded later:
    - finding counts by severity
-   - accepted, fixed, rejected, and deferred counts when known
+   - accepted, fixed, rejected, and deferred counts when known, with a note about whether counts are for this review round or cumulative across the review cycle
    - reviewer agent/model and implementer agent/model when known
    - whether subagents materially affected the review
    Keep this request summary-safe; do not ask for prompts, transcripts, tool
@@ -76,6 +77,7 @@ Use this skill when the user asks for things like:
 - exact verification commands when they are known
 - review criteria with severity tiers and explicit "do not flag" guidance
 - documentation and release-note verification when behavior, workflow, or user-facing usage changed
+- workflow-capture verification when the target repo documents review or session-learning requirements
 - a reviewer output contract
 
 Unless the user asks for something else, return only the reviewer prompt.
@@ -84,10 +86,12 @@ The reviewer output contract should ask for:
 - findings first, ordered by severity
 - file and line references for each finding
 - an explicit statement when there are no findings
+- documentation or release-note verification when applicable
 - open questions or assumptions
 - whether the change appears complete
 - the next best follow-up
 - summary-safe review metrics suitable for workflow-learning capture when applicable
+- whether review metrics are per-round or cumulative when an iterative review cycle is in progress
 
 ## Prompt Template
 
@@ -109,7 +113,7 @@ You are performing an independent code review. This is a review task, not an imp
 
 ## Context Files to Load First
 
-[Project instructions, specs, docs, ADRs, or companion-repo docs that define intended behavior.]
+[Project instructions, planning docs, specs, ADRs, release notes, or companion-repo docs that define intended behavior.]
 
 - /absolute/path/to/AGENTS.md - Project instructions
 - /absolute/path/to/spec.md - Feature or behavior spec
@@ -154,6 +158,8 @@ When reviewing changed functions, classes, tests, or shared helpers, inspect sur
 
 Verify docs or release notes when behavior, workflow, or user-facing usage changed. Treat missing or stale docs as findings.
 
+If this repo documents workflow-learning or session-capture requirements for reviews, verify that the implementer can record the needed summary-safe review outcome through the project's documented capture commands, or can list it in the report when direct recording is not available. Do not ask for or include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+
 If anything in this context is unclear or you need more information to review effectively, ask before proceeding.
 
 ## Reviewer Report Contract
@@ -165,7 +171,7 @@ Structure your output as follows:
 4. Open questions or assumptions - anything you could not verify.
 5. Completeness - whether the change appears complete for the stated scope.
 6. Next best follow-up - the most useful next action.
-7. Workflow-learning metrics - when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+7. Workflow-learning metrics - when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, whether those counts are per-review-round or cumulative, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 ```
 
 ## Rules
@@ -178,14 +184,15 @@ Structure your output as follows:
 - Use absolute file paths so the receiving agent can read files directly in a fresh session.
 - Return the generated prompt inside a single fenced `text` code block.
 - Keep the generated prompt under 400 lines.
-- Include relevant docs, feature files, or specs already known from session context even if they are not in the diff or not in the same repo.
+- Include relevant project-local instructions, planning docs, feature files, release notes, or specs already known from session context or discoverable from repo guidance, even if they are not in the diff or not in the same repo.
 - If it is materially unclear what context should be included for the review, ask the user directly instead of silently narrowing scope.
 - Do not ask the reviewer to inspect the entire repository unless the request or observable impact genuinely requires it.
 - Do not include raw file contents or full diffs in the prompt. The receiving agent can read files directly.
 - Tell the reviewer to inspect surrounding file context, not only diff hunks, when changed functions, classes, or shared helpers have meaningful callers or callees.
 - Tell the reviewer to verify docs or release notes when the change needs them, and to treat missing or stale docs as findings.
 - Tell the reviewer what not to flag so the review stays high-signal.
-- When the target repo records workflow-learning events, ask for review metrics that map to `pipy-session workflow review-outcome` and `workflow evaluation`.
+- When the target repo records workflow-learning events, ask for review metrics that map to the repo's documented workflow-learning commands.
+- For iterative review cycles, ask whether review metrics are for the current round or cumulative across the cycle.
 - If the change is mostly tests, emphasize behavior preservation, helper design quality, and accidental semantics changes.
 - If the change introduces shared helpers, ask the reviewer to check for over-abstraction, misleading names, and hidden coupling.
 - If you cannot determine enough context from the worktree, say so briefly and draft the best prompt from the observable changes.

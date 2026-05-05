@@ -27,21 +27,22 @@ Use this skill when the user asks for things like:
    - `git diff --stat`
    - targeted reads of files named by the user
    - targeted reads of prior review findings or agreed follow-up tasks already established in the session
-   - local specs or design docs that define the requested work
+   - discoverable project-local planning docs, specs, ADRs, backlog files, release notes, or design docs that define the requested work
 
 2. Determine the implementation scope with this source-of-truth order:
    - the user's explicit ask
    - prior session findings, decisions, review feedback, or agreed follow-up tasks
-   - relevant specs, design docs, ADRs, backlog items, terminology docs, or companion-repo docs already known in context
+   - relevant project-local instructions, specs, design docs, ADRs, backlog items, terminology docs, release notes, or companion-repo docs already known or discoverable from the repo context
    - the current diff and worktree as evidence, code-location discovery, and collateral-impact detection
    If it is materially unclear which context defines the implementation target, ask the user a concise question instead of guessing.
 
 3. Load the minimum relevant context.
    Usually include:
    - `AGENTS.md`
-   - the concrete specs or docs that define the requested slice
+   - the concrete planning docs, specs, ADRs, or docs that define the requested slice
    - the primary files to inspect first
    - prior findings or acceptance conditions that this implementation must satisfy
+   - project-local workflow capture or review expectations when the repo documents them
 
 4. Draft a second-agent prompt that is specific to the requested implementation.
    Output the prompt inside a single fenced `text` code block so the user can copy it directly.
@@ -70,6 +71,7 @@ Use this skill when the user asks for things like:
 - concrete implementation expectations
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
+- workflow-capture or review-cycle expectations when the target repo documents them
 - an implementer report contract
 
 Unless the user asks for something else, return only the implementation prompt.
@@ -79,6 +81,8 @@ The implementer report contract should usually ask for:
 - which docs or release-note files changed, or an explicit statement that no doc changes were needed
 - which tests ran
 - whether the requested slice is complete or partial
+- what was intentionally out of scope
+- summary-safe workflow/session events recorded, or an explicit statement that none were needed
 - a concise explanation of what was implemented
 - follow-up risks or next best cleanup
 
@@ -103,7 +107,11 @@ You are implementing the work described below. This is an implementation task, n
 
 ## Constraints
 
-[What must not change. API contracts, backward compatibility, performance budgets, dependency limits, intentionally out-of-scope work.]
+[What must not change. API contracts, backward compatibility, performance budgets, and dependency limits. Put explicit scope deferrals in `Out Of Scope`.]
+
+## Out Of Scope
+
+[Work that should explicitly not be done in this slice. Include deferred boundaries from project docs or prior decisions when they apply.]
 
 ## Failed Approaches - Do NOT Repeat
 
@@ -147,6 +155,8 @@ The implementation is complete when:
 
 Update docs or release notes when behavior, workflow, or user-facing usage changed. Treat missing or stale docs as incomplete work.
 
+If this repo documents workflow-learning or session-capture requirements, record summary-safe events through the project's documented capture commands, or list them in the report when direct recording is not available. Do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+
 If anything in this context is unclear or you need more information to proceed, ask before implementing. Do not guess at requirements or constraints.
 
 ## Implementer Report Contract
@@ -156,8 +166,10 @@ When done, report:
 2. Documentation - which docs or release-note files changed, or state that no doc changes were needed.
 3. Tests - which tests ran and their results.
 4. Completeness - whether the requested slice is complete or partial.
-5. Summary - concise explanation of what was implemented.
-6. Follow-up risks - remaining risks, cleanup, or next best action.
+5. Out of scope - what was intentionally left out.
+6. Workflow capture - summary-safe workflow/session events recorded or an explicit statement that none were needed.
+7. Summary - concise explanation of what was implemented.
+8. Follow-up risks - remaining risks, cleanup, or next best action.
 ```
 
 ## Rules
@@ -167,14 +179,16 @@ When done, report:
 - Use absolute file paths so the receiving agent can read files directly in a fresh session.
 - Return the generated prompt inside a single fenced `text` code block.
 - Keep the generated prompt under 400 lines.
-- Include relevant docs, feature files, or specs already known from session context even if they are not in the diff or not in the same repo.
+- Include relevant project-local instructions, planning docs, feature files, release notes, or specs already known from session context or discoverable from repo guidance, even if they are not in the diff or not in the same repo.
 - If it is materially unclear what context should be included for the implementation handoff, ask the user directly instead of silently narrowing scope.
 - Failed approaches are mandatory when they exist in session context. Omitting them wastes the next agent's time and tokens.
 - Tell the implementer to inspect the actual code before choosing an extraction or design.
 - Tell the implementer to make code changes rather than stopping at analysis.
 - Tell the implementer to keep changes scoped to the requested slice.
+- Tell the implementer what is intentionally out of scope when project docs, backlog items, or prior decisions define deferred boundaries.
 - Tell the implementer to add or update tests as needed.
 - Tell the implementer to update docs or release notes when the change affects behavior, workflow, or user-facing usage.
+- When the target repo records workflow-learning or session events, ask the implementer to record or report summary-safe capture details that map to that repo's documented workflow.
 - If the task is a refactoring slice, keep the prompt focused on that slice rather than expanding into the whole program.
 - If the task is driven by review feedback, list each finding or acceptance condition explicitly rather than summarizing it loosely.
 - If the task is a follow-up to review feedback, carry the exact findings or acceptance conditions into the handoff instead of re-deriving scope only from the current diff.
