@@ -52,6 +52,14 @@ additional instructions for the generated prompt.
 
 5. **Include test results** if tests were run in the current session.
 
+6. **Include workflow-learning details** when the reviewed project documents
+   session or workflow capture. Ask for summary-safe review metrics that can be
+   recorded later: finding counts by severity, accepted/fixed/rejected/deferred
+   counts when known, whether metrics are per-round or cumulative, the review
+   round number or label when known, reviewer/implementer agent and model when
+   known, and material subagent use. Do not ask for prompts, transcripts, tool
+   output, secrets, or credentials.
+
 ## Prompt Requirements
 
 The generated prompt must include:
@@ -68,6 +76,8 @@ The generated prompt must include:
 - Review focus areas specific to the change.
 - Specific things to check closely.
 - Validation already run (commands + results).
+- Review-cycle context when this is a follow-up review, including the review
+  round number or label when known.
 - Required output format (see below).
 
 ## Path Convention
@@ -91,6 +101,9 @@ Tell the reviewer to:
 - Run targeted tests if useful (headless via `QT_QPA_PLATFORM=offscreen` for
   PySide UI tests).
 - Report findings first, ordered by severity, with file and line references.
+- Say whether another review pass is warranted when this is a clean second
+  review or later. Prefer stopping after a clean second review unless scope,
+  risk, or implementation changed.
 
 ## Output Contract
 
@@ -103,6 +116,11 @@ The reviewer prompt must instruct the reviewer to produce:
 2. **Open questions or assumptions**.
 3. **Completeness assessment** - whether the change appears complete.
 4. **Suggested follow-up** - the next best action.
+5. **Workflow-learning metrics** when applicable - finding counts by severity,
+   accepted/fixed/rejected/deferred counts when known, whether counts are
+   per-round or cumulative, the review round number or label when known,
+   reviewer/implementer agent and model when known, and any material subagent
+   use. Keep this summary-safe.
 
 After outputting the prompt, offer to copy it to the clipboard.
 
@@ -112,6 +130,9 @@ After outputting the prompt, offer to copy it to the clipboard.
 - Do not ask the reviewer to inspect the entire repository unless the diff
   genuinely requires it.
 - Prefer concrete touched files over broad module lists.
+- For follow-up reviews, ask whether the review is clean enough to close the
+  cycle; after a clean second review, do not request another pass unless scope
+  or risk changed.
 - When `specs/` files are relevant, include specific paths in the prompt.
 - If the change is mostly tests, emphasize behavior preservation, helper
   design quality, and accidental semantics changes.

@@ -53,6 +53,8 @@ Produce the prompt inside a single fenced code block (` ```text `) so the user c
 
 If tests were run in the current session, include the commands and results.
 
+When the reviewed project uses a workflow-learning capture command or similar workflow-learning capture, ask the reviewer to report summary-safe review metrics that can be recorded later: finding counts by severity; accepted, fixed, rejected, and deferred counts when known; whether counts are for this review round or cumulative across the review cycle; review round number or label when known; reviewer/implementer agent and model when known; and whether subagents materially affected the review. Do not ask for prompts, transcripts, tool output, secrets, or credentials.
+
 ### Step 5 — Present to User
 
 Output the prompt and tell the user to paste it into a fresh Claude Code session. Ensure all file paths are absolute.
@@ -68,6 +70,7 @@ Output the prompt and tell the user to paste it into a fresh Claude Code session
 - explicit constraints or boundaries
 - known trade-offs when they exist
 - review cycle context when this is a follow-up review
+- review round/scope context when known, including whether this is a first review, follow-up, second review, or closeout
 - review focus areas or an explicit review lens
 - exact verification commands when they are known
 - review criteria with severity tiers and explicit "do not flag" guidance
@@ -110,7 +113,7 @@ You are performing an independent code review. This is a review task, not an imp
 
 ## Review Cycle Context
 
-[If applicable: what previous review feedback was addressed, what was intentionally not changed and why. Name the prior findings that should be verified as resolved. If this is the first review, omit this section.]
+[If applicable: what previous review feedback was addressed, what was intentionally not changed and why. Name the prior findings that should be verified as resolved. Include the review round number or label when known, and state whether this review should close the cycle if clean. If this is the first review, omit this section.]
 
 ## Focus Areas
 
@@ -137,6 +140,10 @@ When reviewing changed functions, classes, or shared helpers, inspect surroundin
 
 Verify that documentation and release notes are updated when behavior, workflow, or user-facing usage changed. Treat missing or stale docs as a finding.
 
+If this repo documents workflow-learning or session-capture requirements for reviews, verify that the implementer can record the needed summary-safe review outcome through the project's documented capture commands, or can list it in the report when direct recording is not available. Include review round/scope metadata when known so per-round and cumulative metrics are not mixed. Do not ask for or include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+
+If this is a clean second review or later and no relevant scope changed, say explicitly whether another review pass is warranted. Prefer stopping the review cycle after a clean second review unless risk, scope, or implementation changed enough to justify more review.
+
 If anything in this context is unclear or you need additional information to review effectively, ask before proceeding.
 
 ## Reviewer Report Contract
@@ -148,6 +155,7 @@ Structure your output as follows:
 4. **Open questions or assumptions** — anything you could not verify
 5. **Completeness** — whether the change appears complete
 6. **Next best follow-up** — suggested next action (merge, address findings, further review of X)
+7. **Workflow-learning metrics** — when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, whether those counts are per-review-round or cumulative, the review round number or label when known, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 ```
 
 ## Rules
@@ -159,6 +167,7 @@ Structure your output as follows:
 - Keep the prompt under 400 lines to preserve context window space in the receiving session.
 - For re-reviews, explicitly state what changed since the last review and name the prior findings that should be verified — do not ask the reviewer to re-review everything.
 - When the user is in an iterative review cycle, include that explicitly and carry forward the prior findings or review targets.
+- For follow-up reviews, ask whether the review is clean enough to close the cycle; after a clean second review, do not request another pass unless scope or risk changed.
 - Include the instruction for the reviewer to ask if unclear — the receiving agent should not guess.
 - Do not include raw file contents or full diffs in the prompt. The receiving agent can read files itself.
 - If the change is mostly tests, emphasize behavior preservation, helper design quality, and accidental semantics changes.

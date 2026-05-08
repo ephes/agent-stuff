@@ -57,6 +57,7 @@ Use this skill when the user asks for things like:
    can be recorded later:
    - finding counts by severity
    - accepted, fixed, rejected, and deferred counts when known, with a note about whether counts are for this review round or cumulative across the review cycle
+   - review round number or label when known, for example first review, follow-up, second review, or closeout
    - reviewer agent/model and implementer agent/model when known
    - whether subagents materially affected the review
    Keep this request summary-safe; do not ask for prompts, transcripts, tool
@@ -73,6 +74,7 @@ Use this skill when the user asks for things like:
 - explicit constraints or boundaries
 - known trade-offs when they exist
 - review cycle context when this is a follow-up review
+- review round/scope context when known, including whether this is a first review, follow-up, second review, or closeout
 - review focus areas or an explicit review lens
 - exact verification commands when they are known
 - review criteria with severity tiers and explicit "do not flag" guidance
@@ -92,6 +94,7 @@ The reviewer output contract should ask for:
 - the next best follow-up
 - summary-safe review metrics suitable for workflow-learning capture when applicable
 - whether review metrics are per-round or cumulative when an iterative review cycle is in progress
+- review round number or label when known
 
 ## Prompt Template
 
@@ -128,7 +131,7 @@ You are performing an independent code review. This is a review task, not an imp
 
 ## Review Cycle Context
 
-[If this is a follow-up review, name the prior findings or review targets to verify and note what was intentionally not changed. Omit on a first review.]
+[If this is a follow-up review, name the prior findings or review targets to verify and note what was intentionally not changed. Include the review round number or label when known, and state whether this review should close the cycle if clean. Omit only on a first review.]
 
 ## Focus Areas
 
@@ -158,7 +161,9 @@ When reviewing changed functions, classes, tests, or shared helpers, inspect sur
 
 Verify docs or release notes when behavior, workflow, or user-facing usage changed. Treat missing or stale docs as findings.
 
-If this repo documents workflow-learning or session-capture requirements for reviews, verify that the implementer can record the needed summary-safe review outcome through the project's documented capture commands, or can list it in the report when direct recording is not available. Do not ask for or include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+If this repo documents workflow-learning or session-capture requirements for reviews, verify that the implementer can record the needed summary-safe review outcome through the project's documented capture commands, or can list it in the report when direct recording is not available. Include review round/scope metadata when known so per-round and cumulative metrics are not mixed. Do not ask for or include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+
+If this is a clean second review or later and no relevant scope changed, say explicitly whether another review pass is warranted. Prefer stopping the review cycle after a clean second review unless risk, scope, or implementation changed enough to justify more review.
 
 If anything in this context is unclear or you need more information to review effectively, ask before proceeding.
 
@@ -171,7 +176,7 @@ Structure your output as follows:
 4. Open questions or assumptions - anything you could not verify.
 5. Completeness - whether the change appears complete for the stated scope.
 6. Next best follow-up - the most useful next action.
-7. Workflow-learning metrics - when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, whether those counts are per-review-round or cumulative, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+7. Workflow-learning metrics - when applicable, include finding counts by severity, accepted/fixed/rejected/deferred counts if known, whether those counts are per-review-round or cumulative, the review round number or label when known, reviewer/implementer agent and model if known, and any material subagent use. Keep this summary-safe and do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 ```
 
 ## Rules
@@ -180,6 +185,7 @@ Structure your output as follows:
 - Do not assume the current diff always defines the full review scope.
 - Use the diff as a starting point, not an automatic limit on relevant context.
 - When the user is in an iterative review cycle, include that explicitly in the handoff and name the prior findings or review targets that should be verified.
+- For follow-up reviews, ask whether the review is clean enough to close the cycle; after a clean second review, do not request another pass unless scope or risk changed.
 - Prefer concrete touched files over broad module lists.
 - Use absolute file paths so the receiving agent can read files directly in a fresh session.
 - Return the generated prompt inside a single fenced `text` code block.
@@ -193,6 +199,7 @@ Structure your output as follows:
 - Tell the reviewer what not to flag so the review stays high-signal.
 - When the target repo records workflow-learning events, ask for review metrics that map to the repo's documented workflow-learning commands.
 - For iterative review cycles, ask whether review metrics are for the current round or cumulative across the cycle.
+- For iterative review cycles, ask for the review round number or label when it can be inferred from context.
 - If the change is mostly tests, emphasize behavior preservation, helper design quality, and accidental semantics changes.
 - If the change introduces shared helpers, ask the reviewer to check for over-abstraction, misleading names, and hidden coupling.
 - If you cannot determine enough context from the worktree, say so briefly and draft the best prompt from the observable changes.

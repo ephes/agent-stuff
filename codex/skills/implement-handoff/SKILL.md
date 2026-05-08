@@ -43,6 +43,7 @@ Use this skill when the user asks for things like:
    - the primary files to inspect first
    - prior findings or acceptance conditions that this implementation must satisfy
    - project-local workflow capture or review expectations when the repo documents them
+   - the current named backlog slice, explicit deferred boundaries, and any preferred session slug guidance when the repo documents them
 
 4. Draft a second-agent prompt that is specific to the requested implementation.
    Output the prompt inside a single fenced `text` code block so the user can copy it directly.
@@ -72,6 +73,7 @@ Use this skill when the user asks for things like:
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
 - workflow-capture or review-cycle expectations when the target repo documents them
+- a suggested descriptive session slug when the target repo records session or workflow events and the task has a clear name
 - an implementer report contract
 
 Unless the user asks for something else, return only the implementation prompt.
@@ -155,7 +157,7 @@ The implementation is complete when:
 
 Update docs or release notes when behavior, workflow, or user-facing usage changed. Treat missing or stale docs as incomplete work.
 
-If this repo documents workflow-learning or session-capture requirements, record summary-safe events through the project's documented capture commands, or list them in the report when direct recording is not available. Do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+If this repo documents workflow-learning or session-capture requirements, record summary-safe events through the project's documented capture commands, or list them in the report when direct recording is not available. Prefer a descriptive session slug over a generic wrapper/default slug when the recorder allows it. For implementation work, include the implementer role/model when known, useful workflow evaluations for meaningful process decisions, subagent usage when material, and review-outcome mapping after review cycles when applicable. Do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 
 If anything in this context is unclear or you need more information to proceed, ask before implementing. Do not guess at requirements or constraints.
 
@@ -186,9 +188,10 @@ When done, report:
 - Tell the implementer to make code changes rather than stopping at analysis.
 - Tell the implementer to keep changes scoped to the requested slice.
 - Tell the implementer what is intentionally out of scope when project docs, backlog items, or prior decisions define deferred boundaries.
+- Tell the implementer to carry the named backlog slice, acceptance conditions, and deferred boundaries into the work instead of expanding the task opportunistically.
 - Tell the implementer to add or update tests as needed.
 - Tell the implementer to update docs or release notes when the change affects behavior, workflow, or user-facing usage.
-- When the target repo records workflow-learning or session events, ask the implementer to record or report summary-safe capture details that map to that repo's documented workflow.
+- When the target repo records workflow-learning or session events, ask the implementer to record or report summary-safe capture details that map to that repo's documented workflow, including a descriptive slug when possible.
 - If the task is a refactoring slice, keep the prompt focused on that slice rather than expanding into the whole program.
 - If the task is driven by review feedback, list each finding or acceptance condition explicitly rather than summarizing it loosely.
 - If the task is a follow-up to review feedback, carry the exact findings or acceptance conditions into the handoff instead of re-deriving scope only from the current diff.

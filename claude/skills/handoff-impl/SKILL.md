@@ -45,6 +45,7 @@ Usually include:
 - The concrete specs or docs that define the requested slice
 - The primary files to inspect first
 - Prior findings or acceptance conditions that this implementation must satisfy
+- The current named backlog slice, explicit deferred boundaries, and workflow-capture expectations when the repo documents them
 
 ### Step 4 — Generate the Prompt
 
@@ -73,6 +74,8 @@ Output the prompt and tell the user to paste it into a fresh Claude Code session
 - concrete implementation expectations
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
+- workflow-capture or review-cycle expectations when the target repo documents them
+- a suggested descriptive session slug when the target repo records session or workflow events and the task has a clear name
 - an implementer report contract
 
 Unless the user asks for something else, return only the implementation prompt.
@@ -153,6 +156,8 @@ Verify with:
 
 Update documentation and release notes when the change affects behavior, workflow, or user-facing usage. Treat missing or stale docs as incomplete work.
 
+If this repo documents workflow-learning or session-capture requirements, record summary-safe events through the project's documented capture commands, or list them in the report when direct recording is not available. Prefer a descriptive session slug over a generic wrapper/default slug when the recorder allows it. For implementation work, include the implementer role/model when known, useful workflow evaluations for meaningful process decisions, subagent usage when material, and review-outcome mapping after review cycles when applicable. Do not include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
+
 If anything in this context is unclear or you need additional information to proceed, ask before implementing. Do not guess at requirements or constraints.
 
 ## Implementer Report Contract
@@ -162,8 +167,10 @@ When done, report:
 2. **Documentation** — which docs or release-note files changed, or an explicit statement that no doc changes were needed
 3. **Tests** — which tests ran and their results
 4. **Completeness** — whether the requested slice is complete or partial
-5. **Summary** — concise explanation of what was implemented
-6. **Follow-up risks** — remaining risks, cleanup, or next best action
+5. **Out of scope** — what was intentionally left out
+6. **Workflow capture** — summary-safe workflow/session events recorded or an explicit statement that none were needed
+7. **Summary** — concise explanation of what was implemented
+8. **Follow-up risks** — remaining risks, cleanup, or next best action
 ```
 
 ## Rules
@@ -179,6 +186,8 @@ When done, report:
 - Tell the implementer to inspect the actual code before choosing an extraction or design.
 - Tell the implementer to make code changes rather than stopping at analysis.
 - Tell the implementer to keep changes scoped to the requested slice.
+- Tell the implementer to carry the named backlog slice, acceptance conditions, and deferred boundaries into the work instead of expanding the task opportunistically.
+- When the target repo records workflow-learning or session events, ask the implementer to record or report summary-safe capture details that map to that repo's documented workflow, including a descriptive slug when possible.
 - If the task is a refactoring slice, keep the prompt focused on that slice rather than expanding into the whole program.
 - If tests are a primary part of the change, call out the exact existing test modules the implementer should inspect first.
 - Do not include large code blocks or file contents in the prompt. The receiving agent can read files itself.
