@@ -1,13 +1,13 @@
 ---
 name: handoff-review
-description: This skill should be used when the user asks to "create a review handoff", "generate a review prompt", "hand off for review", "prepare review context", says "/handoff-review", or wants to generate a prompt they can paste into another Claude Code session to perform a code review.
+description: This skill should be used when the user asks to "create a review handoff", "generate a review prompt", "hand off for review", "prepare review context", says "/handoff-review", or wants to generate a prompt they can paste into another agent session (Claude Code, Codex, or similar) to perform a code review.
 ---
 
 # Review Handoff Prompt Generator
 
 ## Overview
 
-Generate a self-contained review prompt that can be pasted into a fresh Claude Code CLI session. The receiving agent gets all the context it needs to perform a thorough, high-signal code review without access to the original conversation.
+Generate a self-contained review prompt that can be pasted into a fresh agent session (Claude Code, Codex, or any equivalent CLI). The receiving agent gets all the context it needs to perform a thorough, high-signal code review without access to the original conversation. Do not assume the receiving agent is the same kind as the current one — write the prompt agent-agnostically.
 
 Do not perform the review — only generate the prompt unless the user explicitly asks otherwise.
 
@@ -57,7 +57,7 @@ When the reviewed project uses a workflow-learning capture command or similar wo
 
 ### Step 5 — Present to User
 
-Output the prompt and tell the user to paste it into a fresh Claude Code session. Ensure all file paths are absolute.
+Output the prompt and stop. Do not append any trailing commentary, paste instructions, or guidance about which agent to send it to — the user already knows where they intend to paste it, and trailers like "paste this into a fresh Claude Code session" confuse non-Claude agents (Codex, etc.) when the prompt is forwarded as-is. Ensure all file paths in the prompt are absolute.
 
 ## Generated Prompt Must Include
 
@@ -77,7 +77,7 @@ Output the prompt and tell the user to paste it into a fresh Claude Code session
 - documentation and release-note verification when behavior, workflow, or user-facing usage changed
 - a reviewer output contract
 
-Unless the user asks for something else, return only the reviewer prompt.
+Unless the user asks for something else, return only the reviewer prompt — no preface, no trailing commentary, no paste instructions.
 
 ## Prompt Template
 
