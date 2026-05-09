@@ -46,13 +46,23 @@ Use this skill when the user asks for things like:
    - prior findings or review targets to re-check when this is a follow-up review
    - an explicit review lens when the user wants one, such as correctness, regression risk, maintainability, performance, security, or docs
 
-4. Draft a second-agent prompt that is specific to the current review.
+4. When the target repo documents summary-safe session reflection and the review
+   is for planning-heavy, workflow-related, model/provider-related, backlog
+   grooming, or boundary-selection work, inspect existing lessons before
+   drafting. Prefer read-only, summary-safe commands such as:
+   - `uv run pipy-session reflect --json`
+   - `uv run pipy-session search <topic> --json`
+   Use only metadata, event summaries, and Markdown summaries by default. Do
+   not include raw transcript bodies, prompts, tool output, secrets,
+   credentials, or sensitive personal data in the generated prompt.
+
+5. Draft a second-agent prompt that is specific to the current review.
    Output the prompt inside a single fenced `text` code block so the user can copy it directly.
    Use absolute file paths throughout the prompt.
 
-5. If tests were run in the current session, include the commands and results.
+6. If tests were run in the current session, include the commands and results.
 
-6. When the reviewed project uses a workflow-learning capture command or similar
+7. When the reviewed project uses a workflow-learning capture command or similar
    workflow-learning capture, ask the reviewer to report review metrics that
    can be recorded later:
    - finding counts by severity
@@ -80,6 +90,7 @@ Use this skill when the user asks for things like:
 - review criteria with severity tiers and explicit "do not flag" guidance
 - documentation and release-note verification when behavior, workflow, or user-facing usage changed
 - workflow-capture verification when the target repo documents review or session-learning requirements
+- relevant summary-safe session-learning lessons when the target repo documents reflection and the review scope calls for it
 - a reviewer output contract
 
 Unless the user asks for something else, return only the reviewer prompt.

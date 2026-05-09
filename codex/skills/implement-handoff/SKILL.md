@@ -45,11 +45,21 @@ Use this skill when the user asks for things like:
    - project-local workflow capture or review expectations when the repo documents them
    - the current named backlog slice, explicit deferred boundaries, and any preferred session slug guidance when the repo documents them
 
-4. Draft a second-agent prompt that is specific to the requested implementation.
+4. When the target repo documents summary-safe session reflection and the task
+   is planning-heavy, workflow-related, model/provider-related, backlog
+   grooming, or boundary selection, inspect existing lessons before drafting.
+   Prefer read-only, summary-safe commands such as:
+   - `uv run pipy-session reflect --json`
+   - `uv run pipy-session search <topic> --json`
+   Use only metadata, event summaries, and Markdown summaries by default. Do
+   not include raw transcript bodies, prompts, tool output, secrets,
+   credentials, or sensitive personal data in the generated prompt.
+
+5. Draft a second-agent prompt that is specific to the requested implementation.
    Output the prompt inside a single fenced `text` code block so the user can copy it directly.
    Use absolute file paths throughout the prompt.
 
-5. If the current session already established useful facts, include them.
+6. If the current session already established useful facts, include them.
    Examples:
    - tests already run
    - review findings to address
@@ -73,6 +83,7 @@ Use this skill when the user asks for things like:
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
 - workflow-capture or review-cycle expectations when the target repo documents them
+- relevant summary-safe session-learning lessons when the target repo documents reflection and the task type calls for it
 - a suggested descriptive session slug when the target repo records session or workflow events and the task has a clear name
 - an implementer report contract
 
