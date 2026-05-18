@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mermaid Marked 2"
+  short_description: "Readable Mermaid charts for Marked 2"
+  default_prompt: "Use $mermaid-marked2-markdown to make this Mermaid diagram readable in Marked 2 light and dark mode."
