@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goal Handoff"
+  short_description: "Draft compact agent goal conditions"
+  default_prompt: "Use $goal-handoff to draft a compact goal condition for the next agent session."

@@ -8,8 +8,10 @@ chezmoi symlinks.
 | Agent | Skill | Purpose |
 |-------|-------|---------|
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
+| Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
@@ -27,11 +29,13 @@ agent-stuff/
     README.md
     skills/
       commit-workflow/
+      goal-handoff/
       implement-handoff/
       review-handoff/
   claude/
     README.md
     skills/
+      goal-handoff/
       handoff-impl/
       handoff-review/
       mermaid-marked2-markdown/
