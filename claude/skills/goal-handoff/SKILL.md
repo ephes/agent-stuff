@@ -38,17 +38,54 @@ Use this source-of-truth order:
 3. **Local backlog, specs, planning docs, release notes, or project instructions**
 4. **The current worktree** — as evidence of in-progress work
 
-If the scope is materially unclear, ask one concise question before drafting.
+**Match the ambition of the user's request.** If the user asks to "do the
+refactor according to the layout doc and make tests green," the goal must
+describe the whole refactor, not a hand-picked starter slice. The skill's job
+is to compress the user's stated objective into a bounded field, not to
+substitute a smaller objective the agent considers safer.
+
+**Classify the goal before drafting:**
+
+- **Full-task goal** — the user wants the entire piece of work done. Default
+  assumption when the user describes an outcome (a finished refactor, a
+  released feature, a passing test suite) rather than a single step.
+- **Slice goal** — the user explicitly asked for a small, named slice
+  ("just do the test-isolation slice", "only the first step", "stop after
+  moving X").
+
+Pick **slice** only when the user said so. Otherwise pick **full-task**.
+
+If the scope is materially unclear — especially whether the user wants a
+full-task goal or a slice goal — ask one concise question before drafting.
 
 ### Step 3 — Draft the Goal Condition
 
 Draft a bounded objective, not a full prompt. Include only:
 
-- The concrete objective
-- The success condition or "done when" criteria
-- Critical constraints and out-of-scope boundaries
-- Required verification commands when known
+- The concrete objective, sized to match the user's ambition (Step 2)
+- The success condition or "done when" criteria that describe completion of
+  *the user's actual ask*, not completion of a sub-step
+- Critical constraints that describe invariants (behavior that must not break,
+  data that must not be lost, gates that must keep passing) — **not** deferred
+  work the user actually wanted included
+- Required verification commands when known, sized to the goal: a full-task
+  refactor goal needs the full gate (`just check`, `just test-e2e`, etc.); a
+  narrow slice may only need a focused command
 - Any blocking facts the next agent must not rediscover
+
+**Scope-reduction red flags** — if the draft contains any of these, stop and
+re-check Step 2 (or ask the user) before continuing:
+
+- The phrases "first safe slice", "minimal slice", "prep slice", or
+  "without broader X" when the user did not ask for slicing
+- A constraints list whose items match the obvious next implementation steps
+  in the linked planning doc (that is the work, not the boundary)
+- "Done when" criteria that finish before the user-visible outcome is
+  achievable
+- A constraints section longer than the success criteria
+
+Constraints describe invariants the next agent must respect *while doing the
+work*; they do not describe work the next agent must skip.
 
 ### Step 4 — Fit the Destination Limit
 
@@ -96,7 +133,10 @@ Omit headings when the goal is simple enough to fit in one paragraph.
 - Do not list every relevant file unless the goal cannot be understood without them.
 - Use absolute paths only for files the next agent must open first; otherwise prefer repo-relative descriptions to save characters.
 - Preserve decisions already made in the session instead of re-opening them.
-- State deferred work explicitly when it prevents accidental scope expansion.
+- State deferred work explicitly **only when the user agreed to defer it**.
+  Do not invent deferrals to make the goal look smaller or safer.
+- Never silently downscope an ambitious user request to a "first slice"
+  goal. If you believe slicing is wiser, ask the user before drafting.
 - Include exact verification commands when known and important.
 - If the user asks for the goal condition only, return only one fenced `text` block plus the character count.
 - If the user asks for both a goal and a handoff prompt, keep the goal condition bounded and put detailed context in the starter prompt.
