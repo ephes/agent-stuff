@@ -49,7 +49,10 @@ Usually include:
 
 ### Step 4 — Generate the Prompt
 
-Produce the prompt inside a single fenced code block (` ```text `) so the user can copy it directly. Follow the template below.
+Produce the raw prompt text only, with no surrounding fenced code block,
+markdown wrapper, preface, trailing commentary, paste instructions, or follow-up
+offer. The prompt itself may use Markdown headings and lists. Follow the
+template below.
 
 If tests were run in the current session, include the commands and results.
 
@@ -77,11 +80,11 @@ Output the prompt and stop. Do not append any trailing commentary, paste instruc
 - documentation and release-note verification when behavior, workflow, or user-facing usage changed
 - a reviewer output contract
 
-Unless the user asks for something else, return only the reviewer prompt — no preface, no trailing commentary, no paste instructions.
+Unless the user asks for something else, return only the raw reviewer prompt — no preface, no trailing commentary, no paste instructions, no code fence.
 
 ## Prompt Template
 
-The generated prompt MUST follow this structure. Adapt section content to the actual context — omit sections that don't apply, but never omit **Context**, **Scope**, **Review Criteria**, or **Reviewer Report Contract**.
+The generated prompt MUST follow this structure. Adapt section content to the actual context — omit sections that don't apply, but never omit **Context**, **Scope**, **Review Criteria**, or **Reviewer Report Contract**. The fenced block below documents the template only; do not include the surrounding fence in the generated output.
 
 ```text
 You are performing an independent code review. This is a review task, not an implementation task. Read this context carefully before reviewing any code.

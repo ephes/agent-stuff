@@ -57,7 +57,9 @@ Use this skill when the user asks for things like:
    credentials, or sensitive personal data in the generated prompt.
 
 5. Draft a second-agent prompt that is specific to the current review.
-   Output the prompt inside a single fenced `text` code block so the user can copy it directly.
+   Return the raw prompt text only, with no surrounding fenced code block,
+   markdown wrapper, introductory heading, explanation, or trailing offer to
+   copy it. The prompt itself may use Markdown headings and lists.
    Use absolute file paths throughout the prompt.
 
 6. If tests were run in the current session, include the commands and results.
@@ -93,7 +95,7 @@ Use this skill when the user asks for things like:
 - relevant summary-safe session-learning lessons when the target repo documents reflection and the review scope calls for it
 - a reviewer output contract
 
-Unless the user asks for something else, return only the reviewer prompt.
+Unless the user asks for something else, return only the raw reviewer prompt.
 
 The reviewer output contract should ask for:
 - findings first, ordered by severity
@@ -109,7 +111,7 @@ The reviewer output contract should ask for:
 
 ## Prompt Template
 
-The generated prompt should follow this structure. Adapt the content to the actual context. Omit sections that do not apply, but never omit `Context`, `Scope`, `Review Criteria`, or `Reviewer Report Contract`.
+The generated prompt should follow this structure. Adapt the content to the actual context. Omit sections that do not apply, but never omit `Context`, `Scope`, `Review Criteria`, or `Reviewer Report Contract`. The fenced block below documents the template only; do not include the surrounding fence in the generated output.
 
 ```text
 You are performing an independent code review. This is a review task, not an implementation task. Read this context before reviewing any code.
@@ -199,7 +201,8 @@ Structure your output as follows:
 - For follow-up reviews, ask whether the review is clean enough to close the cycle; after a clean second review, do not request another pass unless scope or risk changed.
 - Prefer concrete touched files over broad module lists.
 - Use absolute file paths so the receiving agent can read files directly in a fresh session.
-- Return the generated prompt inside a single fenced `text` code block.
+- Return the generated prompt as raw text only. Do not wrap it in a fenced
+  code block, quotation block, assistant preamble, title, or follow-up offer.
 - Keep the generated prompt under 400 lines.
 - Include relevant project-local instructions, planning docs, feature files, release notes, or specs already known from session context or discoverable from repo guidance, even if they are not in the diff or not in the same repo.
 - If it is materially unclear what context should be included for the review, ask the user directly instead of silently narrowing scope.

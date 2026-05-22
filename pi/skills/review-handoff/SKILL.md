@@ -49,6 +49,9 @@ additional instructions for the generated prompt.
    - terminology files if naming or wording matters
 
 4. **Draft the reviewer prompt** specific to the current change.
+   Return the raw prompt text only, with no surrounding fenced code block,
+   markdown wrapper, preface, trailing commentary, paste instructions, or
+   follow-up offer. The prompt itself may use Markdown headings and lists.
 
 5. **Include test results** if tests were run in the current session.
 
@@ -107,7 +110,8 @@ Tell the reviewer to:
 
 ## Output Contract
 
-Unless the user asks for something else, return **only the reviewer prompt**.
+Unless the user asks for something else, return **only the raw reviewer
+prompt**.
 
 The reviewer prompt must instruct the reviewer to produce:
 
@@ -122,11 +126,11 @@ The reviewer prompt must instruct the reviewer to produce:
    reviewer/implementer agent and model when known, and any material subagent
    use. Keep this summary-safe.
 
-After outputting the prompt, offer to copy it to the clipboard.
-
 ## Rules
 
 - Do not output a generic template if the worktree can be inspected.
+- Do not wrap the generated prompt in a fenced code block, quotation block,
+  assistant preamble, title, or follow-up offer.
 - Do not ask the reviewer to inspect the entire repository unless the diff
   genuinely requires it.
 - Prefer concrete touched files over broad module lists.
