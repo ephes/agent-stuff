@@ -47,6 +47,15 @@ This skill is for goal tracking and continuation, not full implementation contex
      completion proxies for look-and-feel parity.
    - Require evidence from the actual user-facing surface, such as screenshots,
      terminal captures, interaction transcripts, or browser/TTY automation.
+   - Pin the exact invocation, runtime mode, environment, initial state, and
+     keystroke/click sequence that counts. Do not let the next agent verify a
+     special debug flag, alternate runtime, fake provider, or different trigger
+     unless the user explicitly accepts that as the product path.
+   - Include the reference's visible state fields in the quality bar when they
+     matter (theme colors, provider/model label, working directory, footer,
+     command palette trigger, selection highlight, and status text). "Similar
+     structure" is not enough when the complaint names concrete visual or
+     interaction differences.
    - Include at least one fake-completion blocker: e.g. "not done if the
      startup screen still differs materially from the reference", "not done if
      tab completion is absent", or "not done if the reference command list
@@ -60,6 +69,13 @@ This skill is for goal tracking and continuation, not full implementation contex
    computed-style/image-load assertions against the named reference, including
    representative image `naturalWidth > 0` and key typography/layout checks
    when relevant.
+
+   For multi-route web UI parity, require evidence for every route/page in
+   scope, or explicitly name sampled routes and why the unsampled routes are
+   out of scope. Homepage-only visual checks cannot satisfy a site-wide parity
+   goal. If a route has distinct widgets or layouts, require route-specific
+   assertions for those widgets, such as profile images, tabs, cards,
+   galleries, forms, calendars, lightboxes, or maps.
 
    Classify the goal before drafting:
    - Full-task goal — default when the user describes an outcome.
@@ -183,10 +199,19 @@ several slices, phases, commits, or reviews.
   missing CSS, fonts, images, JavaScript, layout, or interactions. Status/text
   checks and content-marker propagation are supporting checks, not visual
   parity proof.
+- For multi-route sites or comparison frontends, require route/page coverage.
+  A homepage screenshot plus status/text checks on other routes is not enough
+  unless the user explicitly scoped the goal to the homepage. Distinct route
+  widgets need route-specific checks, e.g. team profile images/tabs, gallery
+  lightboxes, job cards, calendars, forms, or legal rich-text sections.
 - When terminal UI, REPL, CLI, or shell interaction parity is part of the goal,
   require evidence from a real or pseudo-TTY session plus side-by-side
-  comparison against the reference. Unit tests are necessary but not sufficient
-  for "looks and feels like X" claims.
+  comparison against the reference using the same user-facing invocation and
+  exact keystrokes the user named. Unit tests are necessary but not sufficient
+  for "looks and feels like X" claims. Completion triggered by `/` is not
+  proven by a test that only sends Tab; the default product path is not proven
+  by forcing an alternate input runtime; a real provider/model footer is not
+  proven by a fake/test provider footer.
 - When the user requires review gates, say when review must happen and what
   blocks progress. For example: unresolved Critical/Warning findings block
   committing and claiming the slice complete; Suggestions must be fixed or

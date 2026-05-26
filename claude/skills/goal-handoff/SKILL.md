@@ -94,6 +94,15 @@ interaction transcripts, browser automation, or pseudo-TTY automation. Unit
 tests can support the claim, but they cannot be the whole claim when the ask is
 "make it feel like X."
 
+Pin the exact invocation, runtime mode, environment, initial state, and
+keystroke/click sequence that counts. Do not let the next agent verify a
+special debug flag, alternate runtime, fake provider, or different trigger
+unless the user explicitly accepts that as the product path. Include the
+reference's visible state fields in the quality bar when they matter: theme
+colors, provider/model label, working directory, footer, command palette
+trigger, selection highlight, and status text. "Similar structure" is not
+enough when the complaint names concrete visual or interaction differences.
+
 For web UI/browser visual parity, require visual or render evidence that would
 catch missing CSS, fonts, images, JavaScript, layout, or interaction assets. A
 route returning 200, containing expected text, passing a content marker test, or
@@ -102,12 +111,23 @@ frontend or visual parity. Require screenshots and/or computed-style/image-load
 assertions against the named reference, including representative image
 `naturalWidth > 0` and key typography/layout checks when relevant.
 
+For multi-route web UI parity, require evidence for every route/page in scope,
+or explicitly name sampled routes and why the unsampled routes are out of
+scope. Homepage-only visual checks cannot satisfy a site-wide parity goal. If a
+route has distinct widgets or layouts, require route-specific assertions for
+those widgets, such as profile images, tabs, cards, galleries, forms,
+calendars, lightboxes, or maps.
+
 The goal should fail the cheap version explicitly. Examples:
 
 - "Not done if the startup screen still differs materially from the reference
   startup screen, aside from branding."
 - "Not done if typing Tab does not show the same class of command completion
   the reference product shows."
+- "Not done if the reference opens the command menu on `/` but the tested
+  implementation only opens something after Tab or under a forced runtime."
+- "Not done if a fake/test provider appears in the default product footer when
+  the reference shows a real provider/model."
 - "Not done if the command list exists only in docs or tests but not in the
   running product."
 - "Not done if the agent reports a parity matrix score instead of comparing
@@ -231,10 +251,21 @@ commits, reviews, or UI/workflow checkpoints:
   browser or pseudo-TTY automation output, screenshots, terminal captures, test
   results, review findings, commit hashes, and an explicit remaining-checklist
   status.
+- For terminal UI, REPL, CLI, or shell interaction parity, require side-by-side
+  evidence from the same user-facing invocation and exact keystrokes the user
+  named. Completion triggered by `/` is not proven by a test that only sends
+  Tab; the default product path is not proven by forcing an alternate input
+  runtime; a real provider/model footer is not proven by a fake/test provider
+  footer.
 - For web UI visual parity or comparison frontends, require screenshots and/or
   computed browser evidence strong enough to catch missing CSS, fonts, images,
   JavaScript, layout, or interactions. Status/text checks and content-marker
   propagation are supporting checks, not visual parity proof.
+- For multi-route sites or comparison frontends, require route/page coverage. A
+  homepage screenshot plus status/text checks on other routes is not enough
+  unless the user explicitly scoped the goal to the homepage. Distinct route
+  widgets need route-specific checks, e.g. team profile images/tabs, gallery
+  lightboxes, job cards, calendars, forms, or legal rich-text sections.
 - When the request follows a premature or suspicious completion claim, require
   the next agent to audit existing work first and treat prior commits as
   incomplete until verified against the user's actual criteria.
