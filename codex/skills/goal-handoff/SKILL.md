@@ -126,6 +126,9 @@ This skill is for goal tracking and continuation, not full implementation contex
    - "done when" criteria that can be satisfied by a feature matrix or parity
      score when the user asked for the product to look, feel, or behave like a
      reference product
+   - verification that exercises only a lower-level harness, newly introduced
+     abstraction, direct internal API, or special debug route when the requested
+     outcome is an existing product workflow
    - required phases that contain phrases like "future PR", "left for
      follow-up", "manual half", "outstanding", or "deferred" without making
      the phase incomplete or conditional
@@ -194,6 +197,19 @@ several slices, phases, commits, or reviews.
   behavior is part of the goal, require an executed browser-level verification.
   A page or harness that can be run manually is not sufficient unless the user
   explicitly accepted manual verification.
+- When the goal is product workflow or cross-module integration, require
+  verification through the same user-facing route, command, controller,
+  interface, or runtime path that real users and existing consumers use. A
+  lower-level service harness, new adapter-only test, direct internal API call,
+  or special debug path is supporting evidence only unless the user explicitly
+  accepted it as the product path.
+- When integrating a new implementation behind an existing interface or
+  contract, name the contract and representative existing consumers in the goal.
+  Completion requires those consumers to work unchanged, not merely the new
+  implementation's own tests. Add non-completion criteria for known contract
+  bypasses, such as requiring a second lookup, alternate loader, special flag,
+  manual repair step, or direct call to a helper that existing consumers never
+  use.
 - When web UI visual parity or a comparison frontend is part of the goal,
   require screenshots and/or computed browser evidence strong enough to catch
   missing CSS, fonts, images, JavaScript, layout, or interactions. Status/text
