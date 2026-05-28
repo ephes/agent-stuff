@@ -6,6 +6,7 @@ Skills and command prompts for Claude Code.
 
 | Skill | Purpose |
 |-------|---------|
+| `cross-agent-review-cycle` | Run a bounded tmux review loop with a different model family before commit |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |

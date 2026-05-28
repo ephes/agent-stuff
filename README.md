@@ -8,9 +8,11 @@ chezmoi symlinks.
 | Agent | Skill | Purpose |
 |-------|-------|---------|
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| Codex | `cross-agent-review-cycle` | Run a bounded tmux review loop with a different model family before commit |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
+| Claude | `cross-agent-review-cycle` | Run a bounded tmux review loop with a different model family before commit |
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
@@ -25,16 +27,20 @@ chezmoi symlinks.
 
 ```text
 agent-stuff/
+  docs/
+    review-cycle-log.md
   codex/
     README.md
     skills/
       commit-workflow/
+      cross-agent-review-cycle/
       goal-handoff/
       implement-handoff/
       review-handoff/
   claude/
     README.md
     skills/
+      cross-agent-review-cycle/
       goal-handoff/
       handoff-impl/
       handoff-review/
@@ -93,6 +99,13 @@ The concrete clone path is a dotfiles-level choice. This repo is path-agnostic.
 
 Similar skills across agents are intentionally kept separate so each version
 can be tuned to its agent's model, tool names, and interaction patterns.
+
+## Workflow lessons
+
+Reusable agent/process lessons live in `docs/review-cycle-log.md`. Use it for
+things that should improve future skills, goal prompts, tmux orchestration, or
+cross-agent review mechanics across projects. Project-specific execution
+lessons belong in that project's own docs.
 
 ## Design decisions
 

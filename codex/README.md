@@ -7,6 +7,7 @@ Skills for the Codex coding agent.
 | Skill | Purpose |
 |-------|---------|
 | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
+| `cross-agent-review-cycle` | Run a bounded tmux review loop with a different model family before commit |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `implement-handoff` | Generate an implementation prompt for a second agent |
 | `review-handoff` | Generate a code review prompt for a second agent |
