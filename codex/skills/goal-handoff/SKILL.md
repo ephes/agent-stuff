@@ -123,6 +123,10 @@ This skill is for goal tracking and continuation, not full implementation contex
    - "done when" criteria that can be satisfied by documentation, scaffolding,
      a manual harness, or future-work notes when the user asked for implemented
      behavior
+   - docs-complete criteria that only name the new/current-state section but do
+     not require checking deferred/out-of-scope/backlog sections for
+     contradictions. If a shipped behavior is still listed as deferred, the goal
+     is not complete even when tests pass and the main docs section is updated.
    - "done when" criteria that can be satisfied by a feature matrix or parity
      score when the user asked for the product to look, feel, or behave like a
      reference product
@@ -193,6 +197,12 @@ several slices, phases, commits, or reviews.
 - Require evidence for critical claims. Good evidence includes exact commands,
   browser automation output, test results, review findings, commit hashes, and
   an explicit remaining-checklist status.
+- When documentation must match a shipped behavior, require a contradiction
+  scan across current-state, backlog, deferred/out-of-scope, parity, spec, and
+  historical-note sections. Exact stale-phrase scans are not enough; require
+  feature-specific searches for the shipped term plus words such as "deferred",
+  "remaining", "not yet", "future", "read-only", or "absent", and allow
+  historical snapshots only when explicitly labeled as superseded.
 - When browser, UI, audio, storage, worker, worklet, media-device, or end-to-end
   behavior is part of the goal, require an executed browser-level verification.
   A page or harness that can be run manually is not sufficient unless the user
@@ -228,6 +238,15 @@ several slices, phases, commits, or reviews.
   proven by a test that only sends Tab; the default product path is not proven
   by forcing an alternate input runtime; a real provider/model footer is not
   proven by a fake/test provider footer.
+- For stateful terminal/browser/editor interactions, require evidence at the
+  fragile intermediate state, not only after the final action. If the feature
+  involves paste, multiline text, wrapping, resize, streaming, overlays,
+  cursor movement, undo/redo, or drag/drop, name the before-submit or
+  mid-interaction state that must be inspected. A test that proves the final
+  submitted value, saved file, or API call is correct does not prove the live
+  UI frame stayed coherent. Require rendered/screen evidence that catches
+  embedded control characters, unaccounted newlines, stale rows, overlap,
+  cursor misplacement, and incorrect layout bookkeeping.
 - When the user requires review gates, say when review must happen and what
   blocks progress. For example: unresolved Critical/Warning findings block
   committing and claiming the slice complete; Suggestions must be fixed or
