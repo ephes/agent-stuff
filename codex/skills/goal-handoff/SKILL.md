@@ -107,6 +107,10 @@ This skill is for goal tracking and continuation, not full implementation contex
    - conditional phase trigger criteria when later phases are optional
    - non-completion criteria when premature stopping is a known risk
    - evidence requirements for critical verification, review, or commit gates
+   - an explicit verification matrix when the goal names multiple modes,
+     product surfaces, policy branches, runtimes, providers, storage paths, or
+     platforms. Each named surface/policy combination needs product-path
+     evidence, not just shared-helper coverage.
    - critical constraints that describe invariants (behavior, data, gates
      that must not break) — not deferred work the user actually wanted
    - required verification commands sized to the goal
@@ -133,6 +137,14 @@ This skill is for goal tracking and continuation, not full implementation contex
    - verification that exercises only a lower-level harness, newly introduced
      abstraction, direct internal API, or special debug route when the requested
      outcome is an existing product workflow
+   - criteria that say "both modes", "all runtimes", "same policy", or
+     "workspace plus configured roots" without naming the concrete matrix that
+     must be tested. A goal that can pass one representative mode while another
+     documented mode is unwired is under-specified.
+   - "safe diagnostics" or "fail closed" wording that does not define safety
+     concretely when user-controlled labels, paths, commands, URLs, or error
+     strings are printed or archived. Require no raw sensitive content, no
+     unsanitized control/ANSI bytes, and no terminal escape injection.
    - required phases that contain phrases like "future PR", "left for
      follow-up", "manual half", "outstanding", or "deferred" without making
      the phase incomplete or conditional
@@ -141,10 +153,23 @@ This skill is for goal tracking and continuation, not full implementation contex
    Constraints describe invariants the next agent must respect while doing
    the work; they do not describe work the next agent must skip.
 
-4. Keep the goal condition safely under the destination limit.
-   - Hard cap: 4000 characters when no other cap is specified.
-   - Target: 3000-3500 characters for a 4000-character field.
-   - If the first draft is too long, compress by removing background, file lists, and low-risk details before removing success criteria.
+4. Enforce the destination character limit before final output.
+   - Hard cap: 4000 characters when no other cap is specified. This is a
+     strict maximum for the goal condition body, not a target and not
+     approximate.
+   - Target: 3200-3600 characters for a 4000-character field so there is
+     margin for hidden UI counting differences.
+   - Mandatory count check: when the destination limit is 4000 characters, or
+     any explicit character limit is named, measure the final goal condition
+     before replying. If it exceeds the limit, compress and measure again. Do
+     not send an over-limit goal condition.
+   - If a draft is too long, first remove background, examples, file lists,
+     explanatory prose, and low-risk implementation details; then merge bullets;
+     only then simplify success criteria while preserving objective checks.
+   - When the user says they want copy-ready text, `/copy`-friendly output, or
+     no explanation/header/footer, the final response must contain only the
+     goal condition text. Do not wrap it in a heading, code fence, preface,
+     character-count note, or follow-up sentence.
 
 5. If useful context does not fit, split the response into:
    - `Goal condition` - the bounded text that fits in the goal/objective field.
@@ -152,7 +177,8 @@ This skill is for goal tracking and continuation, not full implementation contex
    Do not put overflow context into the goal condition.
 
 6. When precise length matters, verify the character count before final output.
-   Report the count only when the user explicitly asks for it.
+   Report the count only when the user explicitly asks for it; otherwise keep
+   the count out of the final answer.
 
 ## Goal Condition Shape
 
@@ -213,6 +239,25 @@ several slices, phases, commits, or reviews.
   lower-level service harness, new adapter-only test, direct internal API call,
   or special debug path is supporting evidence only unless the user explicitly
   accepted it as the product path.
+- When the goal names multiple product modes, runtimes, platforms, storage
+  locations, provider paths, or policy boundaries, require a compact
+  verification matrix. For every named row, include at least one success case
+  and the important failure/privacy case. Examples: if a feature claims both
+  no-tool and tool-loop REPL support, test both product paths; if it claims
+  workspace plus configured reference-root policy, test both path classes; if
+  it claims local state plus archive privacy, test both the local-state write
+  and the archive non-leak.
+- When a feature reuses an existing policy boundary, name the externally visible
+  parts of that policy in the goal and require evidence for each one that
+  matters. Do not let "uses the same helper" substitute for testing configured
+  roots, ignored/generated files, size caps, binary/non-UTF8 handling,
+  secret-shaped content, auth state, sandbox mode, or whatever policy branches
+  the docs will claim are shipped.
+- When a goal includes safe local diagnostics, errors, notices, or logs, require
+  tests/evidence that user-controlled text is display-safe and archive-safe:
+  no secrets or file contents, no raw unsafe command/path/token bodies when they
+  can contain control characters, and no unsanitized ANSI/control bytes that can
+  alter a terminal or UI frame.
 - When integrating a new implementation behind an existing interface or
   contract, name the contract and representative existing consumers in the goal.
   Completion requires those consumers to work unchanged, not merely the new
