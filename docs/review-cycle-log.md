@@ -283,3 +283,23 @@ Project-specific execution lessons belong in the project repo, not here.
   backticks directly in double quotes. Use single quotes by default for `rg`
   patterns copied from docs, especially in closeout checks.
 - Status: repeated; needs habit-level correction.
+
+## 2026-05-31 - Launch Yolo Review Aliases Through Fish
+
+- Repo: podcast.
+- Goal or slice: P1 physical Now Playing surface proof blocker closeout.
+- Implementer: Codex / GPT-5.
+- Expected: the Codex implementer would run the required Claude review with
+  `claude-yolo --model opus`.
+- Actual: checking only the default shell PATH made `claude-yolo` look missing,
+  because it is a fish function rather than an executable. The review fell back
+  to raw `claude --model opus -p`, and a first tmux heredoc attempt also got
+  stuck before the reviewer launched.
+- Impact: the review still completed with Claude Opus, but it did not use the
+  intended project wrapper and wasted closeout time.
+- Fix or follow-up: run yolo reviewer aliases through fish in tmux and
+  automation: `fish -lc 'claude-yolo --model opus'` or
+  `fish -lc 'codex-yolo -m gpt-5.5'`. If `command -v` cannot find an alias,
+  verify it with `fish -lc 'type claude-yolo'` / `fish -lc 'type codex-yolo'`
+  before falling back to raw CLIs.
+- Status: documented in podcast `AGENTS.md`.
