@@ -16,6 +16,7 @@ chezmoi symlinks.
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
+| Claude | `pi-review-loop` | Bounded, observable review gate: drive Pi (newest GPT) over the diff until CLEAN |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 | Claude | `cmsg` (command) | Commit with a clean message, no self-references |
@@ -29,6 +30,8 @@ chezmoi symlinks.
 agent-stuff/
   docs/
     review-cycle-log.md
+    specs/
+    plans/
   codex/
     README.md
     skills/
@@ -44,6 +47,7 @@ agent-stuff/
       goal-handoff/
       handoff-impl/
       handoff-review/
+      pi-review-loop/
       mermaid-marked2-markdown/
       summarize-youtube/
     commands/
