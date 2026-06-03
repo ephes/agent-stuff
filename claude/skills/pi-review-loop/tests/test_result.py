@@ -45,7 +45,23 @@ class TestReviewResult(unittest.TestCase):
             with open(p) as fh:
                 data = json.load(fh)
         self.assertEqual(data["state"], CLEAN)
-        self.assertIn("scoped_clean", data)
+        self.assertEqual(data["scoped_clean"], False)
+        self.assertEqual(data["duration_s"], 1.0)
+        self.assertEqual(data["model"], "m")
+
+    def test_write_serializes_scoped_clean_true(self):
+        r = result.ReviewResult(
+            state=CLEAN, items=[], model="m", cost=None, started_at=0.0,
+            ended_at=1.5, skipped_files=[{"path": "big.json"}], truncations=[],
+            error=None, raw_verdict_line="REVIEW: CLEAN",
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "result.json")
+            r.write(p)
+            with open(p) as fh:
+                data = json.load(fh)
+        self.assertEqual(data["scoped_clean"], True)
+        self.assertEqual(data["duration_s"], 1.5)
 
 
 if __name__ == "__main__":
