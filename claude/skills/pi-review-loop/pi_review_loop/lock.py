@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import signal
+import subprocess
 
 META_NAME = "meta.json"
 
@@ -55,6 +56,23 @@ def pid_alive(pid):
         return e.errno != errno.ESRCH
 
 
+def _pgid_is_pi(pgid):
+    """Best-effort identity check before killing a recorded process group: confirm
+    the group leader's command is `pi` (the leader pid == pgid because Pi is spawned
+    with start_new_session). Fail-safe: returns False (do NOT kill) on any
+    uncertainty, so a reused PGID never gets an unrelated process group killed."""
+    if not pgid or pgid <= 1:
+        return False
+    try:
+        out = subprocess.run(["ps", "-o", "command=", "-p", str(pgid)],
+                             capture_output=True, text=True, timeout=5,
+                             check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    tokens = out.split()
+    return bool(tokens) and os.path.basename(tokens[0]) == "pi"
+
+
 def _remove_lock_dir(lock_dir):
     try:
         os.remove(os.path.join(lock_dir, META_NAME))
@@ -79,8 +97,8 @@ def _reclaim_if_stale(lock_dir):
     if "harness_pid" in meta:
         if pid_alive(meta.get("harness_pid")):
             return False
-        pgid = meta.get("pi_pgid")  # kill an orphaned Pi group if one was recorded
-        if pgid and pgid > 1:
+        pgid = meta.get("pi_pgid")  # kill an orphaned Pi group only if it is still pi
+        if pgid and pgid > 1 and _pgid_is_pi(pgid):
             try:
                 os.killpg(pgid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
@@ -90,7 +108,7 @@ def _reclaim_if_stale(lock_dir):
     if _group_alive(meta.get("pi_pgid")):
         return False
     pgid = meta.get("pi_pgid")
-    if pgid and pgid > 1:
+    if pgid and pgid > 1 and _pgid_is_pi(pgid):
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):

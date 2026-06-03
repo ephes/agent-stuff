@@ -78,6 +78,11 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
+        import json
+        rp = os.path.join(self.tmp.name, "run3", "result.json")
+        self.assertTrue(os.path.exists(rp), "preflight failure must still write result.json")
+        with open(rp) as fh:
+            self.assertEqual(json.load(fh)["state"], "CRASHED")
 
     def test_non_git_dir_exits_two_cleanly(self):
         nongit = tempfile.mkdtemp()  # standalone, not under the setUp repo

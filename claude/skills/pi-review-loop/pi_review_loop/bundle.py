@@ -2,6 +2,7 @@
 runs with --no-tools, this bundle is the entire review surface, so its contents
 are explicit and its omissions are recorded (never silent)."""
 import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -18,12 +19,26 @@ def _git(repo, *args):
                           capture_output=True, text=True).stdout
 
 
-def _truncate(text, limit, label, truncations):
-    if len(text.encode()) <= limit:
-        return text
-    cut = text.encode()[:limit].decode(errors="ignore")
-    truncations.append({"section": label, "kept_bytes": len(cut.encode())})
-    return cut + f"\n... [truncated {label} at {limit} bytes] ...\n"
+def _truncate_diff_per_file(diff_text, limit, label, truncations):
+    """Split a unified diff into per-file chunks and truncate EACH chunk over
+    `limit`, recording the path of every truncated file. This guarantees a
+    multi-file diff never silently drops later files."""
+    if not diff_text.strip():
+        return diff_text
+    chunks = re.split(r"(?=^diff --git )", diff_text, flags=re.M)
+    out = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if len(chunk.encode()) > limit:
+            m = re.match(r"diff --git a/(\S+)", chunk)
+            path = m.group(1) if m else "?"
+            cut = chunk.encode()[:limit].decode(errors="ignore")
+            truncations.append({"section": label, "path": path,
+                                "kept_bytes": len(cut.encode())})
+            chunk = cut + f"\n... [truncated {path} diff at {limit} bytes] ...\n"
+        out.append(chunk)
+    return "".join(out)
 
 
 def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
@@ -36,13 +51,13 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
 
     staged = _git(repo, "diff", "--cached")
     if staged.strip():
-        staged = _truncate(staged, max_diff_bytes_per_file, "staged diff", truncations)
+        staged = _truncate_diff_per_file(staged, max_diff_bytes_per_file, "staged diff", truncations)
         sections.append((1, "Staged diff", staged))
 
     if not staged_only:
         unstaged = _git(repo, "diff")
         if unstaged.strip():
-            unstaged = _truncate(unstaged, max_diff_bytes_per_file, "unstaged diff", truncations)
+            unstaged = _truncate_diff_per_file(unstaged, max_diff_bytes_per_file, "unstaged diff", truncations)
             sections.append((1, "Unstaged diff", unstaged))
 
     # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
@@ -70,7 +85,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
             skipped.append({"path": path, "reason": "unreadable"})
             continue
         if b"\x00" in raw:
-            notes.append(f"- {path}: untracked BINARY (omitted)")
+            skipped.append({"path": path, "reason": "binary"})
             continue
         untracked_bodies.append(f"### {path}\n```\n{raw.decode(errors='replace')}\n```")
     name_status = _git(repo, "diff", "--name-status", "HEAD")
@@ -83,12 +98,12 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
     numstat = _git(repo, "diff", "--numstat", "HEAD")
     for line in numstat.splitlines():
         if line.startswith("-\t-\t"):
-            notes.append(f"- {line.split(chr(9))[-1]}: BINARY (no content)")
+            skipped.append({"path": line.split(chr(9))[-1], "reason": "binary-diff"})
 
     if untracked_bodies:
         sections.append((2, "Untracked files", "\n\n".join(untracked_bodies)))
     if notes:
-        sections.append((3, "Renamed / deleted / binary", "\n".join(notes)))
+        sections.append((3, "Renamed / deleted", "\n".join(notes)))
 
     # Render, dropping lowest-priority sections if over the total cap.
     def render(secs):

@@ -4,12 +4,14 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 
 from . import bundle as bundle_mod
 from . import model as model_mod
 from .lock import Lock, LockHeld, write_meta
+from .result import ReviewResult
 from .runner import run_review
-from .states import CLEAN, ISSUES, FAILED
+from .states import CLEAN, ISSUES, FAILED, CRASHED
 
 REVIEW_INSTRUCTION = """\
 You are a code reviewer. Review ONLY the changes in the provided review bundle \
@@ -83,8 +85,15 @@ def main(argv=None):
             err = str(e)
         elif not isinstance(err, str):
             err = (err or b"").decode(errors="replace")
-        print(f"pi-review-loop: cannot build review bundle: {(err or '').strip()}",
-              file=sys.stderr)
+        msg = f"cannot build review bundle: {(err or '').strip()}"
+        print(f"pi-review-loop: {msg}", file=sys.stderr)
+        now = time.monotonic()
+        try:
+            ReviewResult(state=CRASHED, items=[], model=model, cost=None,
+                         started_at=now, ended_at=now, error=msg).write(
+                             os.path.join(args.run_dir, "result.json"))
+        except OSError:
+            pass
         return 2
 
     meta = {"harness_pid": os.getpid(), "cwd": os.path.abspath(args.repo),

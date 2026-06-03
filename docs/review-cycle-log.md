@@ -331,6 +331,6 @@ Project-specific execution lessons belong in the project repo, not here.
   now supplied via `--append-system-prompt`. The lock keys on the harness PID rather
   than the Pi PGID (documented deviation). The ISSUES verdict path is exercised by
   `fake_pi` unit tests; the trivial real sample returned CLEAN.
-- Status: built, reviewed, live-verified; pending chezmoi install + SKILL.md.
+- Status: built, reviewed, live-verified, installed via chezmoi; external review round addressed.
 - Safety: summary-safe metrics only; no prompts, transcript bodies, tool output,
   secrets, or sensitive personal data.

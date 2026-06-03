@@ -88,6 +88,28 @@ class TestBundle(unittest.TestCase):
         res = self._build(max_bundle_bytes=200)
         self.assertTrue(any(t.get("dropped") for t in res.truncations))
 
+    def test_untracked_binary_recorded_in_skipped(self):
+        with open(os.path.join(self.repo, "blob.bin"), "wb") as fh:
+            fh.write(b"\x00\x01\x02BIN\x00")
+        res = self._build()
+        self.assertTrue(any(s["path"] == "blob.bin" and s["reason"] == "binary"
+                            for s in res.skipped_files))
+
+    def test_per_file_diff_truncation_keeps_other_files(self):
+        # two changed tracked files; cap small enough to truncate the big one
+        # but keep the small one fully.
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("\n".join(f"line{i}" for i in range(2000)) + "\n")
+        with open(os.path.join(self.repo, "small.py"), "w") as fh:
+            fh.write("SMALL_MARKER = 1\n")
+        git(self.repo, "add", "small.py")  # make small.py a tracked change too
+        res = self._build(max_diff_bytes_per_file=600)
+        with open(res.path) as fh:
+            text = fh.read()
+        # the small file's content survives even though the big file was truncated
+        self.assertIn("SMALL_MARKER", text)
+        self.assertTrue(any(t.get("path", "").endswith("a.py") for t in res.truncations))
+
 
 if __name__ == "__main__":
     unittest.main()

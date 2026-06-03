@@ -319,7 +319,7 @@ All are overridable as skill arguments.
 
 ## Verification results & implementation deltas (post-build)
 
-Built subagent-driven (2026-06-03); 67 stdlib `unittest` tests; live-verified
+Built subagent-driven (2026-06-03); 74 stdlib `unittest` tests; live-verified
 against real `pi` / gpt-5.5. See `docs/review-cycle-log.md` for the smoke record.
 Deltas from the design above, all discovered/confirmed during build + live smoke:
 

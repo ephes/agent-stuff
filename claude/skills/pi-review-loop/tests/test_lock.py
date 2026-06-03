@@ -70,6 +70,23 @@ class TestLock(unittest.TestCase):
             shutil.rmtree(self.lock_dir)  # vanished mid-context
         # __exit__ must not raise
 
+    def test_pgid_is_pi_false_for_non_pi_group(self):
+        # The test runner is python, not pi -> guard must refuse to kill it.
+        self.assertFalse(lock._pgid_is_pi(os.getpgrp()))
+
+    def test_pgid_is_pi_false_for_dead_pgid(self):
+        self.assertFalse(lock._pgid_is_pi(2_000_000_000))
+
+    def test_reclaims_dead_harness_even_when_pgid_not_pi(self):
+        # harness dead + a pi_pgid that is NOT pi: reclaim still removes the lock,
+        # but must not kill the unrelated group (guarded by _pgid_is_pi).
+        os.mkdir(self.lock_dir)
+        lock.write_meta(self.lock_dir, {"harness_pid": 2_000_000_000,
+                                        "pi_pgid": os.getpgrp(),
+                                        "command": "pi-review-loop"})
+        with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
+            self.assertTrue(os.path.isdir(self.lock_dir))
+
 
 if __name__ == "__main__":
     unittest.main()
