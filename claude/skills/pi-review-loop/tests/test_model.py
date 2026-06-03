@@ -10,6 +10,15 @@ google/gemini-2.5-pro
 openai-codex/gpt-4.1
 """
 
+REAL_TABLE = """\
+provider      model                context  max-out  thinking  images
+openai-codex  gpt-5.2              272K     128K     yes       yes
+openai-codex  gpt-5.3-codex        272K     128K     yes       yes
+openai-codex  gpt-5.4              272K     128K     yes       yes
+openai-codex  gpt-5.5              272K     128K     yes       yes
+anthropic     claude-opus-4-8      200K     64K      yes       yes
+"""
+
 
 class TestResolveModel(unittest.TestCase):
     def test_picks_highest_gpt(self):
@@ -34,9 +43,23 @@ class TestResolveModel(unittest.TestCase):
             self.assertEqual(model.resolve_from_cli(fallback="pin/x"), "pin/x")
 
     def test_resolve_from_cli_parses_stdout(self):
-        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n")
+        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n", stderr="")
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
             self.assertEqual(model.resolve_from_cli(), "openai-codex/gpt-5.5")
+
+
+class TestResolveTableFormat(unittest.TestCase):
+    def test_parses_real_table_and_picks_highest(self):
+        # fallback "pin/x" is wrong on purpose: returning gpt-5.5 proves it parsed.
+        self.assertEqual(model.resolve_model(REAL_TABLE, fallback="pin/x"),
+                         "openai-codex/gpt-5.5")
+
+    def test_skips_header_row(self):
+        # header's model column is the literal word "model" (no gpt) -> ignored
+        self.assertEqual(
+            model.resolve_model("provider model context\nx gpt-4 y\n", fallback="pin/x"),
+            "x/gpt-4",
+        )
 
 
 if __name__ == "__main__":

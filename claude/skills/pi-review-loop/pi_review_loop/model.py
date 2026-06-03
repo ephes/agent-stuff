@@ -23,30 +23,43 @@ def _version_key(model_part):
 
 
 def resolve_model(list_models_output, fallback="openai-codex/gpt-5.5"):
+    # `pi --list-models gpt` prints a whitespace table: "<provider> <model> ...",
+    # with a header row. Older/other forms may print a "<provider>/<model>" token.
+    # Handle both; the header row is skipped naturally (its model column is the
+    # literal word "model", which contains no "gpt").
     candidates = []
     for line in list_models_output.splitlines():
         line = line.strip()
-        if not line or "/" not in line:
+        if not line:
             continue
-        token = line.split()[0]
-        if "/" not in token:
+        tokens = line.split()
+        first = tokens[0]
+        if "/" in first:
+            model_part = first.rsplit("/", 1)[1]
+            candidate = first
+        elif len(tokens) >= 2:
+            provider, model_part = tokens[0], tokens[1]
+            candidate = f"{provider}/{model_part}"
+        else:
             continue
-        model_part = token.rsplit("/", 1)[1].lower()
-        if "gpt" not in model_part:
+        if "gpt" not in model_part.lower():
             continue
-        candidates.append(token)
+        candidates.append(candidate)
     if not candidates:
         return fallback
-    return max(candidates, key=lambda t: _version_key(t.rsplit("/", 1)[1]))
+    return max(candidates, key=lambda c: _version_key(c.rsplit("/", 1)[1]))
 
 
 def resolve_from_cli(fallback="openai-codex/gpt-5.5", timeout=30):
     """Run `pi --list-models gpt` and resolve; fall back on any failure."""
     try:
-        out = subprocess.run(
+        proc = subprocess.run(
             ["pi", "--list-models", "gpt"],
             capture_output=True, text=True, timeout=timeout, check=False,
-        ).stdout
+        )
+        # pi writes the table to stderr; combine both streams so the parser
+        # handles whichever stream a future version may use.
+        out = proc.stdout + proc.stderr
     except (OSError, subprocess.SubprocessError):
         return fallback
     return resolve_model(out, fallback=fallback)
