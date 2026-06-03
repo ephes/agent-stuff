@@ -12,6 +12,10 @@ _NUM_RE = re.compile(r"(\d+(?:\.\d+)*)")
 
 
 def _version_key(model_part):
+    # First numeric run only (e.g. gpt-5.5 -> (5,5)). This can tie variants that
+    # share a major.minor (gpt-4.1 vs gpt-4.1-mini) and treats gpt-4o as (4,).
+    # Acceptable for the short, filtered GPT list pi returns; re-check against
+    # the real `pi --list-models gpt` output during live verification.
     m = _NUM_RE.search(model_part)
     if not m:
         return (0,)

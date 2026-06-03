@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from pi_review_loop import model
 
 SAMPLE = """\
@@ -27,6 +28,15 @@ class TestResolveModel(unittest.TestCase):
     def test_ignores_blank_and_noise_lines(self):
         out = "\n  \nAvailable models:\nopenai-codex/gpt-5.5\n"
         self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.5")
+
+    def test_resolve_from_cli_falls_back_on_missing_binary(self):
+        with mock.patch("pi_review_loop.model.subprocess.run", side_effect=OSError):
+            self.assertEqual(model.resolve_from_cli(fallback="pin/x"), "pin/x")
+
+    def test_resolve_from_cli_parses_stdout(self):
+        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n")
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            self.assertEqual(model.resolve_from_cli(), "openai-codex/gpt-5.5")
 
 
 if __name__ == "__main__":
