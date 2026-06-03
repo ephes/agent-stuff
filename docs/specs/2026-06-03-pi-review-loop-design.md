@@ -1,6 +1,6 @@
 # Pi Review Loop — Design Spec
 
-Status: draft for review (revised after review round 3)
+Status: draft for review (revised after review round 4)
 Date: 2026-06-03
 Skill location: `claude/skills/pi-review-loop/` (a Claude Code skill)
 
@@ -161,8 +161,12 @@ The harness:
    the stall/liveness checks. Use non-blocking pipe reads (`selectors`/`select`) or
    a reader thread, plus a periodic timer tick. Read **stdout and stderr
    concurrently** (or redirect stderr straight to `stderr.log`) so a full stderr
-   pipe can't deadlock Pi into a harness-induced stall. For each complete JSON line:
-   append to `events.jsonl`, update `last_event_at` (monotonic), and track
+   pipe can't deadlock Pi into a harness-induced stall. For each line: append the
+   raw line to `events.jsonl`, then try to parse JSON. A **malformed/non-JSON line**
+   (startup or provider bug leaking into the JSONL stream) is recorded raw and
+   skipped — it must never crash the harness — and it does **not** count as a valid
+   event; if no valid `agent_end` ever arrives, the round is `CRASHED`/`INVALID`,
+   never `CLEAN`. For each valid line: update `last_event_at` (monotonic) and track
    `auto_retry` windows + `retry_deadline`. On each tick/line evaluate, in order:
 
    ```text
@@ -194,7 +198,10 @@ The harness:
 
 4. **Teardown (always)** — ensure the process group is reaped on every exit path
    (success, invalid, crash, stall, round cap); release the lock; leave logs for
-   inspection; write `result.json`.
+   inspection. **`result.json` is always written**, even on a harness-internal
+   error (wrap the run so an unexpected exception still emits a `CRASHED` result
+   with the traceback) — Claude must never be left polling for a file that never
+   appears (the M4 anti-pattern at the harness level).
 
 **Reap semantics (resolves "kill without waiting" vs "must reap"):** never block
 waiting for Pi's *natural* exit (M3 means it may never come). But after taking a
@@ -223,16 +230,26 @@ since Pi may spawn children.
   - an explicit **skipped-for-size** list.
   A deterministic-but-incomplete bundle is a review-quality bug, so omissions are
   surfaced, not silent.
+- **Whole-bundle cap, not just per-file.** Even with every file under the size cap,
+  many changed files can overflow the prompt (context overflow, compaction,
+  provider stalls, cost). The harness enforces a per-file *diff* cap
+  (`--max-diff-bytes-per-file`) and a total `--max-bundle-bytes`; when it must
+  truncate or drop sections it does so by priority (diffs > excerpts), and every
+  truncation/omission is recorded in `result.json` and folded into the scoped-clean
+  caveat — a `CLEAN` over a truncated bundle is "clean within provided scope."
 - **If tools are needed later**, allow only `--tools read,grep,find,ls`, ideally
   with Pi running in a sanitized temp directory containing just the bundle, not the
   real repo.
 - **Read-only review prompt** scoped to the changed files; flag only issues
   affecting correctness or stated requirements (avoid nit floods / over-engineering).
 - **Verdict contract.** Pi must end its final message with one exact, parseable
-  block. The harness extracts **only the final assistant message text** from
-  `agent_end.messages[]` (never the whole transcript — the echoed bundle contains
-  these very examples) and parses the **last** line matching
-  `^REVIEW: (CLEAN|ISSUES)$` within it:
+  block. **Extraction shape:** find the **last** message in `agent_end.messages[]`
+  with `role == "assistant"`; `content` may be an array of blocks, so concatenate
+  **only its textual content** (text blocks/strings, skipping tool/thinking/other
+  blocks); parse the verdict **only** from that concatenated assistant text — never
+  the whole transcript (the echoed bundle contains these very examples) and never
+  tool/user content. Within that text, take the **last** line matching
+  `^REVIEW: (CLEAN|ISSUES)$`:
   ```text
   REVIEW: CLEAN
   ```
@@ -263,6 +280,8 @@ since Pi may spawn children.
 | Retry grace | `--retry-grace` | 30s | Slack added to `delayMs` before a retry window counts as `STALLED_RETRY`. |
 | Per-review deadline `global_deadline` | `--review-deadline` | 1500s (25m) | Hard wall-clock cap per review; **never suspended**, even during retries. Backstops every timer. |
 | File size cap | `--max-file-size` | 256 KB | Larger files are excluded from the bundle + listed as skipped. |
+| Per-file diff cap | `--max-diff-bytes-per-file` | 256 KB | A single file's diff is truncated past this; truncation noted. |
+| Total bundle cap | `--max-bundle-bytes` | 2 MB | Many sub-cap files can still overflow context / trigger compaction / inflate cost. Past this, lowest-priority sections are dropped. |
 | Max rounds `N` | `--max-rounds` | 3 | Then stop and report unresolved items rather than loop forever. |
 
 All are overridable as skill arguments.
@@ -290,3 +309,10 @@ All are overridable as skill arguments.
   `INVALID` fail-closed path, and the scoped-clean caveat.
 - Pi's exit code on exhausted backoff / provider error (M4): capture it on the
   process-exit path so a CRASHED round reports *why*, not just *that*, it died.
+- **Startup network noise:** confirm which mechanism actually suppresses unrelated
+  startup calls (version check / telemetry) *without* blocking the model API call.
+  `--help` documents only `--offline`/`PI_OFFLINE=1` as "disable startup network
+  operations" — verify empirically whether that is startup-only (safe to use) or
+  also blocks the provider call (unusable here); and whether env vars like
+  `PI_SKIP_VERSION_CHECK` / `PI_TELEMETRY` exist before relying on them. Do not
+  hardcode unverified env var names.
