@@ -56,6 +56,12 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.state, PROVIDER_ERROR)
         self.assertIn("529", r.error or "")
 
+    def test_on_spawn_receives_pgid(self):
+        seen = []
+        r = self._run("clean", on_spawn=lambda p: seen.append(p))
+        self.assertEqual(r.state, CLEAN)
+        self.assertTrue(seen and isinstance(seen[0], int))
+
 
 if __name__ == "__main__":
     unittest.main()

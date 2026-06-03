@@ -7,7 +7,7 @@ import sys
 
 from . import bundle as bundle_mod
 from . import model as model_mod
-from .lock import Lock, LockHeld
+from .lock import Lock, LockHeld, write_meta
 from .runner import run_review
 from .states import CLEAN, ISSUES, FAILED
 
@@ -77,9 +77,13 @@ def main(argv=None):
             max_bundle_bytes=args.max_bundle_bytes,
             staged_only=args.staged_only,
         )
-    except subprocess.CalledProcessError as e:
-        err = e.stderr if isinstance(e.stderr, str) else (e.stderr or b"").decode(errors="replace")
-        print(f"pi-review-loop: git error building bundle: {(err or '').strip()}",
+    except (subprocess.CalledProcessError, OSError) as e:
+        err = getattr(e, "stderr", None)
+        if err is None:
+            err = str(e)
+        elif not isinstance(err, str):
+            err = (err or b"").decode(errors="replace")
+        print(f"pi-review-loop: cannot build review bundle: {(err or '').strip()}",
               file=sys.stderr)
         return 2
 
@@ -87,10 +91,13 @@ def main(argv=None):
             "command": "pi-review-loop", "model": model, "run_dir": args.run_dir}
     try:
         with Lock(args.lock_dir, meta):
+            def _record_pgid(pgid):
+                write_meta(args.lock_dir, {**meta, "pi_pgid": pgid})
             result = run_review(
                 cmd=_pi_cmd(model, bundle_path), run_dir=args.run_dir,
                 model=model, stall_timeout=args.stall_timeout,
                 retry_grace=args.retry_grace, global_deadline=args.review_deadline,
+                on_spawn=_record_pgid,
             )
     except LockHeld as e:
         print(f"pi-review-loop: {e}", file=sys.stderr)

@@ -67,6 +67,18 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 3, proc.stdout)
 
+    def test_nonexistent_repo_exits_two_cleanly(self):
+        missing = os.path.join(self.tmp.name, "does-not-exist")
+        env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", missing, "--run-dir", os.path.join(self.tmp.name, "run3"),
+             "--lock-dir", os.path.join(self.tmp.name, "lock3"), "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+
     def test_non_git_dir_exits_two_cleanly(self):
         nongit = tempfile.mkdtemp()  # standalone, not under the setUp repo
         self.addCleanup(shutil.rmtree, nongit, ignore_errors=True)

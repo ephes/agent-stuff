@@ -58,7 +58,9 @@ implement and fix; Pi reviews with fresh context.
 
 `--model <id>` (default: newest GPT auto-resolved), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-only`,
-`--max-bundle-bytes <n>` (default 2MB), `--lock-dir <dir>`.
+`--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
+files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single
+file's diff is truncated past this), `--lock-dir <dir>`.
 
 ## Artifacts (in `--run-dir`)
 

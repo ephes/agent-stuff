@@ -105,7 +105,7 @@ class _Streams:
 
 
 def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
-               global_deadline, poll_interval=0.5, env=None):
+               global_deadline, poll_interval=0.5, env=None, on_spawn=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
         "raw": "stdout.raw.log", "events": "events.jsonl",
@@ -137,6 +137,11 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             pgid = os.getpgid(proc.pid)  # cache immediately, before any exit
         except ProcessLookupError:
             pgid = proc.pid  # start_new_session=True guarantees pgid == pid
+        if on_spawn is not None:
+            try:
+                on_spawn(pgid)
+            except Exception:
+                pass  # recording the pgid must never break the review
         streams = _Streams(proc.stdout.fileno(), proc.stderr.fileno(),
                            raw_f, ev_f, err_f, monitor)
 
