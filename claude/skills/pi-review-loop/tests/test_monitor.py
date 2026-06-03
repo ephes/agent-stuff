@@ -75,6 +75,43 @@ class TestMonitor(unittest.TestCase):
         # window cleared; fresh heartbeat at 12; at 50 well within stall timeout
         self.assertEqual(m.decide(now=50, proc_alive=True), Decision("continue", None))
 
+    def test_agent_end_issues_finishes_and_exposes_items(self):
+        # The runner reads verdict_items to build ReviewResult — pin that contract.
+        m = mon()
+        m.on_event({"type": "agent_end", "messages": [
+            {"role": "assistant", "content": [{"type": "text",
+             "text": "REVIEW: ISSUES\n1. [Warning] x.py: tidy"}]},
+        ]}, now=5)
+        d = m.decide(now=6, proc_alive=True)
+        self.assertEqual(d, Decision("finish", ISSUES))
+        self.assertEqual(len(m.verdict_items), 1)
+        self.assertEqual(m.verdict_items[0]["severity"], "Warning")
+
+    def test_agent_end_during_retry_window_finishes(self):
+        # Retry succeeded then agent emitted a verdict: verdict wins over the
+        # still-open retry window (guards the branch ordering).
+        m = mon()
+        m.on_event({"type": "auto_retry_start", "delayMs": 60000}, now=10)
+        m.on_event(agent_end_clean(), now=15)
+        self.assertEqual(m.decide(now=16, proc_alive=True), Decision("finish", CLEAN))
+
+    def test_second_retry_window_is_rearmed(self):
+        # After a successful retry clears the window, a second retry must re-arm it
+        # (else a second stall would be mis-killed as STALLED, not STALLED_RETRY).
+        m = mon()
+        m.on_event({"type": "auto_retry_start", "delayMs": 2000}, now=10)
+        m.on_event({"type": "auto_retry_end", "success": True}, now=12)
+        m.on_event({"type": "auto_retry_start", "delayMs": 2000}, now=20)
+        # second window: retry_deadline = 20 + 2 + 30 = 52; at 53 expired
+        self.assertEqual(m.decide(now=53, proc_alive=True), Decision("kill", STALLED_RETRY))
+
+    def test_auto_retry_start_without_delayms_uses_grace_only(self):
+        m = mon()
+        m.on_event({"type": "auto_retry_start"}, now=10)  # no delayMs key
+        # window = now + 0 + retry_grace(30) = 40; at 39 inside, at 41 expired
+        self.assertEqual(m.decide(now=39, proc_alive=True), Decision("continue", None))
+        self.assertEqual(m.decide(now=41, proc_alive=True), Decision("kill", STALLED_RETRY))
+
 
 if __name__ == "__main__":
     unittest.main()
