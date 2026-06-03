@@ -1,6 +1,6 @@
 # Pi Review Loop — Design Spec
 
-Status: draft for review (revised after review round 4)
+Status: draft for review (revised after review round 5)
 Date: 2026-06-03
 Skill location: `claude/skills/pi-review-loop/` (a Claude Code skill)
 
@@ -88,6 +88,11 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
     wedge a deterministic review. Any relevant `AGENTS.md`/doc excerpts go into the
     bundle explicitly instead.
   - `@review-bundle.md` avoids argv length limits and makes runs reproducible.
+  - **Subprocess env:** set `PI_SKIP_VERSION_CHECK=1` and `PI_TELEMETRY=0` (both
+    documented in Pi's README) to strip the `pi.dev` version check and telemetry from
+    the monitored review path. Do **not** use `PI_OFFLINE=1` — it disables *all*
+    startup network operations and its name implies more; the two targeted vars are
+    unambiguous and leave the provider/model call untouched.
 - **Concurrency:** one Pi review at a time, enforced by an **atomic** lock
   (`mkdir`- or `flock`-based, not a bare PID file), **global per user** because the
   protected resource is the shared provider API (the M2 root cause), not a per-repo
@@ -162,13 +167,16 @@ The harness:
    the stall/liveness checks. Use non-blocking pipe reads (`selectors`/`select`) or
    a reader thread, plus a periodic timer tick. Read **stdout and stderr
    concurrently** (or redirect stderr straight to `stderr.log`) so a full stderr
-   pipe can't deadlock Pi into a harness-induced stall. For each line: append the
-   raw line to `events.jsonl`, then try to parse JSON. A **malformed/non-JSON line**
-   (startup or provider bug leaking into the JSONL stream) is recorded raw and
-   skipped — it must never crash the harness — and it does **not** count as a valid
-   event; if no valid `agent_end` ever arrives, the round is `CRASHED`/`INVALID`,
-   never `CLEAN`. For each valid line: update `last_event_at` (monotonic) and track
-   `auto_retry` windows + `retry_deadline`. On each tick/line evaluate, in order:
+   pipe can't deadlock Pi into a harness-induced stall. Every raw stdout line is
+   teed to `stdout.raw.log`; then try to parse JSON. A **valid** event is appended to
+   `events.jsonl` (keeping it strict JSONL for `jq`/postmortem). A **malformed/
+   non-JSON line** (startup or provider bug leaking into the stream) must never crash
+   the harness and does **not** count as a valid event — record it as
+   `{"type":"malformed_stdout","raw":"…"}` in `events.jsonl` (so the file stays valid
+   JSONL) and continue; if no valid `agent_end` ever arrives, the round is
+   `CRASHED`/`INVALID`, never `CLEAN`. For each valid event: update `last_event_at`
+   (monotonic) and track `auto_retry` windows + `retry_deadline`. On each tick/line
+   evaluate, in order:
 
    ```text
    1. terminal agent_end with parseable verdict?
@@ -187,14 +195,17 @@ The harness:
             agent_end without verdict                 → INVALID
             neither                                   → CRASHED (stderr tail + last event)  # M4
         → wait/reap
-   4. now > global_deadline (never suspended, even during retries)?
+   4. auto_retry_end with success:false (provider gave up after maxAttempts)?
+        → kill process group if still alive, wait/reap
+        → result = PROVIDER_ERROR (finalError)                            # M2 give-up
+   5. now > global_deadline (never suspended, even during retries)?
         → kill process group, wait/reap → STALLED (hit wall-clock cap)
-   5. inside a retry window past retry_deadline (no auto_retry_end)?
+   6. inside a retry window past retry_deadline (no auto_retry_end)?
         → kill process group, wait/reap → STALLED_RETRY
-   6. NOT in a retry window AND (now - last_event_at) > T?
+   7. NOT in a retry window AND (now - last_event_at) > T?
         → kill process group, wait/reap
         → result = STALLED (last event / in-flight context)               # M1/M2
-   7. else: keep reading
+   8. else: keep reading
    ```
 
 4. **Teardown (always)** — ensure the process group is reaped on every exit path
@@ -210,8 +221,10 @@ kill action, do `SIGTERM` the group → short grace → `SIGKILL` if still alive
 `wait()` to collect status. Always kill the **process group**, not the bare PID,
 since Pi may spawn children.
 
-**Artifacts per review** (under a per-run dir): `events.jsonl`, `stderr.log`,
-`result.json` (verdict, items, state, model, cost, timings, skipped files).
+**Artifacts per review** (under a per-run dir): `stdout.raw.log` (every raw stdout
+line, tee'd), `events.jsonl` (strict JSONL — valid events plus `malformed_stdout`
+records), `stderr.log`, and `result.json` (verdict, items, state, model, cost,
+timings, skipped/truncated files).
 
 ## Scope, tools, and the verdict contract
 
@@ -310,10 +323,7 @@ All are overridable as skill arguments.
   `INVALID` fail-closed path, and the scoped-clean caveat.
 - Pi's exit code on exhausted backoff / provider error (M4): capture it on the
   process-exit path so a CRASHED round reports *why*, not just *that*, it died.
-- **Startup network noise:** confirm which mechanism actually suppresses unrelated
-  startup calls (version check / telemetry) *without* blocking the model API call.
-  `--help` documents only `--offline`/`PI_OFFLINE=1` as "disable startup network
-  operations" — verify empirically whether that is startup-only (safe to use) or
-  also blocks the provider call (unusable here); and whether env vars like
-  `PI_SKIP_VERSION_CHECK` / `PI_TELEMETRY` exist before relying on them. Do not
-  hardcode unverified env var names.
+- **Startup network noise:** resolved — set `PI_SKIP_VERSION_CHECK=1` +
+  `PI_TELEMETRY=0` (Pi README). During implementation, just sanity-check that with
+  these set a normal review still reaches the provider (i.e. they did not
+  accidentally suppress the model call).
