@@ -67,21 +67,33 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
 - **Architecture:** Claude Code drives the *outer* loop (review → fix → re-review)
   because Claude holds the code context and does the fixing. Each *single review* is
   one invocation of a deterministic **foreground harness script** that owns Pi.
-- **Reviewer model:** latest available GPT, resolved at runtime. `pi --list-models
-  gpt` currently returns `openai-codex/gpt-5.5`; the harness selects the newest GPT
-  (or a `openai/gpt-5*` glob) and falls back to a known-good pin if resolution fails.
-- **Invocation:** `pi --mode json --no-session --no-tools --model <gpt> "<prompt>"`.
+- **Reviewer model:** latest available GPT, resolved at runtime. Parse
+  `pi --list-models gpt` (currently lists `openai-codex/gpt-5.5`), pick the highest
+  semver-ish `gpt-*` row, and pass `<provider>/<model>` **exactly as listed** — do
+  not assume an `openai/gpt-5*` glob, which can miss the actual provider prefix.
+  Fall back to a known-good pin if resolution fails.
+- **Invocation:** spawn Pi **directly** (no shell wrapper) with the bundle passed as
+  an `@file`, not a giant argv string:
+  ```
+  pi --mode json --no-session --no-tools \
+     --no-extensions --no-skills --no-prompt-templates --no-context-files \
+     --model <provider/gpt> @<run-dir>/review-bundle.md
+  ```
   - `--mode json` is already non-interactive and exits cleanly (verified both with
     and without `-p`), so `-p` is dropped as redundant.
-  - `--no-session` so killing the process after `agent_end` cannot corrupt useful
-    session state.
-  - `--no-tools` by default (see Scope) — this, not a size number, is what actually
-    prevents M1.
+  - `--no-session` so killing the process after `agent_end` cannot corrupt session state.
+  - `--no-tools` by default (see Scope) — this, not a size number, prevents M1.
+  - `--no-extensions/--no-skills/--no-prompt-templates/--no-context-files` so
+    extension startup errors and ambient project/global instructions cannot skew or
+    wedge a deterministic review. Any relevant `AGENTS.md`/doc excerpts go into the
+    bundle explicitly instead.
+  - `@review-bundle.md` avoids argv length limits and makes runs reproducible.
 - **Concurrency:** one Pi review at a time, enforced by an **atomic** lock
-  (`mkdir`- or `flock`-based, not a bare PID file) storing PID, cwd, started-at, and
-  command. The lock is **global per user**, because the resource being protected is
-  the shared provider API (the root cause of M2 under concurrency), not a per-repo
-  resource. Stale locks (dead PID) are reclaimed.
+  (`mkdir`- or `flock`-based, not a bare PID file), **global per user** because the
+  protected resource is the shared provider API (the M2 root cause), not a per-repo
+  resource. Lock metadata records: harness PID, Pi PID, **Pi PGID**, cwd,
+  started-at, command/model, and run dir. Stale reclaim (after identity checks)
+  kills the old **process group** so an orphaned Pi from a dead harness is cleaned up.
 - **Completion:** parse the verdict from the terminal `agent_end` event; if it does
   not contain an exact `REVIEW: CLEAN` / `REVIEW: ISSUES` verdict, the review is
   **invalid** (fail closed), never treated as clean.
@@ -109,9 +121,12 @@ Implications for parsing:
   no delta reassembly. Example: `jq -c 'select(.type=="agent_end")'`.
 - **Retries:** `auto_retry_start` = `{attempt, maxAttempts, delayMs, errorMessage}`;
   `auto_retry_end` = `{success, attempt, finalError?}`. While inside a retry window
-  the harness **suspends the stall timer** (honor `delayMs`). An `auto_retry_end`
-  with `success:false` + `finalError` after `maxAttempts` is the M2 give-up signal →
-  fail the round with that error.
+  the harness **suspends the stall timer** — but with a bound, so a retry that never
+  ends is not an infinite blind spot:
+  `retry_deadline = auto_retry_start_at + delayMs + retry_grace`, also capped by the
+  overall `global_deadline`. No matching `auto_retry_end` by `retry_deadline` →
+  `STALLED_RETRY` (kill/reap/fail). An `auto_retry_end` with `success:false` +
+  `finalError` after `maxAttempts` is the M2 give-up signal → fail with that error.
 - **Do not rely on `agent_end.willRetry`.** The docs place `willRetry` on
   `compaction_end`; installed Pi 0.78.0 happens to emit `willRetry:false` on
   `agent_end`, so it is version-dependent and unsafe. Use `auto_retry_*` instead.
@@ -129,33 +144,52 @@ The harness:
 
 1. **Preflight** — acquire the global lock (reclaim if stale); resolve the GPT model
    (else pinned fallback); assemble the review bundle (see Scope).
-2. **Spawn** Pi in its **own process group**, capturing stdout (JSONL) and stderr.
-3. **Monitor** — read stdout incrementally; for each complete JSON line:
+2. **Spawn** Pi directly in its **own session/process group**, e.g.
+   `subprocess.Popen([...], start_new_session=True, stdout=PIPE, stderr=PIPE)` — no
+   `/bin/zsh -c` wrapper (shell wrapping reintroduces quoting bugs and process-tree
+   ambiguity). Kill via `os.killpg(os.getpgid(proc.pid), SIG…)`. Initialize
+   `last_event_at` at spawn time (not at first event), so a Pi that emits nothing is
+   still subject to the stall timer.
+3. **Monitor** — the loop must **never block on `readline()`**: M1/M2 are precisely
+   "no new line arrives," so a blocking `for line in proc.stdout` would never reach
+   the stall/liveness checks. Use non-blocking pipe reads (`selectors`/`select`) or
+   a reader thread, plus a periodic timer tick. Read **stdout and stderr
+   concurrently** (or redirect stderr straight to `stderr.log`) so a full stderr
+   pipe can't deadlock Pi into a harness-induced stall. For each complete JSON line:
    append to `events.jsonl`, update `last_event_at` (monotonic), and track
-   `auto_retry` windows. Then evaluate, in order:
+   `auto_retry` windows + `retry_deadline`. On each tick/line evaluate, in order:
 
    ```text
    1. terminal agent_end with parseable verdict?
         → kill process group (TERM → grace → KILL), wait/reap
         → result = CLEAN | ISSUES(items)
-   2. process exited (no terminal agent_end)?
+   2. terminal agent_end WITHOUT an exact verdict?
+        → kill process group, wait/reap
+        → result = INVALID (fail closed — never CLEAN)
+   3. process exited?
+        → first DRAIN remaining stdout+stderr and parse any final events
+          (a buffered agent_end must not be misread as a crash), THEN:
+            parseable verdict found → CLEAN | ISSUES
+            agent_end without verdict → INVALID
+            neither                  → CRASHED (stderr tail + last event)  # M4
         → wait/reap
-        → result = CRASHED (include stderr tail + last event)         # M4
-   3. not in an auto_retry window AND (now - last_event_at) > T?
-        → kill process group (TERM → grace → KILL), wait/reap
-        → result = STALLED (include last event / in-flight context)   # M1/M2
-   4. else: keep reading
+   4. inside a retry window past retry_deadline (no auto_retry_end)?
+        → kill process group, wait/reap → STALLED_RETRY
+   5. NOT in a retry window AND (now - last_event_at) > T?
+        → kill process group, wait/reap
+        → result = STALLED (last event / in-flight context)               # M1/M2
+   6. else: keep reading
    ```
 
 4. **Teardown (always)** — ensure the process group is reaped on every exit path
-   (success, crash, stall, round cap); release the lock; leave logs for inspection;
-   write `result.json`.
+   (success, invalid, crash, stall, round cap); release the lock; leave logs for
+   inspection; write `result.json`.
 
 **Reap semantics (resolves "kill without waiting" vs "must reap"):** never block
 waiting for Pi's *natural* exit (M3 means it may never come). But after taking a
 kill action, do `SIGTERM` the group → short grace → `SIGKILL` if still alive →
-`wait()` to collect status. Kill the **process group**, not the bare PID, because
-the launch is wrapped (`/bin/zsh -c …`) and Pi may have children.
+`wait()` to collect status. Always kill the **process group**, not the bare PID,
+since Pi may spawn children.
 
 **Artifacts per review** (under a per-run dir): `events.jsonl`, `stderr.log`,
 `result.json` (verdict, items, state, model, cost, timings, skipped files).
@@ -173,11 +207,20 @@ the launch is wrapped (`/bin/zsh -c …`) and Pi may have children.
   real repo.
 - **Read-only review prompt** scoped to the changed files; flag only issues
   affecting correctness or stated requirements (avoid nit floods / over-engineering).
-- **Verdict contract.** Pi must end its final message with a machine-parseable
-  verdict the harness reads from the `agent_end` transcript:
-  - `REVIEW: CLEAN` — no blocking issues, or
-  - `REVIEW: ISSUES` followed by an enumerated list (severity + file + what).
-  - **Fail closed:** no exact match → `INVALID`, never `CLEAN`.
+- **Verdict contract.** Pi must end its final message with one exact, parseable
+  block. The harness parses the **last** occurrence of a line matching
+  `^REVIEW: (CLEAN|ISSUES)$` in the `agent_end` transcript:
+  ```text
+  REVIEW: CLEAN
+  ```
+  or:
+  ```text
+  REVIEW: ISSUES
+  1. [Critical] path/file.ext: what is wrong
+  2. [Warning] path/file.ext: what is wrong
+  ```
+  - **Fail closed:** no line matching `^REVIEW: (CLEAN|ISSUES)$` → `INVALID`, never
+    `CLEAN`.
 - **Scoped clean.** If any file/diff was skipped for size, a `CLEAN` verdict means
   "clean within the provided scope," not absolute clean; the harness records the
   skipped set in `result.json` and Claude surfaces that caveat.
