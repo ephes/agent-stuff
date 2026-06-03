@@ -97,6 +97,12 @@ class _Streams:
         self.ev_f.write(line + "\n"); self.ev_f.flush()
         self.monitor.on_event(event, _now())
 
+    def close(self):
+        try:
+            self.sel.close()
+        except OSError:
+            pass
+
 
 def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                global_deadline, poll_interval=0.5, env=None):
@@ -115,6 +121,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                       retry_grace=retry_grace, global_deadline=global_deadline)
     proc = None
     pgid = None
+    streams = None
     state = CRASHED
     error = None
 
@@ -129,7 +136,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         try:
             pgid = os.getpgid(proc.pid)  # cache immediately, before any exit
         except ProcessLookupError:
-            pgid = None
+            pgid = proc.pid  # start_new_session=True guarantees pgid == pid
         streams = _Streams(proc.stdout.fileno(), proc.stderr.fileno(),
                            raw_f, ev_f, err_f, monitor)
 
@@ -158,6 +165,15 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             _kill_group(proc, pgid)
     finally:
         raw_f.close(); ev_f.close(); err_f.close()
+        if streams is not None:
+            streams.close()
+        if proc is not None:
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    if stream is not None:
+                        stream.close()
+                except OSError:
+                    pass
 
     if monitor.provider_error and not error:
         error = monitor.provider_error
@@ -168,10 +184,24 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         except OSError:
             pass
 
-    result = ReviewResult(
-        state=state, items=monitor.verdict_items, model=model, cost=None,
-        started_at=started, ended_at=_now(), error=error,
-        raw_verdict_line=monitor.verdict_text,
-    )
-    result.write(paths["result"])
+    try:
+        result = ReviewResult(
+            state=state, items=monitor.verdict_items, model=model, cost=None,
+            started_at=started, ended_at=_now(), error=error,
+            raw_verdict_line=monitor.verdict_text,
+        )
+        result.write(paths["result"])
+    except Exception:
+        # Never leave the caller without a result: degrade to a CRASHED result
+        # and best-effort write (a failed write must still not raise).
+        result = ReviewResult(
+            state=CRASHED, items=[], model=model, cost=None,
+            started_at=started, ended_at=_now(),
+            error=((error or "") + "\n" + traceback.format_exc()).strip(),
+            raw_verdict_line=None,
+        )
+        try:
+            result.write(paths["result"])
+        except OSError:
+            pass
     return result

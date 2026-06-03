@@ -5,6 +5,7 @@
   hang       -> emit one event then sleep forever (stall)
   crash      -> print a malformed line then exit 1 (no agent_end)
   posthang   -> emit a CLEAN agent_end then sleep forever (M3 exit hang)
+  provider_error -> emit a failed auto_retry then exit 1 (M2 provider give-up)
 """
 import json
 import sys
@@ -39,6 +40,11 @@ def main():
     elif mode == "posthang":
         emit(agent_end("REVIEW: CLEAN"))
         time.sleep(3600)
+    elif mode == "provider_error":
+        emit({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 1, "delayMs": 0})
+        emit({"type": "auto_retry_end", "success": False, "attempt": 1,
+              "finalError": "529 overloaded"})
+        sys.exit(1)
 
 
 if __name__ == "__main__":
