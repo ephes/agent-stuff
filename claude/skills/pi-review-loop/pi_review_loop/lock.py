@@ -45,6 +45,11 @@ def _reclaim_if_stale(lock_dir):
     """Remove the lock dir iff its recorded process group is dead. Returns True
     if it reclaimed (or the dir vanished)."""
     meta = read_meta(lock_dir)
+    # Fail closed: a lock dir with no readable metadata may belong to a holder
+    # that created the dir microseconds before writing meta. Treat it as held,
+    # never reclaim it — reclaiming could double-hold the lock.
+    if not meta:
+        return False
     if _group_alive(meta.get("pi_pgid")):
         return False
     # Group is gone: best-effort kill (tolerate ESRCH) then remove the dir.
@@ -76,7 +81,10 @@ class Lock:
         except FileExistsError:
             if not _reclaim_if_stale(self.lock_dir):
                 raise LockHeld(f"review lock held: {self.lock_dir}")
-            os.mkdir(self.lock_dir)  # may raise FileExistsError if a real race; let it propagate
+            try:
+                os.mkdir(self.lock_dir)
+            except FileExistsError:
+                raise LockHeld(f"review lock held (lost reclaim race): {self.lock_dir}")
         write_meta(self.lock_dir, self.meta)
         return self
 

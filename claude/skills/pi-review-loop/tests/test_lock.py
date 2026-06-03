@@ -36,6 +36,25 @@ class TestLock(unittest.TestCase):
         with lock.Lock(self.lock_dir, {"pi_pgid": -1}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 
+    def test_does_not_reclaim_lock_with_missing_meta(self):
+        # No meta.json => treat as held (fail closed), do not reclaim.
+        os.mkdir(self.lock_dir)
+        with self.assertRaises(lock.LockHeld):
+            with lock.Lock(self.lock_dir, {"pi_pgid": -1}):
+                pass
+
+    def test_read_meta_returns_empty_on_corrupt_json(self):
+        os.mkdir(self.lock_dir)
+        with open(os.path.join(self.lock_dir, lock.META_NAME), "w") as fh:
+            fh.write("{not json")
+        self.assertEqual(lock.read_meta(self.lock_dir), {})
+
+    def test_exit_tolerates_externally_removed_dir(self):
+        import shutil
+        with lock.Lock(self.lock_dir, {"pi_pgid": -1}):
+            shutil.rmtree(self.lock_dir)  # vanished mid-context
+        # __exit__ must not raise
+
 
 if __name__ == "__main__":
     unittest.main()
