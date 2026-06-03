@@ -303,3 +303,34 @@ Project-specific execution lessons belong in the project repo, not here.
   verify it with `fish -lc 'type claude-yolo'` / `fish -lc 'type codex-yolo'`
   before falling back to raw CLIs.
 - Status: documented in podcast `AGENTS.md`.
+
+## 2026-06-03 - Pi Review Loop Skill Built And Live-Verified
+
+- Repo: agent-stuff (new skill `claude/skills/pi-review-loop/`).
+- Goal or slice: a Claude-driven, observable Pi review loop replacing ad-hoc and
+  tmux reviewer invocation; built subagent-driven from a reviewed spec + plan.
+- Implementer: Claude / Opus 4.8 controller + Sonnet implementer subagents.
+- Reviewer: two-stage spec-compliance + code-quality review subagents per task.
+- Expected: a pure-stdlib foreground harness that drives Pi as a reviewer over its
+  `--mode json` event stream and can never hang invisibly.
+- Actual (live smoke against real `pi` / gpt-5.5):
+  - Happy path works end to end: model resolved from the real `pi --list-models`,
+    bundle built, Pi spawned in its own process group, `agent_end` detected,
+    verdict extracted from the final assistant message (`REVIEW: CLEAN`), clean
+    teardown, exit 0 in ~5s. The 221 `thinking` blocks were correctly skipped.
+  - M2 (provider block) reproduced in the wild after ~10 rapid `pi` calls: Pi
+    produced zero output on both streams; the harness correctly STALLED at the
+    timeout, killed the process group, left no orphan, wrote `result.json`, exit 2.
+- Impact: validated for both the success and the M2-stall paths on the real
+  provider, not just against the fake.
+- Fix or follow-up: two bugs unit tests could not catch were found and fixed during
+  the smoke — (1) `pi --list-models` prints a whitespace TABLE (separate
+  provider/model columns) to STDERR, not `provider/model` tokens to stdout, so the
+  resolver was silently returning the fallback; (2) the bundle carried only the diff
+  with no reviewer instruction, so Pi was never told to emit the `REVIEW:` verdict —
+  now supplied via `--append-system-prompt`. The lock keys on the harness PID rather
+  than the Pi PGID (documented deviation). The ISSUES verdict path is exercised by
+  `fake_pi` unit tests; the trivial real sample returned CLEAN.
+- Status: built, reviewed, live-verified; pending chezmoi install + SKILL.md.
+- Safety: summary-safe metrics only; no prompts, transcript bodies, tool output,
+  secrets, or sensitive personal data.
