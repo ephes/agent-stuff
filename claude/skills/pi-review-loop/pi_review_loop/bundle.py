@@ -45,29 +45,34 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
             unstaged = _truncate(unstaged, max_diff_bytes_per_file, "unstaged diff", truncations)
             sections.append((1, "Unstaged diff", unstaged))
 
-    # Untracked files (porcelain '??'); renamed/deleted noted via name-status.
-    porcelain = _git(repo, "status", "--porcelain")
+    # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
+    # surrounding quotes git adds for names with spaces.
+    porcelain = _git(repo, "-c", "core.quotePath=false", "status", "--porcelain")
     untracked_bodies, notes = [], []
     for line in porcelain.splitlines():
-        code, path = line[:2], line[3:]
-        if code == "??":
-            full = os.path.join(repo, path)
-            try:
-                size = os.path.getsize(full)
-            except OSError:
-                continue
-            if size > max_file_size:
-                skipped.append({"path": path, "reason": "size", "size": size})
-                continue
-            try:
-                with open(full, "rb") as fh:
-                    raw = fh.read()
-                if b"\x00" in raw:
-                    notes.append(f"- {path}: untracked BINARY (omitted)")
-                    continue
-                untracked_bodies.append(f"### {path}\n```\n{raw.decode(errors='replace')}\n```")
-            except OSError:
-                continue
+        code, raw_path = line[:2], line[3:]
+        if code != "??":
+            continue
+        path = raw_path[1:-1] if raw_path.startswith('"') and raw_path.endswith('"') else raw_path
+        full = os.path.join(repo, path)
+        try:
+            size = os.path.getsize(full)
+        except OSError:
+            skipped.append({"path": path, "reason": "unreadable"})  # never silent
+            continue
+        if size > max_file_size:
+            skipped.append({"path": path, "reason": "size", "size": size})
+            continue
+        try:
+            with open(full, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            skipped.append({"path": path, "reason": "unreadable"})
+            continue
+        if b"\x00" in raw:
+            notes.append(f"- {path}: untracked BINARY (omitted)")
+            continue
+        untracked_bodies.append(f"### {path}\n```\n{raw.decode(errors='replace')}\n```")
     name_status = _git(repo, "diff", "--name-status", "HEAD")
     for line in name_status.splitlines():
         tag = line.split("\t", 1)[0]
@@ -91,12 +96,19 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         for _, title, body in secs:
             parts.append(f"\n## {title}\n\n{body}\n")
         if skipped:
-            parts.append("\n## Skipped for size\n\n" +
-                         "\n".join(f"- {s['path']} ({s['size']} bytes)" for s in skipped) + "\n")
+            lines_ = []
+            for s in skipped:
+                detail = s.get("reason", "skipped")
+                if "size" in s:
+                    detail += f", {s['size']} bytes"
+                lines_.append(f"- {s['path']} ({detail})")
+            parts.append("\n## Skipped files\n\n" + "\n".join(lines_) + "\n")
         return "".join(parts)
 
     secs = sorted(sections, key=lambda s: s[0])
     text = render(secs)
+    # Stop at 1 section: Diffstat is always kept even if still over cap — better
+    # an over-cap bundle than a silently empty one. Never lower this to >= 1.
     while len(text.encode()) > max_bundle_bytes and len(secs) > 1:
         dropped = secs.pop()  # highest priority number = lowest importance
         truncations.append({"section": dropped[1], "dropped": True})

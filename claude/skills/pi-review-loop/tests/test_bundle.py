@@ -36,7 +36,8 @@ class TestBundle(unittest.TestCase):
         with open(os.path.join(self.repo, "a.py"), "w") as fh:
             fh.write("print('two')\n")
         res = self._build()
-        text = open(res.path).read()
+        with open(res.path) as fh:
+            text = fh.read()
         self.assertIn("two", text)
         self.assertIn("diffstat", text.lower())
 
@@ -44,7 +45,8 @@ class TestBundle(unittest.TestCase):
         with open(os.path.join(self.repo, "new.py"), "w") as fh:
             fh.write("NEW_MARKER = 1\n")
         res = self._build()
-        self.assertIn("NEW_MARKER", open(res.path).read())
+        with open(res.path) as fh:
+            self.assertIn("NEW_MARKER", fh.read())
 
     def test_oversized_file_is_skipped_not_inlined(self):
         big = "x" * 5000
@@ -52,13 +54,39 @@ class TestBundle(unittest.TestCase):
             fh.write(big + "\n")
         res = self._build(max_file_size=1000)
         self.assertTrue(any(s["path"] == "big.txt" for s in res.skipped_files))
-        self.assertNotIn(big, open(res.path).read())
+        with open(res.path) as fh:
+            self.assertNotIn(big, fh.read())
 
     def test_per_file_diff_truncated(self):
         with open(os.path.join(self.repo, "a.py"), "w") as fh:
             fh.write("\n".join(f"line{i}" for i in range(2000)) + "\n")
         res = self._build(max_diff_bytes_per_file=500)
         self.assertTrue(res.truncations)
+
+    def test_untracked_file_with_space_in_name_included(self):
+        with open(os.path.join(self.repo, "with space.py"), "w") as fh:
+            fh.write("SPACED_MARKER = 1\n")
+        res = self._build()
+        with open(res.path) as fh:
+            self.assertIn("SPACED_MARKER", fh.read())
+
+    def test_staged_diff_included(self):
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("print('staged change')\n")
+        git(self.repo, "add", "a.py")
+        res = self._build()
+        with open(res.path) as fh:
+            text = fh.read()
+        self.assertIn("staged change", text)
+        self.assertIn("Staged diff", text)
+
+    def test_whole_bundle_cap_drops_low_priority_section(self):
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("print('changed')\n")
+        with open(os.path.join(self.repo, "extra.py"), "w") as fh:
+            fh.write("X = 1\n" * 200)
+        res = self._build(max_bundle_bytes=200)
+        self.assertTrue(any(t.get("dropped") for t in res.truncations))
 
 
 if __name__ == "__main__":
