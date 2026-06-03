@@ -41,24 +41,21 @@ def _group_alive(pgid):
         return e.errno != errno.ESRCH
 
 
-def _reclaim_if_stale(lock_dir):
-    """Remove the lock dir iff its recorded process group is dead. Returns True
-    if it reclaimed (or the dir vanished)."""
-    meta = read_meta(lock_dir)
-    # Fail closed: a lock dir with no readable metadata may belong to a holder
-    # that created the dir microseconds before writing meta. Treat it as held,
-    # never reclaim it — reclaiming could double-hold the lock.
-    if not meta:
+def pid_alive(pid):
+    if not pid or pid <= 1:
         return False
-    if _group_alive(meta.get("pi_pgid")):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
         return False
-    # Group is gone: best-effort kill (tolerate ESRCH) then remove the dir.
-    pgid = meta.get("pi_pgid")
-    if pgid and pgid > 1:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+    except PermissionError:
+        return True
+    except OSError as e:
+        return e.errno != errno.ESRCH
+
+
+def _remove_lock_dir(lock_dir):
     try:
         os.remove(os.path.join(lock_dir, META_NAME))
     except OSError:
@@ -67,6 +64,38 @@ def _reclaim_if_stale(lock_dir):
         os.rmdir(lock_dir)
     except OSError:
         pass
+
+
+def _reclaim_if_stale(lock_dir):
+    """Remove the lock dir iff its holder is provably gone. Reuse-safe and
+    fail-closed: never reclaim a lock with no readable metadata."""
+    meta = read_meta(lock_dir)
+    # Fail closed: a lock dir with no readable metadata may belong to a holder
+    # that created the dir microseconds before writing meta. Treat it as held.
+    if not meta:
+        return False
+    # The CLI holds the lock keyed on its own (harness) PID; the runner owns the
+    # Pi process. Prefer harness liveness when recorded.
+    if "harness_pid" in meta:
+        if pid_alive(meta.get("harness_pid")):
+            return False
+        pgid = meta.get("pi_pgid")  # kill an orphaned Pi group if one was recorded
+        if pgid and pgid > 1:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        _remove_lock_dir(lock_dir)
+        return True
+    if _group_alive(meta.get("pi_pgid")):
+        return False
+    pgid = meta.get("pi_pgid")
+    if pgid and pgid > 1:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    _remove_lock_dir(lock_dir)
     return True
 
 
