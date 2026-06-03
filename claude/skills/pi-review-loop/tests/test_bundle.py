@@ -95,6 +95,15 @@ class TestBundle(unittest.TestCase):
         self.assertTrue(any(s["path"] == "blob.bin" and s["reason"] == "binary"
                             for s in res.skipped_files))
 
+    def test_per_file_truncation_records_path_with_spaces(self):
+        fname = "with space.py"
+        with open(os.path.join(self.repo, fname), "w") as fh:
+            fh.write("\n".join(f"line{i}" for i in range(2000)) + "\n")
+        git(self.repo, "add", fname)
+        res = self._build(max_diff_bytes_per_file=400)
+        paths = [t.get("path") for t in res.truncations]
+        self.assertIn(fname, paths, paths)
+
     def test_per_file_diff_truncation_keeps_other_files(self):
         # two changed tracked files; cap small enough to truncate the big one
         # but keep the small one fully.

@@ -19,6 +19,20 @@ def _git(repo, *args):
                           capture_output=True, text=True).stdout
 
 
+def _diff_chunk_path(chunk):
+    """Extract the file path from a single diff chunk. The `diff --git a/X b/X`
+    header is ambiguous for paths with spaces, so prefer the `+++ b/<path>` /
+    `--- a/<path>` lines, whose path runs to end of line. Strips git's quoting
+    if present. Falls back to the header's first token, then '?'."""
+    for pat in (r"^\+\+\+ b/(.+)$", r"^--- a/(.+)$"):
+        m = re.search(pat, chunk, re.M)
+        if m:
+            p = m.group(1).rstrip()
+            return p[1:-1] if p.startswith('"') and p.endswith('"') else p
+    m = re.match(r"diff --git a/(\S+)", chunk)
+    return m.group(1) if m else "?"
+
+
 def _truncate_diff_per_file(diff_text, limit, label, truncations):
     """Split a unified diff into per-file chunks and truncate EACH chunk over
     `limit`, recording the path of every truncated file. This guarantees a
@@ -31,8 +45,7 @@ def _truncate_diff_per_file(diff_text, limit, label, truncations):
         if not chunk:
             continue
         if len(chunk.encode()) > limit:
-            m = re.match(r"diff --git a/(\S+)", chunk)
-            path = m.group(1) if m else "?"
+            path = _diff_chunk_path(chunk)
             cut = chunk.encode()[:limit].decode(errors="ignore")
             truncations.append({"section": label, "path": path,
                                 "kept_bytes": len(cut.encode())})
