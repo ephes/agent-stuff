@@ -36,6 +36,21 @@ class TestLock(unittest.TestCase):
         with lock.Lock(self.lock_dir, {"pi_pgid": -1}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 
+    def test_does_not_reclaim_live_harness_pid(self):
+        os.mkdir(self.lock_dir)
+        lock.write_meta(self.lock_dir, {"harness_pid": os.getpid(),
+                                        "command": "pi-review-loop"})
+        with self.assertRaises(lock.LockHeld):
+            with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
+                pass
+
+    def test_reclaims_dead_harness_pid(self):
+        os.mkdir(self.lock_dir)
+        lock.write_meta(self.lock_dir, {"harness_pid": 2_000_000_000,
+                                        "command": "pi-review-loop"})
+        with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
+            self.assertTrue(os.path.isdir(self.lock_dir))
+
     def test_does_not_reclaim_lock_with_missing_meta(self):
         # No meta.json => treat as held (fail closed), do not reclaim.
         os.mkdir(self.lock_dir)

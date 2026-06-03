@@ -2,6 +2,7 @@
 import argparse
 import os
 import shlex
+import subprocess
 import sys
 
 from . import bundle as bundle_mod
@@ -50,13 +51,19 @@ def main(argv=None):
 
     model = args.model or model_mod.resolve_from_cli()
     bundle_path = os.path.join(args.run_dir, "review-bundle.md")
-    b = bundle_mod.build_bundle(
-        args.repo, bundle_path,
-        max_file_size=args.max_file_size,
-        max_diff_bytes_per_file=args.max_diff_bytes_per_file,
-        max_bundle_bytes=args.max_bundle_bytes,
-        staged_only=args.staged_only,
-    )
+    try:
+        b = bundle_mod.build_bundle(
+            args.repo, bundle_path,
+            max_file_size=args.max_file_size,
+            max_diff_bytes_per_file=args.max_diff_bytes_per_file,
+            max_bundle_bytes=args.max_bundle_bytes,
+            staged_only=args.staged_only,
+        )
+    except subprocess.CalledProcessError as e:
+        err = e.stderr if isinstance(e.stderr, str) else (e.stderr or b"").decode(errors="replace")
+        print(f"pi-review-loop: git error building bundle: {(err or '').strip()}",
+              file=sys.stderr)
+        return 2
 
     meta = {"harness_pid": os.getpid(), "cwd": os.path.abspath(args.repo),
             "command": "pi-review-loop", "model": model, "run_dir": args.run_dir}
@@ -82,6 +89,5 @@ def main(argv=None):
     for it in result.items:
         print(f"  - [{it['severity']}] {it['path']}: {it['message']}")
     if result.error and result.state in FAILED:
-        print(f"  error: {result.error.splitlines()[-1] if result.error else ''}",
-              file=sys.stderr)
+        print(f"  error: {result.error.splitlines()[-1]}", file=sys.stderr)
     return EXIT_BY_STATE.get(result.state, 2)
