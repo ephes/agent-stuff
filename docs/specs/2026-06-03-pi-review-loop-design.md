@@ -1,6 +1,6 @@
 # Pi Review Loop — Design Spec
 
-Status: draft for review (revised after review round 1)
+Status: draft for review (revised after review round 3)
 Date: 2026-06-03
 Skill location: `claude/skills/pi-review-loop/` (a Claude Code skill)
 
@@ -92,11 +92,15 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
   (`mkdir`- or `flock`-based, not a bare PID file), **global per user** because the
   protected resource is the shared provider API (the M2 root cause), not a per-repo
   resource. Lock metadata records: harness PID, Pi PID, **Pi PGID**, cwd,
-  started-at, command/model, and run dir. Stale reclaim (after identity checks)
-  kills the old **process group** so an orphaned Pi from a dead harness is cleaned up.
-- **Completion:** parse the verdict from the terminal `agent_end` event; if it does
-  not contain an exact `REVIEW: CLEAN` / `REVIEW: ISSUES` verdict, the review is
-  **invalid** (fail closed), never treated as clean.
+  started-at, command/model, and run dir. Stale reclaim must guard against PID/PGID
+  **reuse**: before killing an old group, verify identity — recorded command/model
+  match, cwd/run-dir match, and start-time match where available — and tolerate
+  `ESRCH` (group already gone). Only then `killpg` the old **process group**.
+- **Completion:** parse the verdict from the **final assistant message** in the
+  terminal `agent_end` event — never from the whole transcript (the transcript
+  echoes the user prompt/bundle, which contains verdict *examples*; scanning it
+  would let prompt text masquerade as a verdict). If the final assistant text has no
+  exact verdict, the review is **invalid** (fail closed), never treated as clean.
 
 ## Verified Pi JSON event schema
 
@@ -147,9 +151,11 @@ The harness:
 2. **Spawn** Pi directly in its **own session/process group**, e.g.
    `subprocess.Popen([...], start_new_session=True, stdout=PIPE, stderr=PIPE)` — no
    `/bin/zsh -c` wrapper (shell wrapping reintroduces quoting bugs and process-tree
-   ambiguity). Kill via `os.killpg(os.getpgid(proc.pid), SIG…)`. Initialize
-   `last_event_at` at spawn time (not at first event), so a Pi that emits nothing is
-   still subject to the stall timer.
+   ambiguity). **Cache the PGID immediately after spawn** (`os.getpgid(proc.pid)`);
+   do not call `getpgid` late, after exit, when the PID may be gone. Kill via
+   `os.killpg(cached_pgid, SIG…)`, tolerating `ESRCH`. Initialize `last_event_at`
+   and the `global_deadline` at spawn time (not at first event), so a Pi that emits
+   nothing is still subject to both timers.
 3. **Monitor** — the loop must **never block on `readline()`**: M1/M2 are precisely
    "no new line arrives," so a blocking `for line in proc.stdout` would never reach
    the stall/liveness checks. Use non-blocking pipe reads (`selectors`/`select`) or
@@ -167,18 +173,23 @@ The harness:
         → kill process group, wait/reap
         → result = INVALID (fail closed — never CLEAN)
    3. process exited?
-        → first DRAIN remaining stdout+stderr and parse any final events
-          (a buffered agent_end must not be misread as a crash), THEN:
-            parseable verdict found → CLEAN | ISSUES
-            agent_end without verdict → INVALID
-            neither                  → CRASHED (stderr tail + last event)  # M4
+        → first do a SHORT, BOUNDED, NONBLOCKING drain of available stdout+stderr
+          (a child may hold the pipe open, so the drain must not block forever),
+          parse any final complete lines AND any valid final unterminated line
+          (nonblocking assembly often leaves a buffered last object when the process
+          exits without a trailing newline), THEN:
+            parseable verdict in final assistant text → CLEAN | ISSUES
+            agent_end without verdict                 → INVALID
+            neither                                   → CRASHED (stderr tail + last event)  # M4
         → wait/reap
-   4. inside a retry window past retry_deadline (no auto_retry_end)?
+   4. now > global_deadline (never suspended, even during retries)?
+        → kill process group, wait/reap → STALLED (hit wall-clock cap)
+   5. inside a retry window past retry_deadline (no auto_retry_end)?
         → kill process group, wait/reap → STALLED_RETRY
-   5. NOT in a retry window AND (now - last_event_at) > T?
+   6. NOT in a retry window AND (now - last_event_at) > T?
         → kill process group, wait/reap
         → result = STALLED (last event / in-flight context)               # M1/M2
-   6. else: keep reading
+   7. else: keep reading
    ```
 
 4. **Teardown (always)** — ensure the process group is reaped on every exit path
@@ -197,19 +208,31 @@ since Pi may spawn children.
 ## Scope, tools, and the verdict contract
 
 - **Default `--no-tools` + curated bundle.** The harness feeds Pi a bounded review
-  bundle: diffstat, changed paths, the diffs, relevant doc/code excerpts, and an
-  explicit list of files skipped for size. Because Pi has no `read`/`grep`/`find`/
-  `ls`, it **cannot independently slurp a huge file**, which eliminates M1 at the
-  source. (A size number alone does not: with tools, Pi could still open the
-  skipped file.)
+  bundle. Because Pi has no `read`/`grep`/`find`/`ls`, it **cannot independently
+  slurp a huge file**, which eliminates M1 at the source. (A size number alone does
+  not: with tools, Pi could still open the skipped file.) Since review quality now
+  depends entirely on the bundle, the bundle's git contract is explicit:
+  - **diffstat** + list of changed paths,
+  - **staged diff** and **unstaged diff** (configurable to staged-only),
+  - **untracked files** (contents, subject to the size cap),
+  - **renamed/deleted** files noted as such,
+  - **binary files** noted explicitly (path + status, no content),
+  - **generated/build artifacts** skipped explicitly (per ignore rules), listed as skipped,
+  - **submodules** summarized (pointer change) or skipped with a caveat,
+  - relevant `AGENTS.md`/doc/code excerpts (since `--no-context-files` is set),
+  - an explicit **skipped-for-size** list.
+  A deterministic-but-incomplete bundle is a review-quality bug, so omissions are
+  surfaced, not silent.
 - **If tools are needed later**, allow only `--tools read,grep,find,ls`, ideally
   with Pi running in a sanitized temp directory containing just the bundle, not the
   real repo.
 - **Read-only review prompt** scoped to the changed files; flag only issues
   affecting correctness or stated requirements (avoid nit floods / over-engineering).
 - **Verdict contract.** Pi must end its final message with one exact, parseable
-  block. The harness parses the **last** occurrence of a line matching
-  `^REVIEW: (CLEAN|ISSUES)$` in the `agent_end` transcript:
+  block. The harness extracts **only the final assistant message text** from
+  `agent_end.messages[]` (never the whole transcript — the echoed bundle contains
+  these very examples) and parses the **last** line matching
+  `^REVIEW: (CLEAN|ISSUES)$` within it:
   ```text
   REVIEW: CLEAN
   ```
@@ -219,8 +242,11 @@ since Pi may spawn children.
   1. [Critical] path/file.ext: what is wrong
   2. [Warning] path/file.ext: what is wrong
   ```
-  - **Fail closed:** no line matching `^REVIEW: (CLEAN|ISSUES)$` → `INVALID`, never
-    `CLEAN`.
+  - Allowed severities: **`Critical`**, **`Warning`**, **`Suggestion`**.
+  - **Fail closed:**
+    - no `^REVIEW: (CLEAN|ISSUES)$` line in the final assistant text → `INVALID`;
+    - `REVIEW: ISSUES` with **zero** parseable numbered items → `INVALID`
+      (an issues verdict must enumerate at least one item).
 - **Scoped clean.** If any file/diff was skipped for size, a `CLEAN` verdict means
   "clean within the provided scope," not absolute clean; the harness records the
   skipped set in `result.json` and Claude surfaces that caveat.
@@ -231,13 +257,15 @@ since Pi may spawn children.
 
 ## Tunable defaults
 
-| Knob | Default | Rationale |
-|------|---------|-----------|
-| Stall timeout `T` | 180s since last event (outside retry windows) | gpt-5.5 can pause between events; lower risks false kills. |
-| File size cap | 256 KB | Larger files are excluded from the bundle + listed as skipped. |
-| Max rounds `N` | 3 | Then stop and report unresolved items rather than loop forever. |
+| Knob | Override | Default | Rationale |
+|------|----------|---------|-----------|
+| Stall timeout `T` | `--stall-timeout` | 180s since last event (outside retry windows) | gpt-5.5 can pause between events; lower risks false kills. |
+| Retry grace | `--retry-grace` | 30s | Slack added to `delayMs` before a retry window counts as `STALLED_RETRY`. |
+| Per-review deadline `global_deadline` | `--review-deadline` | 1500s (25m) | Hard wall-clock cap per review; **never suspended**, even during retries. Backstops every timer. |
+| File size cap | `--max-file-size` | 256 KB | Larger files are excluded from the bundle + listed as skipped. |
+| Max rounds `N` | `--max-rounds` | 3 | Then stop and report unresolved items rather than loop forever. |
 
-All three are overridable as skill arguments.
+All are overridable as skill arguments.
 
 ## Non-goals
 
