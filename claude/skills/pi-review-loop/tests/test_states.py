@@ -11,7 +11,16 @@ class TestStates(unittest.TestCase):
         self.assertIn(states.INVALID, states.FAILED)
 
     def test_all_contains_every_state(self):
-        self.assertEqual(len(states.ALL), 7)
+        self.assertEqual(
+            states.ALL,
+            {states.CLEAN, states.ISSUES, states.INVALID, states.CRASHED,
+             states.STALLED, states.STALLED_RETRY, states.PROVIDER_ERROR},
+        )
+
+    def test_all_error_states_are_failed(self):
+        for s in (states.INVALID, states.CRASHED, states.STALLED,
+                  states.STALLED_RETRY, states.PROVIDER_ERROR):
+            self.assertIn(s, states.FAILED)
 
 
 if __name__ == "__main__":

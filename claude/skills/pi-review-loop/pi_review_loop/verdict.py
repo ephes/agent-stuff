@@ -15,7 +15,8 @@ _ITEM_RE = re.compile(
 
 def extract_final_assistant_text(agent_end_event):
     """Return the concatenated text-block content of the last assistant message,
-    or None if there is no assistant message."""
+    or None if there is no assistant message. Returns an empty string if the
+    last assistant message has no text-type blocks."""
     messages = agent_end_event.get("messages") or []
     last = None
     for msg in messages:

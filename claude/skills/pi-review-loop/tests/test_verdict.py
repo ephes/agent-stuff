@@ -54,6 +54,11 @@ class TestParseVerdict(unittest.TestCase):
         text = "quoting: REVIEW: CLEAN\n...\nREVIEW: ISSUES\n1. [Suggestion] x.py: tidy"
         self.assertEqual(verdict.parse_verdict(text)[0], ISSUES)
 
+    def test_takes_last_of_two_matching_verdict_lines(self):
+        # Two genuinely-anchored ^REVIEW: lines — the last one wins.
+        text = "REVIEW: CLEAN\nanalysis text\nREVIEW: ISSUES\n1. [Warning] x.py: bad"
+        self.assertEqual(verdict.parse_verdict(text)[0], ISSUES)
+
     def test_unknown_severity_item_is_ignored(self):
         self.assertEqual(verdict.parse_verdict("REVIEW: ISSUES\n1. [Bogus] x: y")[0], INVALID)
 
