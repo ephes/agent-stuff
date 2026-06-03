@@ -120,9 +120,10 @@ Documented event `type`s (Pi RPC/JSON docs) include: `agent_start`, `agent_end`,
 
 Implications for parsing:
 
-- **`agent_end`** is terminal and carries the full final `messages[]` array. The
-  last `assistant` message's `text` content is the verdict — extract it directly,
-  no delta reassembly. Example: `jq -c 'select(.type=="agent_end")'`.
+- **`agent_end`** is terminal and carries the full final `messages[]` array — so no
+  delta reassembly is needed. The verdict comes from the **last `assistant` message**
+  only (see the verdict contract for the exact content-block extraction shape), not
+  the whole `messages[]` array. Example: `jq -c 'select(.type=="agent_end")'`.
 - **Retries:** `auto_retry_start` = `{attempt, maxAttempts, delayMs, errorMessage}`;
   `auto_retry_end` = `{success, attempt, finalError?}`. While inside a retry window
   the harness **suspends the stall timer** — but with a bound, so a retry that never
