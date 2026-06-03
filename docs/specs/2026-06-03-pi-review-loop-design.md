@@ -77,8 +77,12 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
   ```
   pi --mode json --no-session --no-tools \
      --no-extensions --no-skills --no-prompt-templates --no-context-files \
+     --append-system-prompt <reviewer instruction + verdict contract> \
      --model <provider/gpt> @<run-dir>/review-bundle.md
   ```
+  The bundle (`@file`) carries only the diff/data; the reviewer role and the exact
+  `REVIEW:` verdict contract are delivered via `--append-system-prompt` (live
+  verification showed Pi emits no verdict without it).
   - `--mode json` is already non-interactive and exits cleanly (verified both with
     and without `-p`), so `-p` is dropped as redundant.
   - `--no-session` so killing the process after `agent_end` cannot corrupt session state.
@@ -313,17 +317,28 @@ All are overridable as skill arguments.
   later need interactive multi-prompt control of a single session.
 - Does not run concurrent reviews.
 
-## To verify during implementation
+## Verification results & implementation deltas (post-build)
 
-- `pi --list-models gpt` output format, for robust "newest GPT" selection.
-- That `auto_retry_start`/`_end` actually bracket provider backoffs in practice, so
-  the stall-timer suspension behaves (induce a transient error if feasible).
-- Process-group kill/reap on macOS (`setsid`/new pgid at spawn; `kill -- -pgid`).
-- A real review smoke against a small diff: end-to-end verdict extraction, the
-  `INVALID` fail-closed path, and the scoped-clean caveat.
-- Pi's exit code on exhausted backoff / provider error (M4): capture it on the
-  process-exit path so a CRASHED round reports *why*, not just *that*, it died.
-- **Startup network noise:** resolved — set `PI_SKIP_VERSION_CHECK=1` +
-  `PI_TELEMETRY=0` (Pi README). During implementation, just sanity-check that with
-  these set a normal review still reaches the provider (i.e. they did not
-  accidentally suppress the model call).
+Built subagent-driven (2026-06-03); 67 stdlib `unittest` tests; live-verified
+against real `pi` / gpt-5.5. See `docs/review-cycle-log.md` for the smoke record.
+Deltas from the design above, all discovered/confirmed during build + live smoke:
+
+- **`pi --list-models` format (resolved):** it prints a whitespace **table**
+  (`provider  model  context …`) to **stderr**, not `provider/model` tokens to
+  stdout. `model.resolve_model` parses both the table and the slash form;
+  `resolve_from_cli` reads stdout+stderr. Live: resolves `openai-codex/gpt-5.5`.
+- **Reviewer instruction (resolved):** the bundle is diff-only, so Pi emits no
+  verdict from it alone. The reviewer role + `REVIEW:` contract are passed via
+  `--append-system-prompt`. Live: returns a parseable `REVIEW: CLEAN`.
+- **Lock identity (delta):** the CLI holds the lock keyed on the **harness PID**
+  (the runner owns the Pi process), and reclaim is **fail-closed** — a lock with no
+  readable meta is treated as held, never reclaimed.
+- **Startup network noise (resolved):** `PI_SKIP_VERSION_CHECK=1` + `PI_TELEMETRY=0`
+  set on the subprocess (Pi README); the model call still reaches the provider.
+- **M2 confirmed live:** after ~10 rapid `pi` calls the provider blocked, producing
+  zero output on both streams; the harness STALLED at the timeout, killed the
+  process group, left no orphan, and exited 2 — the watchdog working in the wild.
+- **Still open (low risk):** `auto_retry_*` bracketing and the `STALLED_RETRY` path
+  are unit-tested (fake events) but not yet observed against a real provider backoff;
+  process-group kill/reap verified on macOS via the runner tests + live no-orphan
+  checks.
