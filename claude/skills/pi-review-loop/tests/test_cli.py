@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(SKILL_ROOT, "tests", "fake_pi.py")
@@ -78,6 +79,29 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2, proc.stdout)
         self.assertNotIn("Traceback", proc.stderr)
+
+
+class TestPiCmd(unittest.TestCase):
+    def test_real_pi_cmd_includes_review_instruction(self):
+        from pi_review_loop import cli
+        env = {k: v for k, v in os.environ.items() if k != "PI_REVIEW_FAKE_CMD"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            cmd = cli._pi_cmd("openai-codex/gpt-5.5", "/tmp/bundle.md")
+        self.assertEqual(cmd[0], "pi")
+        self.assertIn("--mode", cmd)
+        self.assertIn("--no-tools", cmd)
+        self.assertIn("@/tmp/bundle.md", cmd)
+        self.assertIn("--append-system-prompt", cmd)
+        i = cmd.index("--append-system-prompt")
+        instruction = cmd[i + 1]
+        self.assertIn("REVIEW: CLEAN", instruction)
+        self.assertIn("REVIEW: ISSUES", instruction)
+        self.assertIn("code reviewer", instruction)
+
+    def test_fake_cmd_seam_used_when_env_set(self):
+        from pi_review_loop import cli
+        with mock.patch.dict(os.environ, {"PI_REVIEW_FAKE_CMD": "echo hi there"}, clear=False):
+            self.assertEqual(cli._pi_cmd("m", "/x/b.md"), ["echo", "hi", "there"])
 
 
 if __name__ == "__main__":

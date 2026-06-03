@@ -11,6 +11,23 @@ from .lock import Lock, LockHeld
 from .runner import run_review
 from .states import CLEAN, ISSUES, FAILED
 
+REVIEW_INSTRUCTION = """\
+You are a code reviewer. Review ONLY the changes in the provided review bundle \
+(diffs and any included file contents) for issues that affect correctness or \
+stated requirements. You cannot edit files; respond with findings only. Do not \
+flag pure style nits unless they affect correctness.
+
+End your reply with EXACTLY one verdict block on its own lines. If there are no \
+blocking issues:
+REVIEW: CLEAN
+Otherwise:
+REVIEW: ISSUES
+1. [Critical] path/to/file: what is wrong and why
+2. [Warning] path/to/file: ...
+Use only the severities Critical, Warning, or Suggestion. The reviewer harness \
+parses the final line matching '^REVIEW: (CLEAN|ISSUES)$' as the verdict, so it \
+must appear verbatim and last."""
+
 EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
 
 
@@ -40,7 +57,8 @@ def _pi_cmd(model, bundle_path):
     return [
         "pi", "--mode", "json", "--no-session", "--no-tools",
         "--no-extensions", "--no-skills", "--no-prompt-templates",
-        "--no-context-files", "--model", model, f"@{bundle_path}",
+        "--no-context-files", "--append-system-prompt", REVIEW_INSTRUCTION,
+        "--model", model, f"@{bundle_path}",
     ]
 
 
