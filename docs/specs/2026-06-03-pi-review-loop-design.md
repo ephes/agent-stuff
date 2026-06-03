@@ -17,21 +17,28 @@ bytes whether Pi is thinking, blocked, or dead. The driving Claude session
 confidently reports "still working" while a session lingers (one ran 44 minutes).
 Nothing self-terminates.
 
-## The three confirmed "stuck" shapes
+## The four confirmed "stuck" shapes
 
-All three were observed in real sessions (llm-benchpacks, podcast), not
-hypothesized:
+All four were observed in real sessions (llm-benchpacks, podcast, django-cast),
+not hypothesized:
 
 1. **M1 — Mid-run resource choke.** Pi tries to read a huge file in the inspected
    directory (a 425 MB transcript). Real CPU/IO-bound hang; no progress.
 2. **M2 — Remote API block.** Pi is alive at ~0% CPU, blocked on the remote
-   `gpt-5.5` API. With `--print` the log is 0 bytes — a pure mystery. Worsened by
+   model API. With `--print` the log is 0 bytes — a pure mystery. Worsened by
    concurrent Pi sessions hammering the same API.
 3. **M3 — Post-completion exit hang.** Pi *finishes* the review and writes its full
    verdict, then hangs on process exit in non-interactive mode. A driver waiting on
    process exit (or on `--print` to flush) waits forever on a review that is
-   actually **done**. This is the subtle one and the most dangerous: the work
-   succeeded, but the naive signal (process alive) reads as failure.
+   actually **done**. The work succeeded, but the naive signal (process alive)
+   reads as failure.
+4. **M4 — Abnormal exit with no output.** Pi exits or is killed (rate-limit backoff
+   exhausted, provider error, or the harness auto-backgrounding the process) leaving
+   a **0-byte file and no `agent_end`**. The process is *gone* but a content-only
+   watcher (`until [ -s file ] && grep VERDICT …`) waits **forever** because it
+   never checks whether the PID is still alive. The driver rationalizes the silence
+   as "model latency" when nothing is running at all. This is the mirror image of
+   M3: M3 is process-alive-but-done, M4 is process-dead-but-unfinished.
 
 ## Key insight
 
@@ -43,11 +50,17 @@ Stop using process exit / `--print` flush as the completion signal. Use the
 - **Liveness** is log-file growth (mtime). No growth for `T` seconds = stalled.
 
 This converts "is it stuck?" from a 44-minute guessing game into a one-line log
-check, and it covers all three shapes:
+check. Combined with a **PID-liveness check**, it covers all four shapes:
 
-- M1/M2 → no log growth for `T` → watchdog kills and fails the round.
+- M1/M2 → process alive but no log growth for `T` → watchdog kills and fails the round.
 - M3 → `agent_end` already in the log → extract verdict, kill the process
   proactively, treat as **success**. Never wait for it to exit.
+- M4 → PID no longer alive and no `agent_end` in the log → abnormal exit → fail the
+  round immediately (do not keep polling a dead process).
+
+The monitor must therefore be a **4-way check**, never a content-only
+`until [ -s file ]` loop: a dead process and an unfinished review both look like an
+empty file, so liveness has to be probed explicitly.
 
 ## Locked decisions
 
@@ -106,13 +119,17 @@ preflight:
 for round in 1..N:
   - launch detached: pi -p --mode json --model <gpt> <scoped prompt> > log.jsonl
     record PID
-  - monitor loop (poll every few seconds):
+  - monitor loop (poll every few seconds) — 4-way check, in this order:
       1. if agent_end present in log:
            extract final assistant text → parse verdict
            kill PID (do NOT wait for exit); break        # success path, covers M3
-      2. else if (now - mtime(log)) > T:
+      2. else if PID not alive:
+           mark round CRASHED (abnormal exit, no verdict); break   # covers M4
+      3. else if (now - mtime(log)) > T:
            kill PID; mark round STALLED; break            # covers M1/M2
-  - on STALLED: report which file/last-event was in flight; stop or retry once
+      4. else: keep polling
+  - on STALLED/CRASHED: report which file/last-event was in flight (or the
+    last log line / provider error); stop or retry once
   - parse verdict:
       CLEAN  → release lock; commit gate satisfied; done
       ISSUES → Claude fixes the listed items; continue to next round
@@ -120,6 +137,12 @@ for round in 1..N:
 
 teardown (always): kill any surviving PID, release lock, leave log for inspection
 ```
+
+**Process ownership.** The skill owns exactly one launch and one monitor. Do not
+stack the harness's own Bash auto-backgrounding *and* a separate watcher process —
+that spawns orphaned watchers nobody reaps (observed in the django-cast session).
+Launch Pi once with a recorded PID and poll it directly; the monitor must reap the
+process on every exit path (success, stall, crash, round cap).
 
 ## Reviewer prompt & verdict contract
 
@@ -162,3 +185,5 @@ All three are overridable as skill arguments.
   block on stdin in `-p` mode (confirm tools run without an approval prompt; use a
   read-only tool allowlist if needed).
 - A real review smoke against a small diff to confirm verdict extraction end to end.
+- Pi's exit code on exhausted rate-limit backoff / provider error (M4): capture it on
+  the PID-death path so a CRASHED round can report *why*, not just *that*, it died.
