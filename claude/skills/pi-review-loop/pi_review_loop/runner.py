@@ -1,0 +1,177 @@
+"""Drive one Pi review: spawn in its own process group, monitor the JSON event
+stream non-blockingly (raw-fd os.read so a buffered text object can never wedge
+us), reap on every exit path, and always write artifacts."""
+import json
+import os
+import selectors
+import signal
+import subprocess
+import time
+import traceback
+
+from .monitor import Monitor
+from .result import ReviewResult
+from .states import CRASHED
+
+
+def _now():
+    return time.monotonic()
+
+
+def _kill_group(proc, pgid, grace=5.0):
+    """SIGTERM the group, wait briefly, SIGKILL if needed, then reap. Never wait
+    for natural exit (M3 means it may never come). pgid is cached at spawn."""
+    if pgid is not None and pgid > 1:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                break
+            try:
+                proc.wait(timeout=grace if sig == signal.SIGTERM else 1.0)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+class _Streams:
+    """Reads two raw fds non-blockingly, splitting stdout into lines and teeing
+    raw/event output. stderr is appended to err_f."""
+
+    def __init__(self, out_fd, err_fd, raw_f, ev_f, err_f, monitor):
+        self.out_fd, self.err_fd = out_fd, err_fd
+        self.raw_f, self.ev_f, self.err_f = raw_f, ev_f, err_f
+        self.monitor = monitor
+        self._buf = b""
+        os.set_blocking(out_fd, False)
+        os.set_blocking(err_fd, False)
+        self.sel = selectors.DefaultSelector()
+        self.sel.register(out_fd, selectors.EVENT_READ, "out")
+        self.sel.register(err_fd, selectors.EVENT_READ, "err")
+
+    def pump(self, timeout):
+        """Read whatever is available within `timeout`. Returns False if both
+        streams hit EOF."""
+        for key, _ in self.sel.select(timeout=timeout):
+            try:
+                data = os.read(key.fd, 65536)
+            except BlockingIOError:
+                continue
+            if not data:  # EOF on this fd
+                try:
+                    self.sel.unregister(key.fd)
+                except KeyError:
+                    pass
+                continue
+            if key.data == "out":
+                self._feed_out(data)
+            else:
+                self.err_f.write(data.decode(errors="replace")); self.err_f.flush()
+        return bool(self.sel.get_map())
+
+    def _feed_out(self, data):
+        self._buf += data
+        while b"\n" in self._buf:
+            raw, self._buf = self._buf.split(b"\n", 1)
+            self._ingest(raw.decode(errors="replace"))
+
+    def flush_partial(self):
+        if self._buf.strip():
+            self._ingest(self._buf.decode(errors="replace").strip())
+            self._buf = b""
+
+    def _ingest(self, line):
+        if line == "":
+            return
+        self.raw_f.write(line + "\n"); self.raw_f.flush()
+        try:
+            event = json.loads(line)
+        except ValueError:
+            self.ev_f.write(json.dumps({"type": "malformed_stdout", "raw": line}) + "\n")
+            self.ev_f.flush()
+            return
+        self.ev_f.write(line + "\n"); self.ev_f.flush()
+        self.monitor.on_event(event, _now())
+
+
+def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
+               global_deadline, poll_interval=0.5, env=None):
+    os.makedirs(run_dir, exist_ok=True)
+    paths = {k: os.path.join(run_dir, v) for k, v in {
+        "raw": "stdout.raw.log", "events": "events.jsonl",
+        "stderr": "stderr.log", "result": "result.json"}.items()}
+
+    started = _now()
+    sub_env = dict(os.environ)
+    sub_env.update({"PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
+    if env:
+        sub_env.update(env)
+
+    monitor = Monitor(started_at=started, stall_timeout=stall_timeout,
+                      retry_grace=retry_grace, global_deadline=global_deadline)
+    proc = None
+    pgid = None
+    state = CRASHED
+    error = None
+
+    raw_f = open(paths["raw"], "w")
+    ev_f = open(paths["events"], "w")
+    err_f = open(paths["stderr"], "w")
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True, env=sub_env, bufsize=0,
+        )
+        try:
+            pgid = os.getpgid(proc.pid)  # cache immediately, before any exit
+        except ProcessLookupError:
+            pgid = None
+        streams = _Streams(proc.stdout.fileno(), proc.stderr.fileno(),
+                           raw_f, ev_f, err_f, monitor)
+
+        decision_state = None
+        while True:
+            streams.pump(timeout=poll_interval)
+            alive = proc.poll() is None
+            if not alive:
+                # Bounded, non-blocking drain of anything still buffered, then
+                # parse a final unterminated line, before classifying.
+                drain_deadline = _now() + 0.5
+                while _now() < drain_deadline and streams.pump(timeout=0.05):
+                    pass
+                streams.flush_partial()
+            decision = monitor.decide(_now(), alive)
+            if decision.action != "continue":
+                decision_state = decision.state
+                if alive:
+                    _kill_group(proc, pgid)
+                break
+        state = decision_state or CRASHED
+    except Exception:  # never leave Claude polling a result that never appears
+        error = traceback.format_exc()
+        state = CRASHED
+        if proc is not None and proc.poll() is None:
+            _kill_group(proc, pgid)
+    finally:
+        raw_f.close(); ev_f.close(); err_f.close()
+
+    if monitor.provider_error and not error:
+        error = monitor.provider_error
+    if error is None and state == CRASHED:
+        try:
+            with open(paths["stderr"]) as fh:
+                error = fh.read()[-2000:] or None
+        except OSError:
+            pass
+
+    result = ReviewResult(
+        state=state, items=monitor.verdict_items, model=model, cost=None,
+        started_at=started, ended_at=_now(), error=error,
+        raw_verdict_line=monitor.verdict_text,
+    )
+    result.write(paths["result"])
+    return result
