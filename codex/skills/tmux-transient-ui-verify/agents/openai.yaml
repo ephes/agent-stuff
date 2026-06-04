@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tmux Transient UI Verify"
+  short_description: "Verify transient terminal UI states with sampled tmux frames."
+  default_prompt: "Use sampled tmux pane captures to compare transient terminal UI behavior while output is being generated."

@@ -82,7 +82,7 @@ without explicit user direction.
    ready=0
    for _ in $(seq 1 30); do
        pane="$(tmux capture-pane -pt "$session" -S -80 2>/dev/null || true)"
-       if printf '%s\n' "$pane" | grep -Eiq '(›|>|esc|enter|prompt|message|what can i help|ready)'; then
+       if printf '%s\n' "$pane" | grep -Eiq '(❯|›|>|esc|enter|prompt|message|what can i help|ready)'; then
            printf '%s\n' "$pane" | tail -40
            ready=1
            break
