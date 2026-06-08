@@ -107,12 +107,13 @@ This skill is for goal tracking and continuation, not full implementation contex
    - conditional phase trigger criteria when later phases are optional
    - non-completion criteria when premature stopping is a known risk
    - evidence requirements for critical verification, review, or commit gates
-   - for implementation or commit-ready goals, a Pi review-loop gate when
-     available: the goal's external judge is Pi running the newest GPT/OpenAI
-     model through `pi-review-loop`, and no commit may be made until that loop
-     returns CLEAN. Treat nonzero exits, failed/stalled reviews, unresolved
-     findings, or scoped-clean reviews with relevant skipped/truncated files as
-     not complete.
+   - for implementation or commit-ready goals, an external different-family
+     review-loop gate when available: for Codex-authored work, prefer Claude
+     Opus through `opus-review-loop`; for Claude-authored work, prefer the
+     newest OpenAI/GPT reviewer through `pi-review-loop` when available. No
+     commit may be made until the applicable loop returns CLEAN. Treat nonzero
+     exits, failed/stalled reviews, unresolved findings, or scoped-clean reviews
+     with relevant skipped/truncated files as not complete.
    - an explicit verification matrix when the goal names multiple modes,
      product surfaces, policy branches, runtimes, providers, storage paths, or
      platforms. Each named surface/policy combination needs product-path
