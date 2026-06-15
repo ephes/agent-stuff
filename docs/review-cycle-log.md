@@ -334,3 +334,22 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status: built, reviewed, live-verified, installed via chezmoi; external review round addressed.
 - Safety: summary-safe metrics only; no prompts, transcript bodies, tool output,
   secrets, or sensitive personal data.
+
+## 2026-06-15 - Read-Only Claude Review Needed A Tight Verdict Prompt
+
+- Repo: podcast.
+- Goal or slice: Show Detail refresh in-progress feedback.
+- Implementer: Codex / GPT-5.
+- Reviewer: Claude / Opus 4.8.
+- Expected: the reviewer would inspect the small scoped diff and return Critical,
+  Warning, Suggestion findings plus an explicit goal-reached verdict.
+- Actual: the first review request remained in source-gathering mode long enough
+  to stall the closeout. Interrupting it and sending a tighter no-more-tools
+  instruction produced the required report immediately.
+- Impact: the review completed with no Critical or Warning findings and an
+  explicit "goal reached: yes" verdict, but the loop took longer than necessary.
+- Fix or follow-up: for small read-only closeout reviews, include a hard
+  instruction to stop after the scoped diff/source pass and emit the verdict. If
+  the reviewer keeps expanding context without findings, interrupt and request a
+  bounded final report instead of waiting indefinitely.
+- Status: identified.
