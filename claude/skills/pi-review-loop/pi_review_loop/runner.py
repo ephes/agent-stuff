@@ -93,6 +93,9 @@ class _Streams:
         except ValueError:
             self.ev_f.write(json.dumps({"type": "malformed_stdout", "raw": line}) + "\n")
             self.ev_f.flush()
+            # Non-JSON output is still liveness: reset the stall timer so a
+            # burst of malformed output is never mis-killed as STALLED.
+            self.monitor.note_output(_now())
             return
         self.ev_f.write(line + "\n"); self.ev_f.flush()
         self.monitor.on_event(event, _now())

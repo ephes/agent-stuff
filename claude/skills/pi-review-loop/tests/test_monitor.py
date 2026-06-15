@@ -56,6 +56,20 @@ class TestMonitor(unittest.TestCase):
         m.on_event({"type": "message_update"}, now=10)
         self.assertEqual(m.decide(now=10 + 181, proc_alive=True), Decision("kill", STALLED))
 
+    def test_non_event_output_resets_stall_timer(self):
+        # Any stdout activity (even non-JSON output) proves liveness and
+        # must reset the stall timer, so a burst of malformed output is
+        # never mis-killed as STALLED.
+        m = mon()
+        m.on_event({"type": "message_update"}, now=10)
+        # Non-JSON output keeps arriving up to t=170 (within stall window).
+        m.note_output(now=170)
+        self.assertEqual(m.decide(now=170 + 179, proc_alive=True),
+                         Decision("continue", None))
+        # Only genuine silence past the last activity stalls.
+        self.assertEqual(m.decide(now=170 + 181, proc_alive=True),
+                         Decision("kill", STALLED))
+
     def test_retry_window_suspends_stall(self):
         m = mon()
         m.on_event({"type": "auto_retry_start", "delayMs": 2000}, now=10)

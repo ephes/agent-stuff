@@ -24,6 +24,16 @@ class Monitor:
         self.provider_error = None     # finalError when provider gives up
         self.retry_until = None        # retry_deadline timestamp, or None
 
+    def note_output(self, now):
+        """Record raw stdout activity that is not a structured event.
+
+        Any output proves the review process is alive, so it resets the
+        stall timer; otherwise a burst of non-JSON output (which carries
+        no parseable event) could be mis-killed as STALLED while Pi is
+        actively producing it.
+        """
+        self.last_event_at = now
+
     def on_event(self, event, now):
         self.last_event_at = now
         etype = event.get("type")
