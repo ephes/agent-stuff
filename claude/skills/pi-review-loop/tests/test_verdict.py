@@ -44,6 +44,21 @@ class TestParseVerdict(unittest.TestCase):
             {"severity": "Warning", "path": "src/b.py", "message": "careful"},
         ])
 
+    def test_issues_with_items_before_verdict_line(self):
+        # gpt-5.5 commonly lists findings BEFORE the trailing verdict line.
+        text = (
+            "1. [Warning] src/a.py: careful\n"
+            "2. [Critical] src/b.py: boom\n"
+            "\n"
+            "REVIEW: ISSUES\n"
+        )
+        state, items = verdict.parse_verdict(text)
+        self.assertEqual(state, ISSUES)
+        self.assertEqual(items, [
+            {"severity": "Warning", "path": "src/a.py", "message": "careful"},
+            {"severity": "Critical", "path": "src/b.py", "message": "boom"},
+        ])
+
     def test_issues_without_items_is_invalid(self):
         self.assertEqual(verdict.parse_verdict("REVIEW: ISSUES\n")[0], INVALID)
 

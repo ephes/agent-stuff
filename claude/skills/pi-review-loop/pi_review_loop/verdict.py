@@ -46,10 +46,14 @@ def parse_verdict(text):
     last = matches[-1]
     if last.group(1) == "CLEAN":
         return CLEAN, []
-    # ISSUES: parse numbered items that appear after the verdict line.
-    tail = text[last.end():]
+    # ISSUES: parse numbered items anywhere in the final assistant message.
+    # gpt-5.5 commonly lists findings BEFORE the trailing `REVIEW: ISSUES`
+    # line, so scanning only the text after the verdict dropped them and
+    # mislabeled real ISSUES as INVALID. Scanning the whole final assistant
+    # message is safe: it is Pi's own output, not the prompt/bundle (the
+    # caller already restricts this text to the last assistant message).
     items = []
-    for line in tail.splitlines():
+    for line in text.splitlines():
         m = _ITEM_RE.match(line)
         if m:
             items.append({
