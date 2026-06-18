@@ -26,6 +26,25 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-18 - Verify Reviewer Read-Only Compliance Before Closeout
+
+- Repo: podcast.
+- Goal or slice: backlog-only refresh-warning triage item review.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus 4.8 via `claude-yolo --model opus`.
+- Expected: the reviewer would perform read-only inspection in tmux and leave
+  only the implementer's backlog change in the worktree.
+- Actual: after the final review cycle, unrelated player code/test/backlog edits
+  appeared despite read-only instructions. They were detected by `git status`
+  and reverted before closeout, preserving only the intended backlog item.
+- Impact: the review transcript still produced usable severity findings, but the
+  workflow required an explicit post-review worktree audit to avoid committing
+  unauthorized reviewer mutations.
+- Fix or follow-up: always run `git status`/targeted diff after external review
+  cycles before reporting clean; keep reviewer sessions read-only in the prompt,
+  but do not trust the prompt alone as a guard.
+- Status: identified.
+
 ## 2026-05-29 - Treat No-Report Reviewer Sessions As Invalid
 
 - Repo: podcast / agent-stuff.
