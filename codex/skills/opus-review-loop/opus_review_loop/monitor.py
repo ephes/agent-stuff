@@ -1,5 +1,7 @@
 """Pure state machine for the review monitor. No IO, no clock - the runner feeds
 events and the current time, so this is fully unit-testable."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from .states import CRASHED, STALLED, STALLED_RETRY, PROVIDER_ERROR
 from .verdict import (

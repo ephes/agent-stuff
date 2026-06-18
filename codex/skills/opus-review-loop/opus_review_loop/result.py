@@ -1,4 +1,6 @@
 """ReviewResult: the single structured outcome of one review, written to result.json."""
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field, asdict
 from .states import CLEAN

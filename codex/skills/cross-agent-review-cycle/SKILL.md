@@ -92,7 +92,9 @@ without explicit user direction.
    session only after telling the user.
 
 4. Poll the log file until the reviewer prints the required completion sentinel.
-   With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough:
+   With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough.
+   The log may stay empty while Claude is still thinking; treat that as normal
+   until the session exits or the polling deadline expires.
 
    ```bash
    completed=0
