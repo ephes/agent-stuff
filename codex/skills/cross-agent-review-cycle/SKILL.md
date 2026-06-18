@@ -13,7 +13,7 @@ slice. The reviewer must be a different model family from the implementer.
 ## Reviewer Selection
 
 - If the implementer is Codex, review with Claude:
-  `claude-yolo --model opus`
+  `claude-yolo -p --model opus`
 - If the implementer is Claude, review with Codex:
   `codex-yolo -m gpt-5.5`
 
@@ -21,12 +21,17 @@ If the yolo commands are shell functions and are not visible from the current
 shell, invoke them through fish:
 
 ```bash
-fish -lc 'claude-yolo --model opus'
+fish -lc 'claude-yolo -p --model opus'
 fish -lc 'codex-yolo -m gpt-5.5'
 ```
 
 Do not silently substitute a same-family reviewer. If the requested reviewer
 command or model is unavailable, report the blocker.
+
+Do not add `--max-budget-usd`, `--permission-mode`, or equivalent ad hoc
+permission/budget flags to Claude review commands. The `claude-yolo` alias owns
+permissions, and subscription usage should not be represented as a per-run budget
+cap.
 
 ## Cycle Limit
 
@@ -55,82 +60,62 @@ without explicit user direction.
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    ```
 
-2. Start the reviewer in the repo root. For a Codex implementer:
-
-   ```bash
-   tmux new-session -d -s "$session" -c "$PWD" "fish -lc 'claude-yolo --model opus'"
-   ```
-
-   For a Claude implementer:
-
-   ```bash
-   tmux new-session -d -s "$session" -c "$PWD" "fish -lc 'codex-yolo -m gpt-5.5'"
-   ```
-
-3. Write the self-contained review prompt to a temp file:
+2. Write the self-contained review prompt to a temp file and choose a log path:
 
    ```bash
    prompt_file="$(mktemp -t review-prompt.XXXXXX)"
-   trap 'rm -f "$prompt_file"' EXIT
+   log_file="/tmp/${session}.out"
    printf '%s' "$review_prompt" > "$prompt_file"
    ```
 
-4. Wait until the reviewer TUI appears ready for input before pasting. Do not
-   paste while the pane is blank, loading configuration, or showing an error:
+3. For a Codex implementer, run Claude as a one-shot noninteractive review
+   inside tmux. Use a tiny fish wrapper so shell aliases/functions are available
+   and the log is tee'd for inspection:
 
    ```bash
-   ready=0
-   for _ in $(seq 1 30); do
-       pane="$(tmux capture-pane -pt "$session" -S -80 2>/dev/null || true)"
-       if printf '%s\n' "$pane" | grep -Eiq '(❯|›|>|esc|enter|prompt|message|what can i help|ready)'; then
-           printf '%s\n' "$pane" | tail -40
-           ready=1
-           break
-       fi
-       sleep 1
-   done
-   if [ "$ready" -ne 1 ]; then
-       echo "Reviewer TUI did not appear ready; attach to inspect before sending the prompt." >&2
-       exit 1
-   fi
+   runner_file="$(mktemp -t review-run.XXXXXX.fish)"
+   cat > "$runner_file" <<'FISH'
+   set prompt_file $argv[1]
+   set log_file $argv[2]
+   cat "$prompt_file" | claude-yolo -p --model opus 2>&1 | tee "$log_file"
+   set statuses $pipestatus
+   printf "\n[claude-yolo pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
+   read -P "review finished; press Enter to close tmux pane"
+   FISH
+   tmux new-session -d -s "$session" -c "$PWD" \
+     "fish \"$runner_file\" \"$prompt_file\" \"$log_file\""
    ```
 
-   If the captured pane does not clearly show the reviewer input UI, stop and
-   attach to inspect before sending the prompt.
+   For a Claude implementer using Codex as reviewer, use the same tmux/log
+   pattern with the appropriate noninteractive Codex command. If no stable
+   noninteractive Codex command is available, fall back to an interactive tmux
+   session only after telling the user.
 
-5. Paste the prompt as a bracketed paste, then submit it once. Do not use
-   `send-keys -l` for multi-line prompts because embedded newlines can submit
-   partial messages:
-
-   ```bash
-   buffer="review-prompt-$session"
-   tmux load-buffer -b "$buffer" "$prompt_file"
-   tmux paste-buffer -p -b "$buffer" -t "$session"
-   tmux send-keys -t "$session" Enter
-   ```
-
-6. Poll output until the reviewer prints the required completion sentinel. The
-   prompt itself contains the sentinel text, so wait for at least two matches:
-   one echoed from the prompt and one emitted by the reviewer.
+4. Poll the log file until the reviewer prints the required completion sentinel.
+   With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough:
 
    ```bash
    completed=0
    for _ in $(seq 1 180); do
-       output="$(tmux capture-pane -pt "$session" -S -2000)"
-       if [ "$(printf '%s\n' "$output" | grep -Fc '=== REVIEW COMPLETE ===')" -ge 2 ]; then
-           printf '%s\n' "$output"
+       if [ -f "$log_file" ] && grep -Fq '=== REVIEW COMPLETE ===' "$log_file"; then
+           tail -200 "$log_file"
            completed=1
            break
+       fi
+       if ! tmux has-session -t "$session" 2>/dev/null; then
+           echo "Review tmux session ended before emitting completion sentinel." >&2
+           [ -f "$log_file" ] && tail -200 "$log_file"
+           exit 1
        fi
        sleep 10
    done
    if [ "$completed" -ne 1 ]; then
-       echo "Review did not emit completion sentinel; keep the session open and inspect it." >&2
+       echo "Review did not emit completion sentinel; inspect the tmux session and $log_file." >&2
        exit 1
    fi
    ```
 
-7. When the review is complete, keep the session available until the cycle is
+5. When the review is complete, keep the session available until the cycle is
    resolved. Kill only when the report has been captured or summarized:
 
    ```bash
@@ -145,7 +130,8 @@ The prompt must say this is a review task, not implementation. Include:
   allowed review
 - implementation intent and scope
 - relevant project instructions, specs, docs, or backlog item paths
-- touched files and what changed
+- touched files and what changed, including untracked files from
+  `git status --short --untracked-files=all`
 - verification commands already run and results
 - known trade-offs or explicit non-goals
 - prior findings and how they were addressed for re-reviews

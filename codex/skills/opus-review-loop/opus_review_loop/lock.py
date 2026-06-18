@@ -57,10 +57,12 @@ def pid_alive(pid):
 
 
 def _pgid_is_claude(pgid):
-    """Best-effort identity check before killing a recorded process group: confirm
-    the group leader's command is `claude` (the leader pid == pgid because Claude
-    is spawned with start_new_session). Fail-safe: returns False (do NOT kill) on any
-    uncertainty, so a reused PGID never gets an unrelated process group killed."""
+    """Best-effort identity check before killing a recorded process group.
+
+    Confirm the group leader is either Claude itself or the fish `claude-yolo`
+    wrapper used to launch Claude. Fail-safe: returns False (do NOT kill) on any
+    uncertainty, so a reused PGID never gets an unrelated process group killed.
+    """
     if not pgid or pgid <= 1:
         return False
     try:
@@ -70,7 +72,12 @@ def _pgid_is_claude(pgid):
     except (OSError, subprocess.SubprocessError):
         return False
     tokens = out.split()
-    return any(os.path.basename(token) == "claude" for token in tokens)
+    if any(os.path.basename(token) == "claude" for token in tokens):
+        return True
+    return (
+        any(os.path.basename(token) == "fish" for token in tokens)
+        and "claude-yolo" in out
+    )
 
 
 def _remove_lock_dir(lock_dir):

@@ -1,15 +1,22 @@
 ---
 name: opus-review-loop
-description: "Use when Codex needs a fresh-context code-review gate from a different model family before committing - runs Claude Code with the Opus model as a read-only reviewer over the current git diff in a bounded, observable loop, and only proceeds when Opus returns CLEAN. Drives review -> fix -> re-review up to a round cap. Triggers: \"have opus review this\", \"claude opus review before commit\", \"run the opus review loop\"."
+description: "Use when Codex needs a fresh-context code-review gate from a different model family before committing - runs Claude Code with the Opus model as a read-only reviewer over the current git diff in a bounded, observable loop, and only proceeds when Opus returns CLEAN. Drives review, fix, and re-review up to a round cap. Triggers: \"have opus review this\", \"claude opus review before commit\", \"run the opus review loop\"."
 ---
 
 # Opus Review Loop
 
-Run a bounded review cycle: hand the current diff to Claude Opus as a fresh-context reviewer
-via the harness, read its structured verdict, and only continue when it is `CLEAN`.
+Run a bounded review cycle: hand the current git worktree delta to Claude Opus as
+a fresh-context reviewer via the harness, read its structured verdict, and only
+continue when it is `CLEAN`.
 The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Claude is stuck. A hung or blocked review is detected and killed,
 and you always get a structured result.
+
+The harness prefers the user's fish `claude-yolo` alias when it is available:
+`fish -lc 'claude-yolo -p --model opus ...'`. If that alias is unavailable, it
+falls back to direct `claude -p`. Do not add `--max-budget-usd`,
+`--permission-mode`, or other ad hoc launch flags; the alias owns permissions and
+the harness owns lifecycle limits.
 
 ## When to use
 
@@ -18,8 +25,10 @@ implement and fix; Claude Opus reviews with fresh context.
 
 ## The loop (you drive this)
 
-1. Make sure the change to review is in the working tree (staged and/or unstaged).
-   The harness bundles the diff; you do not paste code.
+1. Make sure the change to review is in the working tree (staged, unstaged, and/or
+   untracked). The harness bundles tracked diffs and text untracked files; you do
+   not paste code. Read `review-bundle.md` if a scoped result reports skipped or
+   truncated files.
 2. Run one review:
 
    ```bash

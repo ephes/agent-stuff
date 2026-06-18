@@ -57,8 +57,8 @@ def _claude_cmd(model):
     fake = os.environ.get("OPUS_REVIEW_FAKE_CMD")
     if fake:
         return shlex.split(fake)
-    return [
-        "claude", "-p",
+    args = [
+        "-p",
         "--model", model,
         "--output-format", "stream-json",
         "--verbose",
@@ -68,6 +68,21 @@ def _claude_cmd(model):
         "--setting-sources", "local",
         "--append-system-prompt", REVIEW_INSTRUCTION,
     ]
+    if _fish_claude_yolo_available():
+        return ["fish", "-lc", shlex.join(["claude-yolo", *args])]
+    return ["claude", *args]
+
+
+def _fish_claude_yolo_available():
+    try:
+        return subprocess.run(
+            ["fish", "-lc", "type -q claude-yolo"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _write_prompt(bundle_path, prompt_path):

@@ -83,6 +83,16 @@ class TestLock(unittest.TestCase):
         with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
             self.assertTrue(lock._pgid_is_claude(12345))
 
+    def test_pgid_is_claude_accepts_fish_claude_yolo_wrapper(self):
+        completed = mock.Mock(stdout="fish -lc claude-yolo -p --model opus\n")
+        with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
+            self.assertTrue(lock._pgid_is_claude(12345))
+
+    def test_pgid_is_claude_rejects_unrelated_fish(self):
+        completed = mock.Mock(stdout="fish -lc echo hi\n")
+        with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
+            self.assertFalse(lock._pgid_is_claude(12345))
+
     def test_reclaims_dead_harness_even_when_pgid_not_claude(self):
         # harness dead + a claude_pgid that is NOT claude: reclaim still removes
         # the lock, but must not kill the unrelated group.
