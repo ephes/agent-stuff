@@ -354,6 +354,23 @@ Project-specific execution lessons belong in the project repo, not here.
   bounded final report instead of waiting indefinitely.
 - Status: identified.
 
+## 2026-06-17 - Claude Review Completed But Missed Sentinel
+
+- Repo: emerge.
+- Goal or slice: UMF-114 Slice 3 final follow-up review before commit.
+- Implementer: Codex / GPT-5.
+- Reviewer: Claude / Opus 4.8 via `claude-yolo --model opus`.
+- Expected: the reviewer would emit the required final sentinel after the report
+  so the tmux polling wrapper could complete automatically.
+- Actual: Claude produced a clean, bounded review report at the input prompt but
+  omitted the sentinel line, leaving the polling wrapper waiting.
+- Impact: the review result was still usable after direct pane capture, but the
+  automation needed manual interruption.
+- Fix or follow-up: make sentinel instructions more prominent for Claude review
+  prompts, or allow the wrapper to detect the input prompt returning after a
+  complete report with findings/no-findings sections.
+- Status: identified.
+
 ## 2026-06-18 - Claude Print Review Stalled In Tmux With Prompt File
 
 - Repo: podcast.
