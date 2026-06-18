@@ -1,7 +1,9 @@
 import os
+import signal
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from opus_review_loop import runner
 from opus_review_loop.states import CLEAN, ISSUES, CRASHED, STALLED, PROVIDER_ERROR
 
@@ -61,6 +63,20 @@ class TestRunner(unittest.TestCase):
         r = self._run("clean", on_spawn=lambda p: seen.append(p))
         self.assertEqual(r.state, CLEAN)
         self.assertTrue(seen and isinstance(seen[0], int))
+
+    def test_kill_group_escalates_when_wrapper_exits_but_group_survives(self):
+        proc = mock.Mock()
+        proc.wait.side_effect = [None, None]
+        with mock.patch("opus_review_loop.runner.os.killpg") as killpg, mock.patch(
+            "opus_review_loop.runner._group_alive",
+            side_effect=[True, False],
+        ):
+            runner._kill_group(proc, 12345, grace=0.01)
+
+        self.assertEqual(
+            killpg.call_args_list,
+            [mock.call(12345, signal.SIGTERM), mock.call(12345, signal.SIGKILL)],
+        )
 
 
 if __name__ == "__main__":

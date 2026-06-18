@@ -18,20 +18,37 @@ def _now():
     return time.monotonic()
 
 
+def _group_alive(pgid):
+    if pgid is None or pgid <= 1:
+        return False
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+
+
 def _kill_group(proc, pgid, grace=5.0):
-    """SIGTERM the group, wait briefly, SIGKILL if needed, then reap. Never wait
-    for natural exit (M3 means it may never come). pgid is cached at spawn."""
+    """SIGTERM the group, wait briefly, SIGKILL if needed, then reap.
+
+    Never wait for natural exit (M3 means it may never come). pgid is cached at
+    spawn. Wrapper processes such as fish can exit before Claude does, so the
+    process group liveness check is authoritative.
+    """
     if pgid is not None and pgid > 1:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
+        for sig, timeout in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
             try:
                 os.killpg(pgid, sig)
             except (ProcessLookupError, PermissionError, OSError):
                 break
             try:
-                proc.wait(timeout=grace if sig == signal.SIGTERM else 1.0)
-                return
+                proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                continue
+                pass
+            if not _group_alive(pgid):
+                return
     try:
         proc.wait(timeout=1.0)
     except subprocess.TimeoutExpired:
