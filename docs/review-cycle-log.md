@@ -390,3 +390,23 @@ Project-specific execution lessons belong in the project repo, not here.
   while a direct `claude --print` smoke test succeeds, switch to the known-good
   direct invocation and record the deviation.
 - Status: identified.
+
+## 2026-06-18 - Claude Re-Review Failed After Clean First Review
+
+- Repo: django-cast.
+- Goal or slice: Podcast publishing metadata first implementation slice.
+- Implementer: Codex / GPT-5.
+- Reviewer: Claude / Opus via `claude-yolo -p --model opus`.
+- Expected: the second Claude review round would run inside tmux with a prompt
+  file, emit the required sentinel, and verify fixes from round 1.
+- Actual: the first tmux re-review attempt exited with a zero-byte log. A second
+  tmux attempt logged runner start and prompt size, then exited before Claude
+  output or pipeline status. A foreground `claude-yolo -p --model opus` run with
+  the same prompt stayed silent for multiple minutes and was interrupted.
+- Impact: implementation checks passed, and Claude round 1 had no Critical or
+  Warning findings, but the required clean Claude re-review and final Pi review
+  could not be completed in this closeout.
+- Fix or follow-up: make the tmux wrapper surface child-process exit details even
+  when `claude-yolo` exits before fish pipeline status logging, and provide a
+  documented fallback policy for re-review attempts after a clean first review.
+- Status: blocked on review tooling.
