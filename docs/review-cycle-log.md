@@ -26,6 +26,27 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-18 - Use Isolated Review Worktrees For Yolo Reviewers
+
+- Repo: podcast.
+- Goal or slice: iOS player Add-to-Top queue-anchor fix.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus 4.8 via `claude-yolo --model opus`.
+- Expected: the reviewer would inspect uncommitted changes read-only in the main
+  worktree and report findings without changing files.
+- Actual: after the first review cycle, the Swift/test changes were no longer in
+  the main worktree, leaving only docs. The cycle correctly caught the missing
+  implementation, but the review environment was no longer trustworthy for the
+  live worktree.
+- Impact: the implementation had to be re-applied before continuing. Later
+  cycles were run from isolated temporary review worktrees populated from a
+  patch, protecting the main worktree while still giving the reviewer a real
+  `git diff` to inspect.
+- Fix or follow-up: for yolo reviewer sessions, prefer an isolated review
+  worktree or disposable copy with the current patch applied. Always audit the
+  main worktree after each review cycle and before final reporting.
+- Status: identified.
+
 ## 2026-06-18 - Verify Reviewer Read-Only Compliance Before Closeout
 
 - Repo: podcast.
