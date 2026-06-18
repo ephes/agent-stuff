@@ -353,3 +353,23 @@ Project-specific execution lessons belong in the project repo, not here.
   the reviewer keeps expanding context without findings, interrupt and request a
   bounded final report instead of waiting indefinitely.
 - Status: identified.
+
+## 2026-06-18 - Claude Print Review Stalled In Tmux With Prompt File
+
+- Repo: podcast.
+- Goal or slice: Smart Inbox Ranking first production slice.
+- Implementer: Codex / GPT-5.
+- Reviewer: Claude / Opus via Claude Code CLI.
+- Expected: `claude-yolo --model opus --print < prompt` in a separate tmux
+  session would complete the external review and write output to a file.
+- Actual: multiple tmux launches stayed alive with zero-byte output, including
+  stdin redirection and argument-based prompt variants. The same prompt completed
+  through a direct foreground Claude Code Opus invocation.
+- Impact: the review cycle completed with no unresolved Critical or Warning
+  findings, but the required tmux wrapper path wasted closeout time and needed
+  manual cleanup of stuck processes.
+- Fix or follow-up: for Claude Code review automation, smoke-test the exact
+  prompt transport before waiting on a long run. If tmux output remains zero
+  while a direct `claude --print` smoke test succeeds, switch to the known-good
+  direct invocation and record the deviation.
+- Status: identified.
