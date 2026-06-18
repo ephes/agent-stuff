@@ -55,6 +55,21 @@ implement and fix; Claude Opus reviews with fresh context.
 4. Stop after at most 3 rounds. If still not CLEAN after 3 rounds, report the
    outstanding items to the user rather than looping forever.
 
+## Timing and Retry Policy
+
+- Keep the default `--stall-timeout` unless there is a concrete reason to shorten
+  it. Claude Opus can emit the initial stream event, then stay silent for more
+  than 120 seconds before returning a valid review; a too-short override can
+  create false `STALLED` results.
+- If a run exits `2` with `state: STALLED` and `events.jsonl` only contains
+  startup/init activity, rerun once with the default or a longer stall timeout
+  before declaring the external review unavailable.
+- After manually interrupting any review command, check for leftover
+  `claude-yolo` / `claude --model opus` processes and terminate the recorded
+  process group before starting another review. The harness should reap its own
+  children, but manual kills and tmux wrapper kills can leave provider calls
+  running.
+
 ## Hard rules
 
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips

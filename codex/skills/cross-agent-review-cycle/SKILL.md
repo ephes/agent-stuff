@@ -124,6 +124,11 @@ without explicit user direction.
    tmux kill-session -t "$session"
    ```
 
+   If you manually stop or kill a tmux review before completion, verify that no
+   `claude-yolo` / `claude --model opus` child remains. Kill the review process
+   group before starting another review; tmux can exit while the Claude child
+   continues running.
+
 ## Review Prompt Contents
 
 The prompt must say this is a review task, not implementation. Include:
