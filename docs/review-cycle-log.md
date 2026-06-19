@@ -26,6 +26,44 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-19 - Quote Prompts Through Files For tmux Reviewer Runs
+
+- Repo: podcast.
+- Goal or slice: active Queue-row Play idempotence fix.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus via `claude-yolo --model opus`; Pi reviewer via `pi -p`.
+- Expected: tmux reviewer commands would pass the generated review prompt to
+  non-interactive reviewer CLIs.
+- Actual: the first Claude command embedded a fish `$prompt` variable inside a
+  double-quoted outer shell command, so the outer shell expanded it to empty and
+  Claude exited with "Input must be provided".
+- Impact: the first Claude review attempt produced no review and had to be
+  relaunched.
+- Fix or follow-up: for tmux reviewer runs, write a small script that reads the
+  prompt file and invokes the reviewer, then run that script from tmux instead
+  of nesting shell/fish variable expansion in one command string.
+- Status: identified.
+
+## 2026-06-19 - Root-Analysis Reviews Need Process And Worktree Isolation
+
+- Repo: podcast.
+- Goal or slice: Queue row Play root-cause analysis and backlog triage.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus 4.8 via `claude-yolo --model opus`.
+- Expected: a read-only root-analysis review plus one backlog edit would leave
+  the main worktree otherwise unchanged.
+- Actual: after the review, unrelated player-code edits appeared; continued
+  polling showed a lingering Claude Code process with cwd in the podcast repo
+  still mutating files. The process was killed and all unauthorized code edits
+  were reverted before closeout.
+- Impact: the review findings were usable, but the main worktree was briefly
+  polluted by an external agent process.
+- Fix or follow-up: before yolo reviews, check for existing agent processes in
+  the target repo; run reviews from isolated/disposable worktrees even for
+  analysis-only work; continue auditing and reverting any unauthorized mutations
+  before reporting.
+- Status: identified.
+
 ## 2026-06-18 - Use Isolated Review Worktrees For Yolo Reviewers
 
 - Repo: podcast.
