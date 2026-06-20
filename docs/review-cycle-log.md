@@ -26,6 +26,23 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-19 - Run Required Review Before Declaring Slice Complete
+
+- Repo: podcast.
+- Goal or slice: refresh-warning suppression for known feed failures.
+- Implementer: Pi / GPT-family.
+- Reviewer: Claude Code / Opus via `claude-yolo --model opus`.
+- Expected: project-required external review cycle would run before reporting the
+  implementation as complete or commit-ready.
+- Actual: implementation, tests, and docs were completed first, then the user had
+  to explicitly ask whether the review cycle had happened.
+- Impact: no commit occurred, but the closeout was premature and omitted a
+  required quality gate.
+- Fix or follow-up: before final implementation summaries in repositories with a
+  review-cycle rule, check whether the external review has been run; if not,
+  state that plainly and run it before calling the slice complete.
+- Status: identified.
+
 ## 2026-06-19 - Quote Prompts Through Files For tmux Reviewer Runs
 
 - Repo: podcast.
