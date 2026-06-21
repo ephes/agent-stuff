@@ -12,6 +12,7 @@ class BundleResult:
     path: str
     skipped_files: list = field(default_factory=list)
     truncations: list = field(default_factory=list)
+    has_changes: bool = False
 
 
 def _git(repo, *args):
@@ -75,7 +76,10 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
 
     # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
     # surrounding quotes git adds for names with spaces.
-    porcelain = _git(repo, "-c", "core.quotePath=false", "status", "--porcelain")
+    porcelain = _git(
+        repo, "-c", "core.quotePath=false",
+        "status", "--porcelain", "--untracked-files=all",
+    )
     untracked_bodies, notes = [], []
     for line in porcelain.splitlines():
         code, raw_path = line[:2], line[3:]
@@ -142,6 +146,10 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         truncations.append({"section": dropped[1], "dropped": True})
         text = render(secs)
 
+    has_changes = bool(staged.strip() or (not staged_only and unstaged.strip()) or
+                       untracked_bodies or notes or skipped)
+
     with open(out_path, "w") as fh:
         fh.write(text)
-    return BundleResult(path=out_path, skipped_files=skipped, truncations=truncations)
+    return BundleResult(path=out_path, skipped_files=skipped,
+                        truncations=truncations, has_changes=has_changes)

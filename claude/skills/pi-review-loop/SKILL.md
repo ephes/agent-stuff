@@ -40,8 +40,10 @@ implement and fix; Pi reviews with fresh context.
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
      stall or an oversized bundle. Fix the cause and re-run. Never treat a failed
      review as a pass.
-   - `3` → another review already holds the global lock. Wait or investigate the
-     stale lock; do not run concurrent reviews.
+   - `3` → all bounded review slots are busy. Do not report this as a CLEAN
+     review and do not claim a review is queued unless you explicitly run a
+     separate wait/retry wrapper. Either retry later, inspect stale slot metadata,
+     or ask the user whether to raise/lower `--max-concurrent`.
 
 4. Stop after at most 3 rounds. If still not CLEAN after 3 rounds, report the
    outstanding items to the user rather than looping forever.
@@ -50,7 +52,12 @@ implement and fix; Pi reviews with fresh context.
 
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
   are irrelevant. Exit `1`/`2`/`3` are never clean.
-- One review at a time — the harness enforces this with a global lock.
+- Bounded parallelism only — the harness enforces a per-user slot pool. It now
+  defaults to 3 concurrent Pi reviews to avoid a cross-repo bottleneck while still
+  limiting provider pressure. Set `PI_REVIEW_MAX_CONCURRENT=1` or pass
+  `--max-concurrent 1` if provider stalls return.
+- A `CLEAN` result over an empty worktree is invalid: the harness refuses to run
+  the reviewer when there are no staged, unstaged, or untracked changes.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering — do not chase every nit).
 
@@ -60,7 +67,8 @@ implement and fix; Pi reviews with fresh context.
 per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-only`,
 `--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
 files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single
-file's diff is truncated past this), `--lock-dir <dir>`.
+file's diff is truncated past this), `--lock-dir <dir>` (slot-pool directory),
+`--max-concurrent <n>` (default 3, or `PI_REVIEW_MAX_CONCURRENT`).
 
 ## Artifacts (in `--run-dir`)
 

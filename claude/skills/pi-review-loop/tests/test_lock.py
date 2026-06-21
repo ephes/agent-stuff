@@ -87,6 +87,27 @@ class TestLock(unittest.TestCase):
         with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 
+    def test_lock_pool_uses_next_free_slot(self):
+        pool_dir = os.path.join(self.tmp.name, "pool")
+        slot0 = os.path.join(pool_dir, "slot-0")
+        os.makedirs(slot0)
+        lock.write_meta(slot0, {"harness_pid": os.getpid(),
+                                "command": "pi-review-loop"})
+        with lock.LockPool(pool_dir, {"harness_pid": os.getpid()}, max_concurrent=2) as held:
+            self.assertEqual(os.path.basename(held.lock_dir), "slot-1")
+            self.assertTrue(os.path.isdir(held.lock_dir))
+
+    def test_lock_pool_raises_when_all_slots_held(self):
+        pool_dir = os.path.join(self.tmp.name, "pool")
+        for slot in range(2):
+            slot_dir = os.path.join(pool_dir, f"slot-{slot}")
+            os.makedirs(slot_dir)
+            lock.write_meta(slot_dir, {"harness_pid": os.getpid(),
+                                       "command": "pi-review-loop"})
+        with self.assertRaises(lock.LockHeld):
+            with lock.LockPool(pool_dir, {"harness_pid": os.getpid()}, max_concurrent=2):
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()

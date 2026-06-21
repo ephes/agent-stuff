@@ -26,6 +26,26 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-22 - Pi Review Slot Pool And Empty-Bundle Guard
+
+- Repo: agent-stuff.
+- Goal or slice: reduce cross-repo Pi review bottlenecks and prevent false clean
+  verdicts after committing.
+- Implementer: Pi / GPT-family.
+- Reviewer: pending.
+- Expected: parallel agents should be bounded by provider capacity, not a single
+  global mutex; a review with no git changes should not count as CLEAN.
+- Actual: the Pi review harness used one global per-user lock, so unrelated repos
+  queued behind each other; after a commit, an empty diff bundle could still be
+  handed to Pi and reported as CLEAN.
+- Impact: review throughput suffered and agents could report misleading
+  post-commit clean reviews.
+- Fix or follow-up: changed the Pi harness to use a bounded per-user slot pool
+  (default 3, tunable via `--max-concurrent` / `PI_REVIEW_MAX_CONCURRENT`) and to
+  fail closed with INVALID when the worktree has no staged, unstaged, or
+  untracked changes.
+- Status: implemented.
+
 ## 2026-06-19 - Run Required Review Before Declaring Slice Complete
 
 - Repo: podcast.

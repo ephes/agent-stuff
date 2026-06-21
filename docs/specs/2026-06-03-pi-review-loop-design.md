@@ -97,14 +97,16 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
     the monitored review path. Do **not** use `PI_OFFLINE=1` — it disables *all*
     startup network operations and its name implies more; the two targeted vars are
     unambiguous and leave the provider/model call untouched.
-- **Concurrency:** one Pi review at a time, enforced by an **atomic** lock
-  (`mkdir`- or `flock`-based, not a bare PID file), **global per user** because the
-  protected resource is the shared provider API (the M2 root cause), not a per-repo
-  resource. Lock metadata records: harness PID, Pi PID, **Pi PGID**, cwd,
-  started-at, command/model, and run dir. Stale reclaim must guard against PID/PGID
-  **reuse**: before killing an old group, verify identity — recorded command/model
-  match, cwd/run-dir match, and start-time match where available — and tolerate
-  `ESRCH` (group already gone). Only then `killpg` the old **process group**.
+- **Concurrency:** a bounded **global per-user slot pool** is enforced with
+  atomic `mkdir` locks. This protects the shared provider API from unbounded fan-out
+  (the M2 root cause) without serializing every repo behind one review. Default
+  capacity is 3 slots (`PI_REVIEW_MAX_CONCURRENT` / `--max-concurrent` can tune it;
+  set 1 to restore strict serialization if provider stalls return). Slot metadata
+  records: harness PID, Pi PID, **Pi PGID**, cwd, started-at, command/model, run dir,
+  slot index, and capacity. Stale reclaim must guard against PID/PGID **reuse**:
+  before killing an old group, verify identity — recorded command/model match,
+  cwd/run-dir match, and start-time match where available — and tolerate `ESRCH`
+  (group already gone). Only then `killpg` the old **process group**.
 - **Completion:** parse the verdict from the **final assistant message** in the
   terminal `agent_end` event — never from the whole transcript (the transcript
   echoes the user prompt/bundle, which contains verdict *examples*; scanning it
@@ -156,8 +158,9 @@ background or polls a log itself.
 
 The harness:
 
-1. **Preflight** — acquire the global lock (reclaim if stale); resolve the GPT model
-   (else pinned fallback); assemble the review bundle (see Scope).
+1. **Preflight** — acquire a slot from the per-user lock pool (reclaim if stale);
+   resolve the GPT model (else pinned fallback); assemble the review bundle (see
+   Scope).
 2. **Spawn** Pi directly in its **own session/process group**, e.g.
    `subprocess.Popen([...], start_new_session=True, stdout=PIPE, stderr=PIPE)` — no
    `/bin/zsh -c` wrapper (shell wrapping reintroduces quoting bugs and process-tree
@@ -213,7 +216,7 @@ The harness:
    ```
 
 4. **Teardown (always)** — ensure the process group is reaped on every exit path
-   (success, invalid, crash, stall, round cap); release the lock; leave logs for
+   (success, invalid, crash, stall, round cap); release the slot lock; leave logs for
    inspection. **`result.json` is always written**, even on a harness-internal
    error (wrap the run so an unexpected exception still emits a `CRASHED` result
    with the traceback) — Claude must never be left polling for a file that never
@@ -300,6 +303,7 @@ timings, skipped/truncated files).
 | File size cap | `--max-file-size` | 256 KB | Larger files are excluded from the bundle + listed as skipped. |
 | Per-file diff cap | `--max-diff-bytes-per-file` | 256 KB | A single file's diff is truncated past this; truncation noted. |
 | Total bundle cap | `--max-bundle-bytes` | 2 MB | Many sub-cap files can still overflow context / trigger compaction / inflate cost. Past this, lowest-priority sections are dropped. |
+| Max concurrent reviews | `--max-concurrent` / `PI_REVIEW_MAX_CONCURRENT` | 3 | Bounded parallelism: avoids one cross-repo bottleneck while limiting provider pressure. Set to 1 for strict serialization. |
 | Max rounds `N` | `--max-rounds` | 3 | Then stop and report unresolved items rather than loop forever. |
 
 All are overridable as skill arguments.
@@ -315,7 +319,8 @@ All are overridable as skill arguments.
 - Not a Codex driver — this is a Claude Code skill specifically.
 - Not RPC mode — json mode's event stream is sufficient; RPC is overkill unless we
   later need interactive multi-prompt control of a single session.
-- Does not run concurrent reviews.
+- Does not run unbounded concurrent reviews; concurrency is capped by the per-user
+  slot pool.
 
 ## Verification results & implementation deltas (post-build)
 
@@ -330,9 +335,9 @@ Deltas from the design above, all discovered/confirmed during build + live smoke
 - **Reviewer instruction (resolved):** the bundle is diff-only, so Pi emits no
   verdict from it alone. The reviewer role + `REVIEW:` contract are passed via
   `--append-system-prompt`. Live: returns a parseable `REVIEW: CLEAN`.
-- **Lock identity (delta):** the CLI holds the lock keyed on the **harness PID**
-  (the runner owns the Pi process), and reclaim is **fail-closed** — a lock with no
-  readable meta is treated as held, never reclaimed.
+- **Lock identity (delta):** the CLI holds each slot lock keyed on the **harness
+  PID** (the runner owns the Pi process), and reclaim is **fail-closed** — a slot
+  with no readable meta is treated as held, never reclaimed.
 - **Startup network noise (resolved):** `PI_SKIP_VERSION_CHECK=1` + `PI_TELEMETRY=0`
   set on the subprocess (Pi README); the model call still reaches the provider.
 - **M2 confirmed live:** after ~10 rapid `pi` calls the provider blocked, producing

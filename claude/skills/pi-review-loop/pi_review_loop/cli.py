@@ -1,4 +1,4 @@
-"""CLI entry: assemble bundle, run one Pi review under the lock, emit result."""
+"""CLI entry: assemble bundle, run one Pi review under a slot lock, emit result."""
 import argparse
 import os
 import shlex
@@ -8,10 +8,10 @@ import time
 
 from . import bundle as bundle_mod
 from . import model as model_mod
-from .lock import Lock, LockHeld, write_meta
+from .lock import LockHeld, LockPool, write_meta
 from .result import ReviewResult
 from .runner import run_review
-from .states import CLEAN, ISSUES, FAILED, CRASHED
+from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
 
 REVIEW_INSTRUCTION = """\
 You are a code reviewer. Review ONLY the changes in the provided review bundle \
@@ -33,13 +33,33 @@ must appear verbatim and last."""
 EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
 
 
+def _positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be an integer")
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
+def _default_max_concurrent():
+    try:
+        return _positive_int(os.environ.get("PI_REVIEW_MAX_CONCURRENT", "3"))
+    except argparse.ArgumentTypeError:
+        return 3
+
+
 def _build_parser():
     p = argparse.ArgumentParser(prog="pi-review-loop",
                                 description="Run one Pi review over a git diff.")
     p.add_argument("--repo", default=".")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--lock-dir",
-                   default=os.path.expanduser("~/.cache/pi-review-loop/lock"))
+                   default=os.path.expanduser("~/.cache/pi-review-loop/locks"))
+    p.add_argument("--max-concurrent", type=_positive_int,
+                   default=_default_max_concurrent(),
+                   help="maximum concurrent Pi review slots for this user")
     p.add_argument("--model", default=None, help="override model id")
     p.add_argument("--stall-timeout", type=float, default=180)
     p.add_argument("--retry-grace", type=float, default=30)
@@ -69,7 +89,7 @@ def main(argv=None):
     os.makedirs(args.run_dir, exist_ok=True)
     os.makedirs(os.path.dirname(args.lock_dir) or ".", exist_ok=True)
 
-    model = args.model or model_mod.resolve_from_cli()
+    model = args.model or "unresolved"
     bundle_path = os.path.join(args.run_dir, "review-bundle.md")
     try:
         b = bundle_mod.build_bundle(
@@ -96,12 +116,26 @@ def main(argv=None):
             pass
         return 2
 
+    if not b.has_changes:
+        msg = "no changes to review; refusing to treat an empty bundle as clean"
+        print(f"pi-review-loop: {msg}", file=sys.stderr)
+        now = time.monotonic()
+        ReviewResult(state=INVALID, items=[], model=model, cost=None,
+                     started_at=now, ended_at=now, error=msg).write(
+                         os.path.join(args.run_dir, "result.json"))
+        return 2
+
+    model = args.model or model_mod.resolve_from_cli()
     meta = {"harness_pid": os.getpid(), "cwd": os.path.abspath(args.repo),
             "command": "pi-review-loop", "model": model, "run_dir": args.run_dir}
     try:
-        with Lock(args.lock_dir, meta):
+        with LockPool(args.lock_dir, meta, args.max_concurrent) as held_lock:
             def _record_pgid(pgid):
-                write_meta(args.lock_dir, {**meta, "pi_pgid": pgid})
+                write_meta(held_lock.lock_dir, {
+                    **meta, "pi_pgid": pgid,
+                    "lock_slot": held_lock.slot,
+                    "max_concurrent": args.max_concurrent,
+                })
             result = run_review(
                 cmd=_pi_cmd(model, bundle_path), run_dir=args.run_dir,
                 model=model, stall_timeout=args.stall_timeout,

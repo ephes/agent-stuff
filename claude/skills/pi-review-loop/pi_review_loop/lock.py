@@ -1,7 +1,9 @@
-"""Atomic, global-per-user lock so only one Pi review runs at a time (concurrent
-reviews are what worsen provider API blocking). Uses mkdir for atomicity. Stale
-reclaim is reuse-safe: it only removes a lock whose recorded process group is
-genuinely gone."""
+"""Atomic, global-per-user review slot locks.
+
+The harness uses a bounded slot pool rather than an unlimited fan-out or a single
+cross-repo mutex: a few Pi reviews may run in parallel, while stale slot reclaim
+remains reuse-safe and only removes a slot whose recorded holder is gone.
+"""
 import errno
 import json
 import os
@@ -144,4 +146,47 @@ class Lock:
             os.rmdir(self.lock_dir)
         except OSError:
             pass
+        return False
+
+
+class LockPool:
+    """Acquire one slot from a bounded per-user review pool.
+
+    A single global lock serialized every repository behind one Pi call. The pool
+    keeps a hard cap for provider protection while allowing unrelated agents to
+    review in parallel.
+    """
+
+    def __init__(self, pool_dir, meta, max_concurrent=3):
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+        self.pool_dir = pool_dir
+        self.meta = dict(meta)
+        self.max_concurrent = max_concurrent
+        self._lock = None
+        self.lock_dir = None
+        self.slot = None
+
+    def __enter__(self):
+        os.makedirs(self.pool_dir, exist_ok=True)
+        last_error = None
+        for slot in range(self.max_concurrent):
+            slot_dir = os.path.join(self.pool_dir, f"slot-{slot}")
+            slot_meta = {**self.meta, "lock_slot": slot,
+                         "max_concurrent": self.max_concurrent}
+            try:
+                self._lock = Lock(slot_dir, slot_meta).__enter__()
+                self.lock_dir = slot_dir
+                self.slot = slot
+                return self
+            except LockHeld as e:
+                last_error = e
+                continue
+        raise LockHeld(
+            f"all {self.max_concurrent} review slots held: {self.pool_dir}"
+        ) from last_error
+
+    def __exit__(self, *exc):
+        if self._lock is not None:
+            return self._lock.__exit__(*exc)
         return False

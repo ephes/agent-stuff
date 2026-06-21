@@ -40,6 +40,11 @@ class TestBundle(unittest.TestCase):
             text = fh.read()
         self.assertIn("two", text)
         self.assertIn("diffstat", text.lower())
+        self.assertTrue(res.has_changes)
+
+    def test_clean_worktree_reports_no_changes(self):
+        res = self._build()
+        self.assertFalse(res.has_changes)
 
     def test_untracked_file_contents_included(self):
         with open(os.path.join(self.repo, "new.py"), "w") as fh:
@@ -47,6 +52,15 @@ class TestBundle(unittest.TestCase):
         res = self._build()
         with open(res.path) as fh:
             self.assertIn("NEW_MARKER", fh.read())
+        self.assertTrue(res.has_changes)
+
+    def test_untracked_file_in_directory_included(self):
+        os.mkdir(os.path.join(self.repo, "newdir"))
+        with open(os.path.join(self.repo, "newdir", "new.py"), "w") as fh:
+            fh.write("NESTED_MARKER = 1\n")
+        res = self._build()
+        with open(res.path) as fh:
+            self.assertIn("NESTED_MARKER", fh.read())
 
     def test_oversized_file_is_skipped_not_inlined(self):
         big = "x" * 5000

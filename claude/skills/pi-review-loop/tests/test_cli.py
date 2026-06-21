@@ -53,19 +53,37 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn("ISSUES", proc.stdout)
 
-    def test_lock_held_exit_three(self):
+    def test_lock_held_exit_three_when_all_slots_busy(self):
         lock_dir = os.path.join(self.tmp.name, "lock")
-        os.mkdir(lock_dir)
-        with open(os.path.join(lock_dir, "meta.json"), "w") as fh:
+        slot_dir = os.path.join(lock_dir, "slot-0")
+        os.makedirs(slot_dir)
+        with open(os.path.join(slot_dir, "meta.json"), "w") as fh:
             fh.write('{"harness_pid": %d, "command": "pi-review-loop"}' % os.getpid())
         env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
             [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
-             "--lock-dir", lock_dir, "--model", "fake/model"],
+             "--lock-dir", lock_dir, "--max-concurrent", "1",
+             "--model", "fake/model"],
             capture_output=True, text=True, env=env,
         )
         self.assertEqual(proc.returncode, 3, proc.stdout)
+
+    def test_uses_free_slot_when_another_slot_is_held(self):
+        lock_dir = os.path.join(self.tmp.name, "lock")
+        slot_dir = os.path.join(lock_dir, "slot-0")
+        os.makedirs(slot_dir)
+        with open(os.path.join(slot_dir, "meta.json"), "w") as fh:
+            fh.write('{"harness_pid": %d, "command": "pi-review-loop"}' % os.getpid())
+        env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
+             "--lock-dir", lock_dir, "--max-concurrent", "2",
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_nonexistent_repo_exits_two_cleanly(self):
         missing = os.path.join(self.tmp.name, "does-not-exist")
@@ -96,6 +114,22 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2, proc.stdout)
         self.assertNotIn("Traceback", proc.stderr)
+
+    def test_empty_worktree_exits_two_without_invoking_reviewer(self):
+        subprocess.run(["git", "checkout", "--", "a.py"], cwd=self.repo,
+                       check=True, capture_output=True)
+        env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run4"),
+             "--lock-dir", os.path.join(self.tmp.name, "lock4"), "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout)
+        self.assertIn("empty bundle", proc.stderr)
+        import json
+        with open(os.path.join(self.tmp.name, "run4", "result.json")) as fh:
+            self.assertEqual(json.load(fh)["state"], "INVALID")
 
 
 class TestPiCmd(unittest.TestCase):
