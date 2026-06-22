@@ -525,3 +525,22 @@ Project-specific execution lessons belong in the project repo, not here.
   when `claude-yolo` exits before fish pipeline status logging, and provide a
   documented fallback policy for re-review attempts after a clean first review.
 - Status: blocked on review tooling.
+
+## 2026-06-22 - Docs-First Review Needs Current-Vs-Target Sweep
+
+- Repo: podcast.
+- Goal or slice: docs-first episode lifecycle state model and backlog cleanup task.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus via `claude-yolo --model opus`.
+- Expected: a three-cycle review loop would reach a clean external review before
+  manual handoff.
+- Actual: cycle 3 found one remaining current-vs-target wording mismatch in the
+  product doc after the reference docs had been qualified; the mismatch was fixed
+  after the final allowed cycle, so no fourth clean re-review was run.
+- Impact: the slice can be manually reviewed with checks passing, but the review
+  loop did not produce a final clean external verdict.
+- Fix or follow-up: for docs-first slices that intentionally document desired
+  behavior before implementation, include an explicit current-vs-target sweep in
+  the first review prompt and grep both reference/current docs and product docs
+  for unqualified target claims before re-review.
+- Status: identified.
