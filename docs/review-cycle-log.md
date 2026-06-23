@@ -544,3 +544,5 @@ Project-specific execution lessons belong in the project repo, not here.
   the first review prompt and grep both reference/current docs and product docs
   for unqualified target claims before re-review.
 - Status: identified.
+
+- 2026-06-23: Claude review cycle hit API 529 Overloaded before emitting the completion sentinel. Treat this as an infrastructure failure, kill the waiting tmux session, record the failed log path, and rerun the same review cycle rather than counting it as completed. Status: applied.
