@@ -26,6 +26,24 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-24 - Claude tmux Review Needs Interactive Shell Dispatch
+
+- Repo: podcast.
+- Goal or slice: Persistence & Responsiveness Refactor Phase 0 measurement.
+- Implementer: Codex / GPT-family.
+- Reviewer: Claude Code / Opus via `claude-yolo --model opus`.
+- Expected: a detached one-shot tmux command would run `claude-yolo --model opus
+  -p` with redirected prompt and log files and leave review output in the log.
+- Actual: the detached wrapper exited without durable output; launching a fresh
+  tmux shell and sending the fish command into the pane produced normal Claude
+  review output.
+- Impact: the first review handoff attempts were wasted and had to be rerun, but
+  the required review loop completed before commit.
+- Fix or follow-up: for Claude yolo review cycles, prefer `tmux new-session`
+  followed by `tmux send-keys` into an interactive shell, or use a checked script
+  file, instead of deeply nested detached shell/fish/redirection strings.
+- Status: identified.
+
 ## 2026-06-22 - Pi Review Slot Pool And Empty-Bundle Guard
 
 - Repo: agent-stuff.
