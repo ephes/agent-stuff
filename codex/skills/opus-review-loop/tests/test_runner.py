@@ -58,6 +58,17 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.state, PROVIDER_ERROR)
         self.assertIn("529", r.error or "")
 
+    def test_default_stdin_is_closed(self):
+        r = self._run("stdin_empty")
+        self.assertEqual(r.state, CLEAN)
+
+    def test_input_path_supplies_stdin(self):
+        prompt_path = os.path.join(self.run_dir, "prompt.txt")
+        with open(prompt_path, "w") as fh:
+            fh.write("review prompt")
+        r = self._run("stdin_prompt", input_path=prompt_path)
+        self.assertEqual(r.state, CLEAN)
+
     def test_on_spawn_receives_pgid(self):
         seen = []
         r = self._run("clean", on_spawn=lambda p: seen.append(p))

@@ -6,6 +6,8 @@
   crash      -> print a malformed line then exit 1 (no result)
   posthang   -> emit a CLEAN result then sleep forever (exit hang)
   provider_error -> emit an error result then exit 1
+  stdin_empty -> return CLEAN only when stdin is empty
+  stdin_prompt -> return CLEAN only when stdin contains "review prompt"
 """
 import json
 import sys
@@ -64,6 +66,12 @@ def main():
             "terminal_reason": "api_error",
         })
         sys.exit(1)
+    elif mode == "stdin_empty":
+        text = "REVIEW: CLEAN" if sys.stdin.read() == "" else "REVIEW: ISSUES\n1. [Warning] stdin: inherited unexpected input"
+        emit(result(text))
+    elif mode == "stdin_prompt":
+        text = "REVIEW: CLEAN" if "review prompt" in sys.stdin.read() else "REVIEW: ISSUES\n1. [Warning] stdin: prompt missing"
+        emit(result(text))
 
 
 if __name__ == "__main__":

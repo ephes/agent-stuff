@@ -1,6 +1,6 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when Codex implemented the slice and Claude should review it, or when coordinating up to three fix/re-review cycles with claude-yolo or codex-yolo.
+description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when Codex implemented the slice and Claude should review it, or when coordinating up to three fix/re-review cycles with direct Claude Code or codex-yolo.
 ---
 
 # Cross-Agent Review Cycle
@@ -13,25 +13,24 @@ slice. The reviewer must be a different model family from the implementer.
 ## Reviewer Selection
 
 - If the implementer is Codex, review with Claude:
-  `claude-yolo -p --model opus`
+  `claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands`
 - If the implementer is Claude, review with Codex:
   `codex-yolo -m gpt-5.5`
 
-If the yolo commands are shell functions and are not visible from the current
-shell, invoke them through fish:
+If the Codex yolo command is a shell function and is not visible from the
+current shell, invoke it through fish:
 
 ```bash
-fish -lc 'claude-yolo -p --model opus'
 fish -lc 'codex-yolo -m gpt-5.5'
 ```
 
 Do not silently substitute a same-family reviewer. If the requested reviewer
 command or model is unavailable, report the blocker.
 
-Do not add `--max-budget-usd`, `--permission-mode`, or equivalent ad hoc
-permission/budget flags to Claude review commands. The `claude-yolo` alias owns
-permissions, and subscription usage should not be represented as a per-run budget
-cap.
+Do not add `--max-budget-usd`, `--dangerously-skip-permissions`, or equivalent
+ad hoc permission/budget flags to Claude review commands. Direct read-only
+review should disable tools; subscription usage should not be represented as a
+per-run budget cap.
 
 ## Cycle Limit
 
@@ -69,17 +68,16 @@ without explicit user direction.
    ```
 
 3. For a Codex implementer, run Claude as a one-shot noninteractive review
-   inside tmux. Use a tiny fish wrapper so shell aliases/functions are available
-   and the log is tee'd for inspection:
+   inside tmux. Feed the prompt file on stdin and tee the log for inspection:
 
    ```bash
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]
-   cat "$prompt_file" | claude-yolo -p --model opus 2>&1 | tee "$log_file"
+   claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
    set statuses $pipestatus
-   printf "\n[claude-yolo pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
+   printf "\n[claude pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
    read -P "review finished; press Enter to close tmux pane"
    FISH
    tmux new-session -d -s "$session" -c "$PWD" \
@@ -125,9 +123,18 @@ without explicit user direction.
    ```
 
    If you manually stop or kill a tmux review before completion, verify that no
-   `claude-yolo` / `claude --model opus` child remains. Kill the review process
-   group before starting another review; tmux can exit while the Claude child
-   continues running.
+   `claude --model opus` child remains. Kill the review process group before
+   starting another review; tmux can exit while the Claude child continues
+   running.
+
+## Claude Prompt Discipline
+
+- Prompt via stdin: use exactly one stdin source, such as `< "$prompt_file"`;
+  do not also pass a positional prompt.
+- Prompt as an argument: put it after `--` and close stdin, for example
+  `claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands -- "$PROMPT" </dev/null`.
+- `--tools ""` is variadic. Never put a positional prompt immediately after it;
+  either use stdin or insert `--` before the prompt.
 
 ## Review Prompt Contents
 

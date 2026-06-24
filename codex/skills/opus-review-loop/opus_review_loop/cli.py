@@ -1,7 +1,6 @@
 """CLI entry: assemble bundle, run one Claude Opus review, emit result."""
 import argparse
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -56,8 +55,10 @@ def _claude_cmd(model):
     # Test seam: OPUS_REVIEW_FAKE_CMD replaces the `claude ...` argv entirely.
     fake = os.environ.get("OPUS_REVIEW_FAKE_CMD")
     if fake:
+        import shlex
         return shlex.split(fake)
-    args = [
+    return [
+        "claude",
         "-p",
         "--model", model,
         "--output-format", "stream-json",
@@ -68,21 +69,6 @@ def _claude_cmd(model):
         "--setting-sources", "local",
         "--append-system-prompt", REVIEW_INSTRUCTION,
     ]
-    if _fish_claude_yolo_available():
-        return ["fish", "-lc", shlex.join(["claude-yolo", *args])]
-    return ["claude", *args]
-
-
-def _fish_claude_yolo_available():
-    try:
-        return subprocess.run(
-            ["fish", "-lc", "type -q claude-yolo"],
-            capture_output=True,
-            timeout=5,
-            check=False,
-        ).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
 
 
 def _write_prompt(bundle_path, prompt_path):

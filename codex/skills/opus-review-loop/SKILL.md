@@ -12,11 +12,12 @@ The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you ne
 a process or guess whether Claude is stuck. A hung or blocked review is detected and killed,
 and you always get a structured result.
 
-The harness prefers the user's fish `claude-yolo` alias when it is available:
-`fish -lc 'claude-yolo -p --model opus ...'`. If that alias is unavailable, it
-falls back to direct `claude -p`. Do not add `--max-budget-usd`,
-`--permission-mode`, or other ad hoc launch flags; the alias owns permissions and
-the harness owns lifecycle limits.
+The harness runs direct `claude -p` with tools disabled and supplies the review
+prompt from a prompt file on stdin. It does not use `claude-yolo`; read-only
+review does not need write-capable permission bypass. Do not add
+`--max-budget-usd`, `--permission-mode`, `--dangerously-skip-permissions`, or
+other ad hoc launch flags; the harness owns lifecycle limits and the review
+bundle is the entire review surface.
 
 ## When to use
 
@@ -61,14 +62,16 @@ implement and fix; Claude Opus reviews with fresh context.
   it. Claude Opus can emit the initial stream event, then stay silent for more
   than 120 seconds before returning a valid review; a too-short override can
   create false `STALLED` results.
+- The harness deliberately avoids a positional prompt. `--tools ""` is safe here
+  because the prompt is provided on stdin; do not hand-roll
+  `claude -p --tools "" "$PROMPT"` without an explicit `--` delimiter.
 - If a run exits `2` with `state: STALLED` and `events.jsonl` only contains
   startup/init activity, rerun once with the default or a longer stall timeout
   before declaring the external review unavailable.
 - After manually interrupting any review command, check for leftover
-  `claude-yolo` / `claude --model opus` processes and terminate the recorded
-  process group before starting another review. The harness should reap its own
-  children, but manual kills and tmux wrapper kills can leave provider calls
-  running.
+  `claude --model opus` processes and terminate the recorded process group before
+  starting another review. The harness should reap its own children, but manual
+  kills can leave provider calls running.
 
 ## Hard rules
 

@@ -103,8 +103,7 @@ class TestClaudeCmd(unittest.TestCase):
     def test_direct_claude_cmd_includes_review_instruction(self):
         from opus_review_loop import cli
         env = {k: v for k, v in os.environ.items() if k != "OPUS_REVIEW_FAKE_CMD"}
-        with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch("opus_review_loop.cli._fish_claude_yolo_available", return_value=False):
+        with mock.patch.dict(os.environ, env, clear=True):
             cmd = cli._claude_cmd("opus")
         self.assertEqual(cmd[0], "claude")
         self.assertIn("-p", cmd)
@@ -120,21 +119,8 @@ class TestClaudeCmd(unittest.TestCase):
         self.assertIn("REVIEW: CLEAN", instruction)
         self.assertIn("REVIEW: ISSUES", instruction)
         self.assertIn("code reviewer", instruction)
+        self.assertNotIn("claude-yolo", cmd)
         self.assertNotIn("--max-budget-usd", cmd)
-
-    def test_claude_cmd_prefers_fish_claude_yolo_alias(self):
-        from opus_review_loop import cli
-        env = {k: v for k, v in os.environ.items() if k != "OPUS_REVIEW_FAKE_CMD"}
-        with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch("opus_review_loop.cli._fish_claude_yolo_available", return_value=True):
-            cmd = cli._claude_cmd("opus")
-        self.assertEqual(cmd[:2], ["fish", "-lc"])
-        shell_cmd = cmd[2]
-        self.assertIn("claude-yolo", shell_cmd)
-        self.assertIn("--model opus", shell_cmd)
-        self.assertIn("--output-format stream-json", shell_cmd)
-        self.assertIn("--append-system-prompt", shell_cmd)
-        self.assertNotIn("--max-budget-usd", shell_cmd)
 
     def test_fake_cmd_seam_used_when_env_set(self):
         from opus_review_loop import cli

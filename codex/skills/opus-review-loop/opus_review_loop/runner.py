@@ -151,7 +151,10 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         if input_path is not None:
             stdin_f = open(input_path, "rb")
         proc = subprocess.Popen(
-            cmd, stdin=stdin_f, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd,
+            stdin=stdin_f if stdin_f is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             start_new_session=True, env=sub_env, bufsize=0,
         )
         try:
