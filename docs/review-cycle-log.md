@@ -546,3 +546,5 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status: identified.
 
 - 2026-06-23: Claude review cycle hit API 529 Overloaded before emitting the completion sentinel. Treat this as an infrastructure failure, kill the waiting tmux session, record the failed log path, and rerun the same review cycle rather than counting it as completed. Status: applied.
+
+- 2026-06-24: Claude no-tools analysis review exited without the required sentinel after asking to read files. Treat this as a prompt/context failure, not a review finding: kill the waiting tmux pane, restart the same round with the relevant file snippets embedded directly, and explicitly instruct Claude to report insufficient context as a finding instead of requesting tools. Status: applied.
