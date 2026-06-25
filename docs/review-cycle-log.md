@@ -42,7 +42,10 @@ Project-specific execution lessons belong in the project repo, not here.
   Recurrence on 2026-06-25 during an Episode Detail chapter-disclosure docs
   review: even with an embedded diff, Claude attempted disabled file reads when
   asked for line references; rerunning with explicit "review only the diff in
-  this prompt; do not try tools" completed normally.
+  this prompt; do not try tools" completed normally. Recurrence later the same
+  day during the download-progress/device-workflow review: Claude emitted a
+  disabled Read tool call despite an embedded diff; rerunning with a stronger
+  "do not output tool_use JSON; state limitations instead" instruction completed.
 
 ## 2026-06-24 - Claude tmux Review Needs Interactive Shell Dispatch
 
@@ -660,3 +663,19 @@ Project-specific execution lessons belong in the project repo, not here.
   no-tools re-reviews, put the evidence boundary and no-tools instruction in the
   first paragraph and avoid asking Claude to independently verify live files.
   Status: applied.
+
+- 2026-06-25: Claude Opus no-tools review for an emerge table-splitter reset
+  fix exited successfully without the required sentinel after emitting attempted
+  tool-call markup. The retry succeeded when the prompt explicitly said this
+  replaced an invalid no-sentinel attempt and that all code needed for review
+  was included in the prompt. For no-tools first-review prompts, put the
+  self-contained evidence boundary before the implementation scope and ban tool
+  calls/slash commands explicitly. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools round-2 re-review for emerge MI local
+  filtering exited with pipeline status 143 and no review text when given a
+  full-diff prompt. The retry succeeded with a shorter prompt containing the
+  prior findings, verification results, and line-numbered changed snippets. For
+  no-tools re-reviews, prefer focused snippets over full raw diffs when the
+  changed files are large, and detect pipeline status without sentinel before
+  waiting on a runner prompt. Status: applied.
