@@ -26,6 +26,27 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-25 - Tool-disabled Claude Reviews Can Hallucinate Verification
+
+- Repo: podcast.
+- Goal or slice: Episode Detail chapter folding implementation.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus.
+- Expected: a read-only `claude -p --tools ""` review would either review the
+  supplied context or state that direct verification was unavailable.
+- Actual: the first review emitted apparent tool-use/output and reported warnings
+  against stale or nonexistent code/docs. A second review with `claude-yolo`,
+  explicit read-only instructions, and direct worktree access re-verified the
+  findings as invalid and closed clean after a final docs-trace-only re-review.
+- Impact: one extra review cycle was consumed and false warnings had to be
+  triaged carefully instead of implemented.
+- Fix or follow-up: for code-review cycles that require direct verification, do
+  not disable tools unless the prompt embeds the exact diff and explicitly asks
+  the reviewer to state limitations rather than invent file reads. If a review
+  report cites symbols/files that do not exist, verify before changing code and
+  use the next cycle to document accepted/rejected findings.
+- Status: identified.
+
 ## 2026-06-25 - Read-only Claude Reviews Need Self-contained Diffs
 
 - Repo: podcast.
