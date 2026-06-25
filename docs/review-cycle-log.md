@@ -26,6 +26,20 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-25 - Read-only Claude Reviews Need Self-contained Diffs
+
+- Repo: podcast.
+- Goal or slice: episode artwork show-navigation implementation.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus via `claude -p --model opus --tools ""`.
+- Expected: the read-only tmux review prompt would let Claude review without tools.
+- Actual: the first prompt listed touched files but did not embed the diff, so Claude attempted an unavailable Read tool and ended without the required sentinel.
+- Impact: the first review attempt had to be killed and rerun with a self-contained diff prompt.
+- Fix or follow-up: when tools are disabled for a reviewer, include the relevant diff/context inline rather than only file paths.
+- Status: identified. Recurrence on 2026-06-25 during the transcript-reader
+  stabilization review: an initial no-diff prompt again produced no usable
+  sentinel, and rerunning with the scoped diff embedded completed normally.
+
 ## 2026-06-24 - Claude tmux Review Needs Interactive Shell Dispatch
 
 - Repo: podcast.
@@ -566,3 +580,43 @@ Project-specific execution lessons belong in the project repo, not here.
 - 2026-06-23: Claude review cycle hit API 529 Overloaded before emitting the completion sentinel. Treat this as an infrastructure failure, kill the waiting tmux session, record the failed log path, and rerun the same review cycle rather than counting it as completed. Status: applied.
 
 - 2026-06-24: Claude no-tools analysis review exited without the required sentinel after asking to read files. Treat this as a prompt/context failure, not a review finding: kill the waiting tmux pane, restart the same round with the relevant file snippets embedded directly, and explicitly instruct Claude to report insufficient context as a finding instead of requesting tools. Status: applied.
+
+- 2026-06-24: Claude Code `-p` review invocations for podcast P2 hung with
+  zero-byte logs in tmux and in foreground when using the default text output
+  path. A foreground smoke test with `--no-session-persistence --output-format
+  json` completed, and the follow-up review completed with that exact mode
+  outside tmux. For Claude Code review automation, try JSON print mode before
+  spending multiple polling intervals on silent text-mode runs; record any tmux
+  deviation separately from the review verdict. Status: identified.
+
+- 2026-06-24: Claude Opus no-tools review for emerge slice 5 first returned
+  partial prose and no sentinel after saying it needed to read files. The retry
+  succeeded when the prompt explicitly said the reviewer had no tools, must not
+  inspect files, and must review only the supplied diff. For no-tools review
+  prompts, state the available evidence boundary before the scope and require
+  insufficient context to be reported as a finding instead of tool-seeking prose.
+  Status: applied.
+
+- 2026-06-24: Claude Opus final-goal review for emerge MI management repeated
+  the no-tools failure mode: the first prompt described repo paths and asked for
+  inspection, so Claude emitted a tool call and exited without the required
+  sentinel. Kill the waiting tmux pane and rerun the same round with the
+  evidence boundary first, explicitly saying no repository reads are available
+  and insufficient context must be reported as a finding. Status: applied.
+
+- 2026-06-24: Claude Opus review for podcast responsiveness stress proof hung
+  for multiple minutes with zero output when given embedded 30KB, 24KB, 14KB,
+  and 4KB diff prompts through both tmux and foreground `-p` modes. A tiny smoke
+  prompt returned immediately, and a concise risk-summary review prompt returned
+  `CLEAN` in tmux. For closeout reviews under this failure mode, first verify
+  the CLI with a tiny smoke prompt, then prefer a short evidence summary focused
+  on Critical/Warning risks over progressively smaller raw diffs. Status:
+  identified.
+
+- 2026-06-25: A Claude no-tools re-review prompt for a docs-only backlog change
+  still emitted repeated tool-seeking prose and no sentinel, despite embedding
+  the full changed block. The retry succeeded in tmux with `claude-yolo -p` and
+  read-only tools (`--allowedTools Read,Grep,Glob`). For re-reviews that ask
+  Claude to verify the live file matches a supplied docs excerpt, prefer a
+  read-only-tool Claude Code invocation over no-tools analysis, or explicitly
+  remove all language about reading/verifying live files. Status: applied.
