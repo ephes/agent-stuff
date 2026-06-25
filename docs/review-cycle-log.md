@@ -679,3 +679,31 @@ Project-specific execution lessons belong in the project repo, not here.
   no-tools re-reviews, prefer focused snippets over full raw diffs when the
   changed files are large, and detect pipeline status without sentinel before
   waiting on a runner prompt. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools final re-review for emerge MI validity
+  picker exited successfully without the required sentinel after emitting
+  attempted tool-call markup. The retry succeeded when the first paragraph
+  explicitly said to review only the supplied prompt text, banned tool XML, and
+  embedded the exact validation and add-row snippets needed to close the prior
+  warning. For no-tools re-reviews, include the decisive source excerpts in the
+  prompt and avoid asking Claude to verify live files. Status: applied.
+
+- 2026-06-25: Podcast transcript/metadata fix was validated and device-installed
+  before the mandatory cross-agent review loop ran; the user caught the missing
+  review step. For projects with AGENTS.md review-cycle requirements, treat
+  external review as part of implementation completion, not only commit prep, and
+  run it before reporting a slice as fixed/deployed. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools round-2 re-review for emerge MI edit-table
+  layout exited without the required sentinel after trying to invoke a skill,
+  despite tools being disabled. The retry succeeded when the first paragraph
+  explicitly said "Do not use skills" in addition to banning tools and framed
+  the prior attempt as invalid. For no-tools Claude reviews, ban both tools and
+  skills when the prompt asks for a code review. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools review for emerge CGMES/UCTE selection
+  behavior again exited before the sentinel after trying to invoke its own
+  review skill. The retry succeeded with a self-contained evidence prompt and
+  no tool access; later cycles completed normally. For no-tools Claude review
+  loops, keep banning skills alongside tools and treat any pre-sentinel skill
+  invocation as an invalid review that needs a focused retry. Status: applied.
