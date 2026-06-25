@@ -39,6 +39,10 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status: identified. Recurrence on 2026-06-25 during the transcript-reader
   stabilization review: an initial no-diff prompt again produced no usable
   sentinel, and rerunning with the scoped diff embedded completed normally.
+  Recurrence on 2026-06-25 during an Episode Detail chapter-disclosure docs
+  review: even with an embedded diff, Claude attempted disabled file reads when
+  asked for line references; rerunning with explicit "review only the diff in
+  this prompt; do not try tools" completed normally.
 
 ## 2026-06-24 - Claude tmux Review Needs Interactive Shell Dispatch
 
@@ -620,3 +624,21 @@ Project-specific execution lessons belong in the project repo, not here.
   Claude to verify the live file matches a supplied docs excerpt, prefer a
   read-only-tool Claude Code invocation over no-tools analysis, or explicitly
   remove all language about reading/verifying live files. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools round-2 re-review for an emerge frontend
+  geometry fix exited without the required sentinel after saying it needed to
+  inspect files, even though the diff was embedded. The retry succeeded when the
+  prompt opened with an explicit no-tools evidence boundary, supplied the needed
+  surrounding code facts, and asked Claude to review only the supplied diff. For
+  no-tools re-reviews, put the evidence boundary before any repo/file language
+  and include key surrounding facts that would otherwise trigger tool-seeking.
+  Status: applied.
+
+- 2026-06-25: Claude Opus no-tools round-2 re-review for emerge MI process
+  selection emitted tool-seeking prose and exited without the required sentinel
+  even though the full diff was embedded. The retry succeeded when the prompt
+  opened with "review from supplied prompt contents only", explicitly said "do
+  not use tools", and framed the previous no-sentinel run as invalid. For
+  no-tools re-reviews, put the evidence boundary and no-tools instruction in the
+  first paragraph and avoid asking Claude to independently verify live files.
+  Status: applied.
