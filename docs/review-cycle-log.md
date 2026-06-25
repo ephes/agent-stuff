@@ -581,7 +581,25 @@ Project-specific execution lessons belong in the project repo, not here.
   for unqualified target claims before re-review.
 - Status: identified.
 
-- 2026-06-23: Claude review cycle hit API 529 Overloaded before emitting the completion sentinel. Treat this as an infrastructure failure, kill the waiting tmux session, record the failed log path, and rerun the same review cycle rather than counting it as completed. Status: applied.
+## 2026-06-23 - Claude Review Hit Temporary API Overload
+
+- Repo: emerge.
+- Goal or slice: UMF-1339 specs-first persisted Time Domain edit planning.
+- Implementer: Codex / GPT-5.
+- Reviewer: Claude / Opus via `claude-yolo -p --model opus`.
+- Expected: the tmux review wrapper would run a read-only docs/spec review and
+  emit the required sentinel.
+- Actual: Claude returned API Error 529 Overloaded before producing a review
+  report or sentinel.
+- Impact: no review findings were available; the attempt did not count as a
+  completed review cycle and had to be retried after cleaning up the tmux
+  session.
+- Fix or follow-up: treat 529 as a transient external failure, kill stale tmux
+  sessions, and verify no child Claude process remains before retrying.
+  Multiple re-review retries after the initial completed review hit the same
+  529 overload. A later user-requested retry completed successfully and closed
+  the review with 0 Critical / 0 Warning findings.
+- Status: resolved after retry.
 
 - 2026-06-24: Claude no-tools analysis review exited without the required sentinel after asking to read files. Treat this as a prompt/context failure, not a review finding: kill the waiting tmux pane, restart the same round with the relevant file snippets embedded directly, and explicitly instruct Claude to report insufficient context as a finding instead of requesting tools. Status: applied.
 
