@@ -728,3 +728,20 @@ Project-specific execution lessons belong in the project repo, not here.
   no tool access; later cycles completed normally. For no-tools Claude review
   loops, keep banning skills alongside tools and treat any pre-sentinel skill
   invocation as an invalid review that needs a focused retry. Status: applied.
+
+- 2026-06-25: Claude Opus no-tools review for emerge MI IGM/CGM edit-table
+  header chrome exited without the required sentinel after trying to inspect a
+  file through disabled tooling. The retry succeeded when the prompt explicitly
+  required review from embedded evidence only, banned tool invocations in the
+  first paragraph, and included the surrounding facts needed to evaluate the
+  small diff. For no-tools Claude reviews, keep the evidence boundary first and
+  include decisive context rather than asking the reviewer to inspect files.
+  Status: applied.
+
+- 2026-06-25: Claude Opus no-tools docs review for django-resume first hung
+  silently when the prompt was fed on stdin, then exited without the required
+  sentinel after emitting attempted terminal-tool markup. The retry succeeded
+  after embedding the full diff and line-numbered docs and opening with an
+  explicit no-tools evidence boundary. For docs-only no-tools reviews, avoid
+  asking Claude to inspect the worktree and provide the exact review evidence
+  in the prompt. Status: applied.
