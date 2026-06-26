@@ -26,6 +26,27 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-26 - Tool-disabled Claude Review Returned No Sentinel
+
+- Repo: podcast.
+- Goal or slice: Episode Detail long-notes bottom-clearance fix.
+- Implementer: Codex-family.
+- Reviewer: Claude Code / Opus.
+- Expected: `claude -p --model opus --no-session-persistence --tools ""` with a
+  self-contained diff prompt would produce a read-only review and the required
+  completion sentinel.
+- Actual: the run exited with no substantive review, logged a tool-use error /
+  interrupted request shape, and did not emit the sentinel even though the
+  pipeline status was zero.
+- Impact: the first tmux review attempt had to be killed and rerun; the usable
+  review cycle completed after switching to `--permission-mode plan` with direct
+  read-only worktree access.
+- Fix or follow-up: do not rely on zero pipeline status as review completion;
+  keep sentinel polling mandatory. Prefer plan-mode read-only Claude reviews for
+  this project when tool-disabled mode returns empty/tool-error output, and keep
+  prompts explicit about no mutation.
+- Status: identified.
+
 ## 2026-06-25 - Tool-disabled Claude Reviews Need Explicit Limitation Handling
 
 - Repo: podcast.
