@@ -26,6 +26,22 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-25 - Tool-disabled Claude Reviews Need Explicit Limitation Handling
+
+- Repo: podcast.
+- Goal or slice: episode-list blank-tail fix.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus via `claude -p --model opus --tools ""`.
+- Expected: because the prompt embedded the full diff, the reviewer would complete
+  a diff-based review without tool access and clearly state any limitations.
+- Actual: the review completed, but reported degraded/empty file-read tooling and
+  based findings on the embedded diff only.
+- Impact: the cycle was still usable because the prompt was self-contained, but
+  warnings needed careful triage and a second review to confirm fixes.
+- Fix or follow-up: keep embedding full diffs for tool-disabled reviewers and ask
+  them to separate diff-based conclusions from worktree-verified conclusions.
+- Status: reinforced.
+
 ## 2026-06-25 - Tool-disabled Claude Reviews Can Hallucinate Verification
 
 - Repo: podcast.
