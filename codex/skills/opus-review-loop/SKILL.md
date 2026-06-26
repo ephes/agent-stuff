@@ -18,6 +18,9 @@ review does not need write-capable permission bypass. Do not add
 `--max-budget-usd`, `--permission-mode`, `--dangerously-skip-permissions`, or
 other ad hoc launch flags; the harness owns lifecycle limits and the review
 bundle is the entire review surface.
+The review must remain a single direct Opus context. Claude Code `Agent`
+subagents, Task-style delegation, parallel reviewers, or any other delegated
+review are not allowed for this gate.
 
 ## When to use
 
@@ -41,8 +44,11 @@ implement and fix; Claude Opus reviews with fresh context.
 
 3. Interpret by exit code (and read `result.json`):
    - `0` -> CLEAN. If it printed `(scoped)`, the bundle skipped/truncated files
-     (huge or binary). Treat this as "clean within provided scope" and decide whether
-     the skipped files matter.
+     (huge or binary). Treat this as "clean within provided scope" and decide
+     whether the skipped files matter. If `events.jsonl`, Claude hook metadata,
+     or the transcript shows `Agent` tool use, Task-style delegation,
+     `general-purpose` subagents, or parallel reviewer fanout, reject the CLEAN
+     result and rerun with delegation disabled or report the review as blocked.
    - `1` -> ISSUES. Fix each listed `[Severity] path: message`, then re-run a FRESH
      review (not an edit of the old one).
    - `2` -> failed review (INVALID / CRASHED / STALLED / STALLED_RETRY /
@@ -76,7 +82,10 @@ implement and fix; Claude Opus reviews with fresh context.
 ## Hard rules
 
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
-  are irrelevant. Exit `1`/`2`/`3` are never clean.
+  are irrelevant AND the review was direct. Exit `1`/`2`/`3` are never clean.
+- Direct review only: no Claude Code `Agent` tool, Task-style delegation,
+  subagents, or parallel reviewer fanout. Delegated review output is not a valid
+  commit gate even if it says CLEAN.
 - One review at a time - the harness enforces this with a global lock.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering - do not chase every nit).
