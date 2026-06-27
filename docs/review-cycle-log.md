@@ -26,6 +26,45 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-06-26 - Tool-disabled Claude Review Failed Again For SRT Transcript Slice
+
+- Repo: podcast.
+- Goal or slice: SRT transcript provider implementation.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus.
+- Expected: a tool-disabled `claude -p --model opus --no-session-persistence
+  --tools ""` review would use the embedded/contextual diff and emit the review
+  completion sentinel.
+- Actual: one attempt timed out or exited without substantive output, and another
+  attempted to inspect files despite disabled tools before exiting without the
+  sentinel.
+- Impact: two unusable tmux review attempts had to be killed before the actual
+  review cycle could start.
+- Fix or follow-up: for podcast review cycles, use Claude Code `--permission-mode
+  plan` with an explicit read-only tool allowlist (`Read`, `Grep`, `Glob`, and
+  limited `Bash(git diff/status/rg/grep/ls)`) instead of `--tools ""` when the
+  reviewer needs to inspect the worktree.
+- Status: recurrence; workaround successful and re-review closed clean.
+
+## 2026-06-26 - Tool-disabled Claude Review Returned No Sentinel For Download Badge Slice
+
+- Repo: podcast.
+- Goal or slice: downloaded episode-row artwork badge implementation.
+- Implementer: Pi / Codex-family.
+- Reviewer: Claude Code / Opus.
+- Expected: `claude -p --model opus --no-session-persistence --tools ""` would
+  perform a read-only review from the self-contained prompt and emit the required
+  sentinel.
+- Actual: Claude attempted a disabled workflow/tool command, exited with pipeline
+  status zero, and did not emit the sentinel.
+- Impact: the first tmux review attempt had to be killed and rerun; the review
+  completed cleanly after allowing read-only `Read`/`Bash(git diff/status/rg)`
+  tools and explicitly disallowing edit/write tools.
+- Fix or follow-up: keep sentinel polling mandatory; for this project, prefer
+  read-only tool allowlists over fully tool-disabled Claude reviews when direct
+  worktree verification is needed.
+- Status: recurrence; workaround successful.
+
 ## 2026-06-26 - Tool-disabled Claude Review Returned No Sentinel
 
 - Repo: podcast.
@@ -782,3 +821,67 @@ Project-specific execution lessons belong in the project repo, not here.
   explicit no-tools evidence boundary. For docs-only no-tools reviews, avoid
   asking Claude to inspect the worktree and provide the exact review evidence
   in the prompt. Status: applied.
+
+- 2026-06-26: Claude Opus no-tools review for emerge UMF-1348 emitted
+  fabricated test execution claims and false missing-code findings when the
+  prompt asked it to review a diff but also framed verification as something it
+  could independently confirm. The re-review succeeded after supplying exact
+  local outputs, line-numbered decisive snippets, and the `SL` area-code to
+  `SI` dashboard-code alias context. For no-tools reviews, make the embedded
+  evidence boundary explicit and include alias/domain facts that are needed to
+  judge tests without live command execution. Status: applied.
+
+- 2026-06-26: Claude Opus no-tools review for emerge MI voltage parameter
+  typing exited with status 143 and no sentinel because the fish runner picked
+  up a timeout-wrapped `claude`, leaving a `claude --model opus` child after
+  tmux was closed. The review succeeded after killing the orphaned process
+  group and invoking `/opt/homebrew/bin/claude` explicitly from the fish runner.
+  For no-tools Claude reviews, check for orphaned Claude children after any
+  pre-sentinel tmux failure and bypass shell wrappers with the absolute Claude
+  binary when needed. Status: applied.
+
+- 2026-06-26: Claude Opus no-tools review for an emerge Time Domain Qt
+  crash fix first exited without the required sentinel after trying to inspect
+  files, then exited with status 143 on fuller self-contained prompts. The
+  review succeeded only after shrinking the prompt to decisive evidence and a
+  summarized code change. For no-tools Claude reviews, use concise decisive
+  snippets for small lifecycle fixes and fall back from raw diffs when Opus
+  repeatedly exits 143. Status: applied.
+
+- 2026-06-26: Claude Opus no-tools re-review for emerge UMF-1303 readability
+  exited with pipeline status 143 and no review text, leaving only the fish
+  runner prompt alive in tmux. Killing the stale session and rerunning the same
+  focused re-review succeeded, and the final cycle was clean. After pre-sentinel
+  status-143 exits, inspect the log before waiting out the full poll loop, kill
+  any orphaned Claude child, then retry with the focused prior-findings prompt.
+  Status: applied.
+
+- 2026-06-26: Claude Opus no-tools re-review for emerge Model Improvement
+  deletion UX exited with pipeline status 143 and no review text, leaving only
+  the fish runner prompt in tmux. The active implementation had changed after a
+  user-reported false-dirty issue, so the review loop needed a clean retry with
+  a shorter focused prompt covering prior findings and the updated diff. For
+  small PySide follow-up reviews, prefer concise re-review prompts after fixing
+  prior findings instead of repeating all narrative context. Status: applied.
+
+- 2026-06-26: pi noninteractive review for emerge UMF-1286 hung silently when
+  run through the tmux/tee wrapper: the pane stayed blank and only the runner
+  plus `tee` remained visible, while the same prompt shape worked when `pi -p`
+  was run directly with `--no-context-files --approve`. For pi review loops,
+  smoke-test direct noninteractive mode first and fall back to direct foreground
+  execution if the tmux wrapper has no output and no visible pi child process.
+  Status: applied.
+
+## 2026-06-26 - Pi review prompt argument splitting
+- Expected: Pi review runner passes the complete prompt as one noninteractive read-only review request.
+- Actual: fish command substitution split prompt lines into separate CLI arguments, so bullet lines beginning with `-` were parsed as unknown options.
+- Impact: first review attempt did not run and emitted no review sentinel.
+- Fix/follow-up: pass prompt after `--` as one quoted argument or use a stdin-safe invocation verified for `pi -p` before starting tmux.
+- Status: fixed for rerun.
+
+## 2026-06-26 - Pi review option separator
+- Expected: Pi accepts the conventional `--` end-of-options separator before a quoted prompt in noninteractive mode.
+- Actual: Pi rejected `--` as an unknown option, exited immediately, and left only the tmux runner waiting at its close prompt.
+- Impact: first review attempt did not run and produced no review sentinel.
+- Fix/follow-up: invoke `pi -p --no-session --tools read,grep,find,ls "$prompt"` without `--`; inspect short logs before waiting out the full poll window.
+- Status: fixed for rerun.

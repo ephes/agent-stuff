@@ -1,6 +1,6 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when Claude implemented the slice and Codex should review it, or when coordinating up to three fix/re-review cycles with claude-yolo or codex-yolo.
+description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when a configurable different-family reviewer should inspect the slice, or when coordinating up to three fix/re-review cycles with Claude, Codex, or Pi.
 ---
 
 # Cross-Agent Review Cycle
@@ -12,21 +12,27 @@ slice. The reviewer must be a different model family from the implementer.
 
 ## Reviewer Selection
 
-- If the implementer is Claude, review with Codex:
-  `codex-yolo -m gpt-5.5`
-- If the implementer is Codex, review with Claude:
-  `claude-yolo --model opus`
-
-If the yolo commands are shell functions and are not visible from the current
-shell, invoke them through fish:
-
-```bash
-fish -lc 'codex-yolo -m gpt-5.5'
-fish -lc 'claude-yolo --model opus'
-```
+- The reviewer must be a different model family from the implementer.
+- `REVIEWER_AGENT` may override the default reviewer. Supported values:
+  `auto`, `claude-plan`, `claude-no-tools`, `codex`, and `pi`.
+- `REVIEWER_MODEL` may override the default model for the selected reviewer.
+- If `REVIEWER_AGENT` is unset or `auto`:
+  - Claude-family implementer: use `codex` with
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.5}"`.
+  - Codex/GPT-family implementer: use `claude-plan` with
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-opus}"`.
+- Prefer `claude-plan` over `claude-no-tools` when the reviewer needs to inspect
+  the worktree. Repeated failures show that fully tool-disabled Claude reviews
+  can exit with no sentinel, try unavailable tools, or hallucinate verification.
 
 Do not silently substitute a same-family reviewer. If the requested reviewer
 command or model is unavailable, report the blocker.
+
+Do not add `--max-budget-usd`, `--dangerously-skip-permissions`, or equivalent
+ad hoc permission/budget flags to Claude review commands. Subscription usage
+should not be represented as a per-run budget cap. For Claude reviews, use
+either `claude-plan` with a read-only allowlist or `claude-no-tools` with a
+self-contained prompt; do not use write-capable permission bypass for review.
 
 ## Cycle Limit
 
@@ -55,87 +61,100 @@ without explicit user direction.
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    ```
 
-2. Start the reviewer in the repo root. For a Claude implementer:
-
-   ```bash
-   tmux new-session -d -s "$session" -c "$PWD" "fish -lc 'codex-yolo -m gpt-5.5'"
-   ```
-
-   For a Codex implementer:
-
-   ```bash
-   tmux new-session -d -s "$session" -c "$PWD" "fish -lc 'claude-yolo --model opus'"
-   ```
-
-3. Write the self-contained review prompt to a temp file:
+2. Write the self-contained review prompt to a temp file and choose a log path:
 
    ```bash
    prompt_file="$(mktemp -t review-prompt.XXXXXX)"
-   trap 'rm -f "$prompt_file"' EXIT
+   log_file="/tmp/${session}.out"
    printf '%s' "$review_prompt" > "$prompt_file"
    ```
 
-4. Wait until the reviewer TUI appears ready for input before pasting. Do not
-   paste while the pane is blank, loading configuration, or showing an error:
+3. Run the selected reviewer as a one-shot noninteractive review inside tmux.
+   Feed or pass the prompt as one intact value and tee the log for inspection:
 
    ```bash
-   ready=0
-   for _ in $(seq 1 30); do
-       pane="$(tmux capture-pane -pt "$session" -S -80 2>/dev/null || true)"
-       if printf '%s\n' "$pane" | grep -Eiq '(❯|›|>|esc|enter|prompt|message|what can i help|ready)'; then
-           printf '%s\n' "$pane" | tail -40
-           ready=1
-           break
-       fi
-       sleep 1
-   done
-   if [ "$ready" -ne 1 ]; then
-       echo "Reviewer TUI did not appear ready; attach to inspect before sending the prompt." >&2
-       exit 1
-   fi
+   runner_file="$(mktemp -t review-run.XXXXXX.fish)"
+   cat > "$runner_file" <<'FISH'
+   set prompt_file $argv[1]
+   set log_file $argv[2]
+   set reviewer_agent (set -q REVIEWER_AGENT; and echo $REVIEWER_AGENT; or echo auto)
+   set reviewer_model (set -q REVIEWER_MODEL; and echo $REVIEWER_MODEL; or echo "")
+   if test "$reviewer_agent" = auto
+       set reviewer_agent codex
+   end
+   switch "$reviewer_agent"
+       case claude-plan
+           test -n "$reviewer_model"; or set reviewer_model opus
+           claude -p --model "$reviewer_model" --no-session-persistence \
+             --permission-mode plan \
+             --allowedTools "Read,Grep,Glob,Bash(git diff *),Bash(git status *),Bash(rg *),Bash(grep *),Bash(ls *)" \
+             --disallowedTools "Edit,Write" \
+             --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
+       case claude-no-tools
+           test -n "$reviewer_model"; or set reviewer_model opus
+           claude -p --model "$reviewer_model" --no-session-persistence \
+             --tools "" --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
+       case codex
+           test -n "$reviewer_model"; or set reviewer_model gpt-5.5
+           codex -a never exec --sandbox read-only -m "$reviewer_model" - < "$prompt_file" 2>&1 | tee "$log_file"
+       case pi
+           test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.5
+           set prompt_text (cat "$prompt_file" | string collect)
+           pi -p --no-session --no-context-files --approve --model "$reviewer_model" \
+             --tools read,grep,find,ls "$prompt_text" 2>&1 | tee "$log_file"
+       case '*'
+           echo "unsupported REVIEWER_AGENT=$reviewer_agent" | tee "$log_file"
+           exit 64
+   end
+   set statuses $pipestatus
+   printf "\n[review pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
+   read -P "review finished; press Enter to close tmux pane"
+   FISH
+   tmux new-session -d -s "$session" -c "$PWD" \
+     "fish \"$runner_file\" \"$prompt_file\" \"$log_file\""
    ```
 
-   If the captured pane does not clearly show the reviewer input UI, stop and
-   attach to inspect before sending the prompt.
+   For a Claude implementer, use `REVIEWER_AGENT=codex` unless another
+   different-family reviewer was explicitly requested. If no stable
+   noninteractive command is available for the requested reviewer, fall back to
+   an interactive tmux session only after telling the user.
 
-5. Paste the prompt as a bracketed paste, then submit it once. Do not use
-   `send-keys -l` for multi-line prompts because embedded newlines can submit
-   partial messages:
-
-   ```bash
-   buffer="review-prompt-$session"
-   tmux load-buffer -b "$buffer" "$prompt_file"
-   tmux paste-buffer -p -b "$buffer" -t "$session"
-   tmux send-keys -t "$session" Enter
-   ```
-
-6. Poll output until the reviewer prints the required completion sentinel. The
-   prompt itself contains the sentinel text, so wait for at least two matches:
-   one echoed from the prompt and one emitted by the reviewer.
+4. Poll the log file until the reviewer prints the required completion sentinel.
+   With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough.
+   The log may stay empty while a reviewer is still thinking; treat that as
+   normal until the session exits or the polling deadline expires.
 
    ```bash
    completed=0
    for _ in $(seq 1 180); do
-       output="$(tmux capture-pane -pt "$session" -S -2000)"
-       if [ "$(printf '%s\n' "$output" | grep -Fc '=== REVIEW COMPLETE ===')" -ge 2 ]; then
-           printf '%s\n' "$output"
+       if [ -f "$log_file" ] && grep -Fq '=== REVIEW COMPLETE ===' "$log_file"; then
+           tail -200 "$log_file"
            completed=1
            break
+       fi
+       if ! tmux has-session -t "$session" 2>/dev/null; then
+           echo "Review tmux session ended before emitting completion sentinel." >&2
+           [ -f "$log_file" ] && tail -200 "$log_file"
+           exit 1
        fi
        sleep 10
    done
    if [ "$completed" -ne 1 ]; then
-       echo "Review did not emit completion sentinel; keep the session open and inspect it." >&2
+       echo "Review did not emit completion sentinel; inspect the tmux session and $log_file." >&2
        exit 1
    fi
    ```
 
-7. When the review is complete, keep the session available until the cycle is
+5. When the review is complete, keep the session available until the cycle is
    resolved. Kill only when the report has been captured or summarized:
 
    ```bash
    tmux kill-session -t "$session"
    ```
+
+   If you manually stop or kill a tmux review before completion, verify that no
+   reviewer child remains. Kill the review process group before starting another
+   review; tmux can exit while the child continues running.
 
 ## Review Prompt Contents
 

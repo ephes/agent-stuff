@@ -1,6 +1,6 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when Codex implemented the slice and Claude should review it, or when coordinating up to three fix/re-review cycles with direct Claude Code or codex-yolo.
+description: Use before committing an implementation slice when the project requires an external tmux review loop, especially when a configurable different-family reviewer should inspect the slice, or when coordinating up to three fix/re-review cycles with Claude, Codex, or Pi.
 ---
 
 # Cross-Agent Review Cycle
@@ -12,25 +12,27 @@ slice. The reviewer must be a different model family from the implementer.
 
 ## Reviewer Selection
 
-- If the implementer is Codex, review with Claude:
-  `claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands`
-- If the implementer is Claude, review with Codex:
-  `codex-yolo -m gpt-5.5`
-
-If the Codex yolo command is a shell function and is not visible from the
-current shell, invoke it through fish:
-
-```bash
-fish -lc 'codex-yolo -m gpt-5.5'
-```
+- The reviewer must be a different model family from the implementer.
+- `REVIEWER_AGENT` may override the default reviewer. Supported values:
+  `auto`, `claude-plan`, `claude-no-tools`, `codex`, and `pi`.
+- `REVIEWER_MODEL` may override the default model for the selected reviewer.
+- If `REVIEWER_AGENT` is unset or `auto`:
+  - Codex/GPT-family implementer: use `claude-plan` with
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-opus}"`.
+  - Claude-family implementer: use `codex` with
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.5}"`.
+- Prefer `claude-plan` over `claude-no-tools` when the reviewer needs to inspect
+  the worktree. Repeated failures show that fully tool-disabled Claude reviews
+  can exit with no sentinel, try unavailable tools, or hallucinate verification.
 
 Do not silently substitute a same-family reviewer. If the requested reviewer
 command or model is unavailable, report the blocker.
 
 Do not add `--max-budget-usd`, `--dangerously-skip-permissions`, or equivalent
-ad hoc permission/budget flags to Claude review commands. Direct read-only
-review should disable tools; subscription usage should not be represented as a
-per-run budget cap.
+ad hoc permission/budget flags to Claude review commands. Subscription usage
+should not be represented as a per-run budget cap. For Claude reviews, use
+either `claude-plan` with a read-only allowlist or `claude-no-tools` with a
+self-contained prompt; do not use write-capable permission bypass for review.
 
 ## Cycle Limit
 
@@ -67,27 +69,55 @@ without explicit user direction.
    printf '%s' "$review_prompt" > "$prompt_file"
    ```
 
-3. For a Codex implementer, run Claude as a one-shot noninteractive review
-   inside tmux. Feed the prompt file on stdin and tee the log for inspection:
+3. Run the selected reviewer as a one-shot noninteractive review inside tmux.
+   Feed or pass the prompt as one intact value and tee the log for inspection:
 
    ```bash
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]
-   claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
+   set reviewer_agent (set -q REVIEWER_AGENT; and echo $REVIEWER_AGENT; or echo auto)
+   set reviewer_model (set -q REVIEWER_MODEL; and echo $REVIEWER_MODEL; or echo "")
+   if test "$reviewer_agent" = auto
+       set reviewer_agent claude-plan
+   end
+   switch "$reviewer_agent"
+       case claude-plan
+           test -n "$reviewer_model"; or set reviewer_model opus
+           claude -p --model "$reviewer_model" --no-session-persistence \
+             --permission-mode plan \
+             --allowedTools "Read,Grep,Glob,Bash(git diff *),Bash(git status *),Bash(rg *),Bash(grep *),Bash(ls *)" \
+             --disallowedTools "Edit,Write" \
+             --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
+       case claude-no-tools
+           test -n "$reviewer_model"; or set reviewer_model opus
+           claude -p --model "$reviewer_model" --no-session-persistence \
+             --tools "" --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
+       case codex
+           test -n "$reviewer_model"; or set reviewer_model gpt-5.5
+           codex -a never exec --sandbox read-only -m "$reviewer_model" - < "$prompt_file" 2>&1 | tee "$log_file"
+       case pi
+           test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.5
+           set prompt_text (cat "$prompt_file" | string collect)
+           pi -p --no-session --no-context-files --approve --model "$reviewer_model" \
+             --tools read,grep,find,ls "$prompt_text" 2>&1 | tee "$log_file"
+       case '*'
+           echo "unsupported REVIEWER_AGENT=$reviewer_agent" | tee "$log_file"
+           exit 64
+   end
    set statuses $pipestatus
-   printf "\n[claude pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
+   printf "\n[review pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
    read -P "review finished; press Enter to close tmux pane"
    FISH
    tmux new-session -d -s "$session" -c "$PWD" \
      "fish \"$runner_file\" \"$prompt_file\" \"$log_file\""
    ```
 
-   For a Claude implementer using Codex as reviewer, use the same tmux/log
-   pattern with the appropriate noninteractive Codex command. If no stable
-   noninteractive Codex command is available, fall back to an interactive tmux
-   session only after telling the user.
+   For a Claude implementer, set `REVIEWER_AGENT=codex` unless another
+   different-family reviewer was explicitly requested. If no stable
+   noninteractive command is available for the requested reviewer, fall back to
+   an interactive tmux session only after telling the user.
 
 4. Poll the log file until the reviewer prints the required completion sentinel.
    With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough.
@@ -135,6 +165,9 @@ without explicit user direction.
   `claude -p --model opus --no-session-persistence --tools "" --disable-slash-commands -- "$PROMPT" </dev/null`.
 - `--tools ""` is variadic. Never put a positional prompt immediately after it;
   either use stdin or insert `--` before the prompt.
+- Use `claude-no-tools` only when the prompt embeds the exact diff/evidence and
+  tells Claude to state limitations instead of inventing file reads. Use
+  `claude-plan` for normal code reviews that need direct worktree inspection.
 
 ## Review Prompt Contents
 
