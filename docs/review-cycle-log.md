@@ -932,6 +932,15 @@ Project-specific execution lessons belong in the project repo, not here.
   --model openai-codex/gpt-5.5 --tools read,grep,find,ls "$prompt"` path.
 - Status: applied during the podcast retained-catalog download-cleanup slice.
 
+- 2026-06-28: pi read-only review for daybook smoke command repeatedly hung
+  silently when the full prompt was fed on stdin through tmux/tee or a direct
+  shell pipeline; the wrapper shell remained alive with an empty log and no
+  useful reviewer output. A tiny pi prompt worked, and the real review succeeded
+  when the prompt was passed as an `@prompt-file` argument with read-only tools.
+  For pi review loops, write the prompt to a file and invoke
+  `pi -p --no-session --approve --tools read,grep,find,ls @"$prompt_file"`,
+  capturing output to a log file. Status: applied.
+
 ## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
 
 - Repo: ops-control / ops-library.

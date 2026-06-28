@@ -143,6 +143,18 @@ without explicit user direction.
    noninteractive command is available for the requested reviewer, fall back to
    an interactive tmux session only after telling the user.
 
+   If the user explicitly asks for `pi` as the reviewer, prefer pi's file
+   argument form over stdin:
+
+   ```bash
+   pi -p --no-session --approve --tools read,grep,find,ls @"$prompt_file" > "$log_file" 2>&1
+   ```
+
+   Do not pipe pi through `tee` until after you know the invocation is producing
+   output. In observed runs, stdin and tmux/tee wrappers could leave only the
+   wrapper shell alive with an empty log before the pi child started; `@file`
+   avoided that failure mode.
+
    The Pi branch preflights `pi --list-models gpt` before starting the review.
    Exit `127` means `pi` was not on PATH; exit `69` means this environment could
    not list an authenticated GPT model. Report that blocker instead of treating
