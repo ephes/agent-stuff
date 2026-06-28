@@ -102,6 +102,26 @@ Project-specific execution lessons belong in the project repo, not here.
   them to separate diff-based conclusions from worktree-verified conclusions.
 - Status: reinforced.
 
+## 2026-06-26 - Tool-Disabled Claude Review Tried To Use Tools Before Sentinel
+
+- Repo: django-chat.
+- Goal or slice: transcript-storage deletion mitigation.
+- Implementer: Codex / GPT-family.
+- Reviewer: Claude Code / Opus via `claude -p --model opus --tools ""`.
+- Expected: a self-contained diff prompt with disabled tools would produce a
+  complete read-only review ending in the required sentinel.
+- Actual: Claude emitted apparent tool-use narration and exited without the
+  sentinel, though it did surface actionable concerns from the embedded diff.
+- Impact: the first review attempt could not count as a completed review cycle,
+  but its partial findings were still triaged before rerunning the gate.
+- Fix or follow-up: strengthen no-tools prompts to say the reviewer must review
+  only the embedded diff and must not output tool-call narration; continue
+  treating missing-sentinel reviews as incomplete workflow failures.
+- Status: identified. Recurrence in the same django-chat review loop: one
+  re-review attempt exited with Claude status 143 and no content beyond pipeline
+  status; it was not counted as a completed cycle and was retried with a smaller
+  prompt.
+
 ## 2026-06-25 - Tool-disabled Claude Reviews Can Hallucinate Verification
 
 - Repo: podcast.
@@ -822,6 +842,7 @@ Project-specific execution lessons belong in the project repo, not here.
   asking Claude to inspect the worktree and provide the exact review evidence
   in the prompt. Status: applied.
 
+<<<<<<< HEAD
 - 2026-06-26: Claude Opus no-tools review for emerge UMF-1348 emitted
   fabricated test execution claims and false missing-code findings when the
   prompt asked it to review a diff but also framed verification as something it
@@ -932,6 +953,57 @@ Project-specific execution lessons belong in the project repo, not here.
   --model openai-codex/gpt-5.5 --tools read,grep,find,ls "$prompt"` path.
 - Status: applied during the podcast retained-catalog download-cleanup slice.
 
+||||||| parent of cef7d7a (Record Claude no-tools review lessons)
+=======
+- 2026-06-25: Claude Opus no-tools review for django-cast editor media/detail
+  slice repeatedly failed before a usable review: a large stdin prompt hung with
+  an empty log, a smaller prompt returned "The model's tool call could not be
+  parsed", and a compact direct no-tools prompt hung before ending with
+  "Execution error" when interrupted. The smoke test showed
+  `--tools=""` works for tiny prompts, so the failure appears prompt/runtime
+  specific rather than tmux alone. For future large no-tools reviews, start with
+  a minimal evidence-bound prompt that explicitly bans tools and skills in the
+  first paragraph, use `--tools=""`, and validate completion on a small
+  representative diff before starting the full review loop. Status: observed.
+
+- 2026-06-25: Claude Opus no-tools round-2 re-review for django-cast editor
+  media/detail fixes returned a conditional video-timeout warning because the
+  prompt included the upload view but not the model method that swallows optional
+  poster probe failures. The final re-review closed cleanly after adding the
+  decisive `models/video.py` excerpt and a focused poster-timeout regression
+  test. For no-tools re-reviews, include the downstream implementation context
+  for any behavior asserted by a view, not only the immediate file under review.
+  Status: applied.
+
+- 2026-06-26: Claude Opus no-tools re-review for django-cast editor
+  media/detail follow-up returned only conditional findings when the prompt
+  omitted the code diff, then two larger stdin prompts hung with empty logs even
+  after reducing from full diff to focused excerpts. The implementation had
+  already passed `just check`, and the remaining conditional warning was covered
+  by an added same-type unsupported-placeholder swap regression test. For
+  future large no-tools reviews, do not rely on progressively larger stdin
+  prompts after the first silent hang; switch to a smaller single-question
+  reviewer prompt or use a reviewer configuration that can inspect files
+  read-only. Status: observed.
+
+- 2026-06-26: Claude Opus no-tools review for django-cast public transcript
+  storage split hung silently for more than ten minutes with an empty log when
+  fed a large stdin prompt containing full diffs and planning notes. The process
+  stayed alive until manually stopped and left no child after killing the tmux
+  session. For this review shape, start with a compact evidence-bound prompt,
+  explicitly ban tools and skills in the first paragraph, and include only the
+  decisive code/docs excerpts needed for the migration and storage-contract
+  review. Status: applied.
+
+- 2026-06-26: Claude Opus no-tools re-review for django-chat django-cast bump
+  exited before the required sentinel after emitting attempted read-tool markup,
+  even though `--tools ""` was set. The prompt still invited live verification
+  of key files. For no-tools re-reviews, open with an explicit evidence-only
+  boundary that bans tools and skills, state that attempted tool markup makes
+  the review invalid, and include focused excerpts with line numbers instead of
+  asking the reviewer to inspect the checkout. Status: applied.
+
+>>>>>>> cef7d7a (Record Claude no-tools review lessons)
 - 2026-06-28: pi read-only review for daybook smoke command repeatedly hung
   silently when the full prompt was fed on stdin through tmux/tee or a direct
   shell pipeline; the wrapper shell remained alive with an empty log and no
