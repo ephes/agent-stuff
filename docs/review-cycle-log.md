@@ -885,3 +885,30 @@ Project-specific execution lessons belong in the project repo, not here.
 - Impact: first review attempt did not run and produced no review sentinel.
 - Fix/follow-up: invoke `pi -p --no-session --tools read,grep,find,ls "$prompt"` without `--`; inspect short logs before waiting out the full poll window.
 - Status: fixed for rerun.
+
+## 2026-06-27 - Pi tmux prompt expansion
+- Expected: tmux starts a bash runner that reads the prompt file inside the review pane and passes it to Pi as one `-p` argument.
+- Actual: embedding `$(cat "$1")` inside the outer double-quoted `tmux new-session` command expanded before tmux started, so `$1` was empty and the first run printed `cat: "": No such file or directory`.
+- Impact: the first review attempt received no prompt and produced no sentinel.
+- Fix/follow-up: write a small temporary runner script and pass `prompt_file` / `log_file` as script arguments, so command substitution happens inside the pane with real positional parameters.
+- Status: fixed for rerun.
+
+## 2026-06-27 - Pi Anthropic Review Route Blocked
+- Expected: Pi review can use an Anthropic model to keep Codex implementation slices under a different-family reviewer while still satisfying a user request for Pi-run reviews.
+- Actual: Pi returned an Anthropic third-party-app extra-usage billing error before review text or the sentinel.
+- Impact: the attempted review produced no findings and could not satisfy the different-family review gate.
+- Fix/follow-up: when Pi/Anthropic is blocked, either use another available non-GPT Pi model from `pi --list-models` or explicitly record the limitation before retrying with the user-requested Pi/OpenAI model.
+- Status: applied for the llm-benchpacks product-offer docs slice.
+
+## 2026-06-28 - Pi tmux wrapper can leave only fish and tee
+- Expected: the cross-agent review fish runner would start `pi -p`, stream output
+  through `tee`, and emit the required sentinel.
+- Actual: the tmux pane and log stayed empty; `ps` showed only the fish wrapper
+  and `tee`, with no visible `pi` child, until the session was killed.
+- Impact: waiting for the full polling window would not produce a real review
+  and would delay the slice.
+- Fix/follow-up: when a Pi tmux review has an empty log and no `pi` child after a
+  few polls, kill that wrapper, verify no orphaned Pi process remains, and retry
+  with the direct foreground `pi -p --no-session --no-context-files --approve
+  --model openai-codex/gpt-5.5 --tools read,grep,find,ls "$prompt"` path.
+- Status: applied during the podcast retained-catalog download-cleanup slice.
