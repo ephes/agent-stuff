@@ -1013,6 +1013,31 @@ Project-specific execution lessons belong in the project repo, not here.
   `pi -p --no-session --approve --tools read,grep,find,ls @"$prompt_file"`,
   capturing output to a log file. Status: applied.
 
+- 2026-06-29: pi read-only review for the emerge Validation Status From
+  MergeManager plan could not start because pi reported no configured models
+  and no API key for the configured provider before reading the prompt. Explicit
+  provider checks for google and openai-codex also returned "No models
+  available". Treat this as an authentication/configuration blocker rather than
+  a review finding; do not silently substitute a different reviewer when the
+  user explicitly requested pi. Status: blocked.
+
+- 2026-06-29: Claude Opus no-tools re-review for emerge enriched merge slots
+  exited cleanly but without the required sentinel after emitting attempted
+  tool invocation markup. The prompt said "verify by reading actual files" even
+  though it also embedded the diff and disabled tools. For no-tools reviews,
+  make the evidence-only boundary the first instruction, explicitly state that
+  tool markup invalidates the cycle, and ask the reviewer to use only the
+  embedded diff/excerpts. Status: applied.
+
+- 2026-06-29: pi read-only review for emerge enriched merge slots succeeded
+  for a tiny smoke prompt, but multiple review prompts using read-only tools
+  (`read,grep,find,ls`) stayed alive with empty logs until manually stopped,
+  even after reducing scope and disabling context/skills/extensions. A direct
+  no-tools evidence-only prompt with focused source diff completed and produced
+  actionable findings; the re-review also completed cleanly. For pi reviews
+  where tool-backed file reading hangs silently, stop the run and switch to a
+  no-tools prompt with only decisive diff excerpts. Status: applied.
+
 ## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
 
 - Repo: ops-control / ops-library.
