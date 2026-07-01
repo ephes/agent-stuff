@@ -912,3 +912,23 @@ Project-specific execution lessons belong in the project repo, not here.
   with the direct foreground `pi -p --no-session --no-context-files --approve
   --model openai-codex/gpt-5.5 --tools read,grep,find,ls "$prompt"` path.
 - Status: applied during the podcast retained-catalog download-cleanup slice.
+
+## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
+
+- Repo: ops-control / ops-library.
+- Goal or slice: Delve StoreKit backend rollout hardening.
+- Implementer: Pi / Codex-family.
+- Reviewer: n/a.
+- Expected: after installing the local ops-library collection, `just test` in
+  ops-control would provide a full green validation gate for the deployment
+  config change.
+- Actual: playbook syntax, inventory, secrets, and collection installation passed,
+  but service metadata validation failed because `delve_monitoring` references a
+  missing `delve_monitoring_deploy` role in the installed collection.
+- Impact: the slice could still be deployed and smoke-tested, but the broad
+  ops-control validation gate is not currently usable as a green commit gate for
+  unrelated Delve deployment changes.
+- Fix or follow-up: either add the missing monitoring role, change the service
+  metadata capability mapping, or document/target a narrower validation gate until
+  `delve_monitoring` metadata is fixed.
+- Status: open; reported with the StoreKit rollout validation results.
