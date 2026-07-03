@@ -932,3 +932,38 @@ Project-specific execution lessons belong in the project repo, not here.
   metadata capability mapping, or document/target a narrower validation gate until
   `delve_monitoring` metadata is fixed.
 - Status: open; reported with the StoreKit rollout validation results.
+
+## 2026-07-03 - Pi Review Tmux Environment Not Propagated
+
+- Repo: emerge.
+- Goal or slice: Automatic process configuration frontend alignment, Slice 1.
+- Implementer: Codex / GPT-family.
+- Reviewer: Pi / openai-codex/gpt-5.5.
+- Expected: prefixing `REVIEWER_AGENT=pi REVIEWER_MODEL=... tmux new-session`
+  would make the fish review runner select Pi inside the tmux pane.
+- Actual: the tmux session saw the default reviewer value, selected
+  `claude-plan`, and exited before producing the review sentinel.
+- Impact: the first review attempt did not run and had to be restarted.
+- Fix or follow-up: set the reviewer selection directly inside the runner script
+  or pass explicit tmux environment values with a verified method before polling.
+- Status: fixed for rerun.
+
+## 2026-07-03 - Pi Review Prompt Handoff Reliability
+
+- Repo: podcast.
+- Goal or slice: Startup hydration empty-state guard.
+- Implementer: Codex / GPT-family.
+- Reviewer: Pi / openai-codex/gpt-5.5.
+- Expected: Pi would accept the full review prompt as one positional argument in
+  the tmux runner and stream review output.
+- Actual: the long positional-prompt runs left the Pi process alive with an
+  empty log for several minutes. A tiny Pi probe and a temp-file read probe both
+  worked, and the full review completed when the runner passed a short
+  instruction telling Pi to read the prompt file.
+- Impact: the review loop lost time to two nonproductive attempts before the
+  real review started.
+- Fix or follow-up: for Pi reviews with substantial prompts, write the prompt to
+  a temp file and pass only a short instruction to read that file. Keep a tiny
+  direct Pi probe handy to distinguish CLI startup failure from prompt handoff
+  trouble.
+- Status: applied for rerun and re-review.
