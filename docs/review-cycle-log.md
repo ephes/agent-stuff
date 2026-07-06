@@ -893,6 +893,25 @@ Project-specific execution lessons belong in the project repo, not here.
 - Fix/follow-up: write a small temporary runner script and pass `prompt_file` / `log_file` as script arguments, so command substitution happens inside the pane with real positional parameters.
 - Status: fixed for rerun.
 
+## 2026-07-06 - Pi Tmux Runner Can Stall Before Spawning Pi
+
+- Repo: podcast.
+- Goal or slice: Singularity.FM show artwork import.
+- Implementer: Codex / GPT-family.
+- Reviewer: Pi / openai-codex/gpt-5.5.
+- Expected: fish or zsh tmux runners would pass a saved review prompt to
+  `pi -p`, stream output through `tee`, and produce the completion sentinel.
+- Actual: two tmux attempts stayed blank with a zero-byte log; process checks
+  showed only the runner and `tee`, with no visible `pi` child. A tiny direct Pi
+  smoke test succeeded, and the direct foreground Pi review completed.
+- Impact: the review loop lost time to wrapper startup failures before the real
+  review began.
+- Fix or follow-up: when a Pi tmux runner has a zero-byte log and no `pi` child
+  after a few polls, kill the tmux session, verify no orphaned review process,
+  and run the read-only Pi review directly with `--no-session --no-context-files
+  --approve` rather than retrying equivalent tmux wrappers.
+- Status: applied; cycle 1 produced one Suggestion, cycle 2 was clean.
+
 ## 2026-06-27 - Pi Anthropic Review Route Blocked
 - Expected: Pi review can use an Anthropic model to keep Codex implementation slices under a different-family reviewer while still satisfying a user request for Pi-run reviews.
 - Actual: Pi returned an Anthropic third-party-app extra-usage billing error before review text or the sentinel.
