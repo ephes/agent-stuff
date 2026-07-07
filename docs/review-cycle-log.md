@@ -842,7 +842,6 @@ Project-specific execution lessons belong in the project repo, not here.
   asking Claude to inspect the worktree and provide the exact review evidence
   in the prompt. Status: applied.
 
-<<<<<<< HEAD
 - 2026-06-26: Claude Opus no-tools review for emerge UMF-1348 emitted
   fabricated test execution claims and false missing-code findings when the
   prompt asked it to review a diff but also framed verification as something it
@@ -953,8 +952,6 @@ Project-specific execution lessons belong in the project repo, not here.
   --model openai-codex/gpt-5.5 --tools read,grep,find,ls "$prompt"` path.
 - Status: applied during the podcast retained-catalog download-cleanup slice.
 
-||||||| parent of cef7d7a (Record Claude no-tools review lessons)
-=======
 - 2026-06-25: Claude Opus no-tools review for django-cast editor media/detail
   slice repeatedly failed before a usable review: a large stdin prompt hung with
   an empty log, a smaller prompt returned "The model's tool call could not be
@@ -1003,7 +1000,6 @@ Project-specific execution lessons belong in the project repo, not here.
   the review invalid, and include focused excerpts with line numbers instead of
   asking the reviewer to inspect the checkout. Status: applied.
 
->>>>>>> cef7d7a (Record Claude no-tools review lessons)
 - 2026-06-28: pi read-only review for daybook smoke command repeatedly hung
   silently when the full prompt was fed on stdin through tmux/tee or a direct
   shell pipeline; the wrapper shell remained alive with an empty log and no
