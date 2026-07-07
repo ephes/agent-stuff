@@ -1038,6 +1038,49 @@ Project-specific execution lessons belong in the project repo, not here.
   where tool-backed file reading hangs silently, stop the run and switch to a
   no-tools prompt with only decisive diff excerpts. Status: applied.
 
+- 2026-07-01: Claude Opus no-tools review for django-cast editor API
+  rendered-preview endpoints exited without the required sentinel after
+  emitting attempted read-tool markup, despite `--tools ""`. The prompt still
+  invited the reviewer to examine source files beyond the embedded diff. Treat
+  that output as an invalid review, kill the tmux session after confirming no
+  Claude child remains, and rerun with an evidence-only prompt that explicitly
+  bans tool use and bases findings only on embedded status/diff/check results.
+  Status: applied.
+
+- 2026-07-01: Claude Opus no-tools re-review for django-cast podcast
+  `itunes:type` support exited without the required sentinel after reporting
+  "The model's tool call could not be parsed" even though tools were disabled
+  and the full diff was embedded. Treat this as an invalid review rather than a
+  finding, kill the tmux session, and rerun with a shorter evidence-only prompt
+  that explicitly forbids tool calls/tool markup and focuses on prior findings
+  plus changed excerpts. Status: applied.
+
+- 2026-07-01: django-cast transcript sanitizer Pi review exited immediately
+  with no log when launched through an inline tmux command containing nested
+  prompt/log quoting. Relaunching through a small runner script and passing the
+  prompt as `@"$prompt_file"` produced a clean sentinel-bearing review. The
+  follow-up Claude Opus no-tools review emitted a complete clean report and
+  required sentinel but returned process status 1; treat the sentinel-bearing
+  report as review evidence, record the anomalous status, and verify no Claude
+  child remains before closing the loop. Status: observed.
+
+- 2026-07-06: django-cast Pi review prompt construction failed before launch
+  because a zsh loop used `path` as the iteration variable, which overwrote the
+  shell's special `path`/`PATH` array and made later commands such as `sed`
+  unavailable. Use neutral names such as `file_path` in zsh review-run scripts,
+  especially before invoking commands while building prompt bundles. Status:
+  applied.
+
+- 2026-07-06: django-cast strict mypy rollout Pi reviews hung silently when
+  launched with read-only tools for some focused prompts; the wrapper process
+  remained alive with no reviewer output. Re-running the same evidence-bound
+  prompts with `pi -p --no-session --approve --no-tools @"$prompt_file"`
+  produced sentinel-bearing reviews. For this repo, prefer compact embedded
+  diffs and no-tools Pi prompts when tool-backed Pi review stalls. Also avoid
+  parallel DB-heavy targeted pytest runs in this suite; they can surface
+  transient SQLite lock failures that disappear when rerun sequentially.
+  Status: applied.
+
 ## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
 
 - Repo: ops-control / ops-library.
