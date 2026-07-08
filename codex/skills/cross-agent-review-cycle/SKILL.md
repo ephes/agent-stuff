@@ -99,8 +99,28 @@ without explicit user direction.
            codex -a never exec --sandbox read-only -m "$reviewer_model" - < "$prompt_file" 2>&1 | tee "$log_file"
        case pi
            test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.5
+           if not command -q pi
+               echo "pi reviewer unavailable: pi command not found on PATH" | tee "$log_file"
+               exit 127
+           end
+           set pi_models (env PI_TELEMETRY=0 pi --list-models gpt 2>&1 | string collect)
+           set pi_models_status $pipestatus[1]
+           if test $pi_models_status -ne 0
+               echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
+               printf "%s\n" "$pi_models" | tee -a "$log_file"
+               exit 69
+           end
+           if not string match -rq '(^|[[:space:]])gpt-[^[:space:]]+' -- "$pi_models"
+               if string match -q '*No models available*' -- "$pi_models"; or string match -q '*No API key found*' -- "$pi_models"
+                   echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
+               else
+                   echo "pi reviewer unavailable: no GPT model listed by pi in this environment" | tee "$log_file"
+               end
+               printf "%s\n" "$pi_models" | tee -a "$log_file"
+               exit 69
+           end
            set prompt_text (cat "$prompt_file" | string collect)
-           pi -p --no-session --no-context-files --approve --model "$reviewer_model" \
+           env PI_TELEMETRY=0 pi -p --no-session --no-context-files --approve --model "$reviewer_model" \
              --tools read,grep,find,ls "$prompt_text" 2>&1 | tee "$log_file"
        case '*'
            echo "unsupported REVIEWER_AGENT=$reviewer_agent" | tee "$log_file"
@@ -118,6 +138,11 @@ without explicit user direction.
    different-family reviewer was explicitly requested. If no stable
    noninteractive command is available for the requested reviewer, fall back to
    an interactive tmux session only after telling the user.
+
+   The Pi branch preflights `pi --list-models gpt` before starting the review.
+   Exit `127` means `pi` was not on PATH; exit `69` means this environment could
+   not list an authenticated GPT model. Report that blocker instead of treating
+   the review as queued or clean.
 
 4. Poll the log file until the reviewer prints the required completion sentinel.
    With one-shot `-p`, the prompt is not echoed, so one sentinel match is enough.

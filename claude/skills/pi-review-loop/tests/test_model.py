@@ -38,14 +38,118 @@ class TestResolveModel(unittest.TestCase):
         out = "\n  \nAvailable models:\nopenai-codex/gpt-5.5\n"
         self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.5")
 
+    def test_rejects_gpt_text_in_diagnostic_prose_without_table_header(self):
+        out = "No models available. Use /login to log into a provider.\nDefault: gpt-5.5\n"
+        self.assertEqual(model.resolve_model(out, fallback="pin/x"), "pin/x")
+
+    def test_rejects_gpt_text_in_diagnostic_prose_after_table_header(self):
+        out = "provider model context\nopenai-codex gpt-5.1 272K\nDefault: gpt-5.5\n"
+        self.assertEqual(model.resolve_model(out, fallback="pin/x"), "openai-codex/gpt-5.1")
+
     def test_resolve_from_cli_falls_back_on_missing_binary(self):
         with mock.patch("pi_review_loop.model.subprocess.run", side_effect=OSError):
             self.assertEqual(model.resolve_from_cli(fallback="pin/x"), "pin/x")
 
     def test_resolve_from_cli_parses_stdout(self):
-        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n", stderr="")
+        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n", stderr="", returncode=0)
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
             self.assertEqual(model.resolve_from_cli(), "openai-codex/gpt-5.5")
+
+    def test_diagnostic_line_does_not_hide_listed_gpt_model(self):
+        completed = mock.Mock(
+            stdout="provider      model\nopenai-codex  gpt-5.5  272K\n",
+            stderr="No API key found for anthropic.\n",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            self.assertEqual(
+                model.resolve_from_cli(require_available=True),
+                "openai-codex/gpt-5.5",
+            )
+
+    def test_require_available_rejects_no_models(self):
+        completed = mock.Mock(
+            stdout="",
+            stderr="No models available. Use /login to log into a provider via OAuth or API key.",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable) as raised:
+                model.resolve_from_cli(require_available=True)
+        self.assertIn("no available models", str(raised.exception))
+
+    def test_require_available_rejects_cli_failure(self):
+        completed = mock.Mock(stdout="", stderr="No API key found for openai-codex.", returncode=1)
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable) as raised:
+                model.resolve_from_cli(require_available=True)
+        self.assertIn("No API key found", str(raised.exception))
+
+    def test_require_available_rejects_generic_cli_failure(self):
+        completed = mock.Mock(stdout="", stderr="network unreachable", returncode=2)
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable) as raised:
+                model.resolve_from_cli(require_available=True)
+        self.assertIn("failed with exit 2", str(raised.exception))
+
+    def test_require_available_rejects_failed_cli_even_with_model_text(self):
+        completed = mock.Mock(stdout="openai-codex gpt-5.5 272K\n", stderr="", returncode=2)
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable) as raised:
+                model.resolve_from_cli(require_available=True)
+        self.assertIn("failed with exit 2", str(raised.exception))
+
+    def test_ensure_available_accepts_non_gpt_model_listing(self):
+        completed = mock.Mock(
+            stdout="provider      model\nanthropic     claude-opus-4-8\n",
+            stderr="",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            self.assertIsNone(model.ensure_available())
+
+    def test_ensure_available_accepts_listing_with_unrelated_diagnostic(self):
+        completed = mock.Mock(
+            stdout="provider      model\nopenai-codex  gpt-5.5\n",
+            stderr="No API key found for anthropic.\n",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            self.assertIsNone(model.ensure_available())
+
+    def test_ensure_available_rejects_no_models(self):
+        completed = mock.Mock(stdout="", stderr="No models available.", returncode=0)
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable):
+                model.ensure_available()
+
+    def test_ensure_available_rejects_no_models_with_help_paths(self):
+        completed = mock.Mock(
+            stdout="",
+            stderr=(
+                "No models available. Use /login to log into a provider via OAuth or API key.\n"
+                "  /opt/homebrew/Cellar/pi/docs/providers.md\n"
+                "  /opt/homebrew/Cellar/pi/docs/models.md\n"
+            ),
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable):
+                model.ensure_available()
+
+    def test_ensure_available_rejects_no_models_with_prose_help(self):
+        completed = mock.Mock(
+            stdout="",
+            stderr=(
+                "No models available.\n"
+                "See https://example.com/docs for setup\n"
+                "Run pi and use /login\n"
+            ),
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable):
+                model.ensure_available()
 
 
 class TestResolveTableFormat(unittest.TestCase):

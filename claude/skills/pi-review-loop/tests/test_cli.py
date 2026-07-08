@@ -42,6 +42,17 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("CLEAN", proc.stdout)
 
+    def test_fake_cmd_without_model_does_not_shell_out_to_real_pi(self):
+        env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run-no-model"),
+             "--lock-dir", os.path.join(self.tmp.name, "lock-no-model")],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("model=fake/model", proc.stdout)
+
     def test_issues_exit_one(self):
         env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} issues")
         proc = subprocess.run(

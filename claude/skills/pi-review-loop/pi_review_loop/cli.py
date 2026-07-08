@@ -125,7 +125,22 @@ def main(argv=None):
                          os.path.join(args.run_dir, "result.json"))
         return 2
 
-    model = args.model or model_mod.resolve_from_cli()
+    try:
+        if os.environ.get("PI_REVIEW_FAKE_CMD"):
+            model = args.model or "fake/model"
+        elif args.model:
+            model_mod.ensure_available()
+            model = args.model
+        else:
+            model = model_mod.resolve_from_cli(require_available=True)
+    except model_mod.PiUnavailable as e:
+        msg = f"pi unavailable: {e}"
+        print(f"pi-review-loop: {msg}", file=sys.stderr)
+        now = time.monotonic()
+        ReviewResult(state=CRASHED, items=[], model=model, cost=None,
+                     started_at=now, ended_at=now, error=msg).write(
+                         os.path.join(args.run_dir, "result.json"))
+        return 2
     meta = {"harness_pid": os.getpid(), "cwd": os.path.abspath(args.repo),
             "command": "pi-review-loop", "model": model, "run_dir": args.run_dir}
     try:

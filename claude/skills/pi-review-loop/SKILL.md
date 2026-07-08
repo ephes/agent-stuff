@@ -40,6 +40,11 @@ implement and fix; Pi reviews with fresh context.
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
      stall or an oversized bundle. Fix the cause and re-run. Never treat a failed
      review as a pass.
+     If the error says `pi unavailable`, the harness could not see a usable GPT
+     model from its environment. `pi -p` may still work in another interactive
+     shell that has provider auth; verify from the same environment with
+     `PI_TELEMETRY=0 pi --list-models gpt` and rerun after auth/model listing
+     is visible.
    - `3` → all bounded review slots are busy. Do not report this as a CLEAN
      review and do not claim a review is queued unless you explicitly run a
      separate wait/retry wrapper. Either retry later, inspect stale slot metadata,
