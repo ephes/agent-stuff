@@ -1025,3 +1025,22 @@ Project-specific execution lessons belong in the project repo, not here.
   provider API key before running the review loop; do not silently substitute a
   Codex-family subagent when the user explicitly asks for Pi.
 - Status: blocked pending Pi provider configuration.
+
+## 2026-07-08 - Claude Plan-Mode Review Silent Hang
+
+- Repo: podcast.
+- Goal or slice: Discovery docs/comment cleanup.
+- Implementer: Codex / GPT-family.
+- Reviewer: Claude / Opus.
+- Expected: a `claude -p --permission-mode plan` read-only tmux review would
+  inspect a small three-file diff and emit the completion sentinel.
+- Actual: the Claude process stayed alive for several minutes with an empty tmux
+  pane and empty log. Retrying with `claude -p --tools ""` and an embedded diff
+  completed and emitted the sentinel.
+- Impact: the review loop lost several minutes and required terminating the
+  silent plan-mode attempt before a substantive review could run.
+- Fix or follow-up: for small docs/comment-only diffs, prefer no-tools Claude
+  reviews with the exact diff and validation evidence embedded, or fall back to
+  that mode after a short empty-log timeout. Kill the silent plan-mode session
+  and verify no child Claude process remains before retrying.
+- Status: applied for rerun and re-review.
