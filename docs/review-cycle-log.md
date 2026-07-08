@@ -986,3 +986,42 @@ Project-specific execution lessons belong in the project repo, not here.
   direct Pi probe handy to distinguish CLI startup failure from prompt handoff
   trouble.
 - Status: applied for rerun and re-review.
+
+## 2026-07-06 - Review Suggestion Missed Test-Only Accessor Use
+
+- Repo: podcast.
+- Goal or slice: Periphery dead-code gate restoration.
+- Implementer: Codex / GPT-family.
+- Reviewer: Claude / Opus.
+- Expected: optional cleanup suggestions from re-review would be safe to apply
+  when backed by repo-wide reference searches.
+- Actual: a re-review suggestion to delete `TranscriptResolutionPlan.candidates`
+  missed test-only property reads because the property name matched the enum
+  case name; applying it made `just lint-dead` fail during test-target build.
+- Impact: the commit loop lost one validation run and required reverting the
+  optional cleanup before commit.
+- Fix or follow-up: for enum computed properties whose names match cases, verify
+  with the compiler/lint gate before accepting static-search-only review
+  suggestions; prefer treating such suggestions as deferred unless directly in
+  scope.
+- Status: applied; the optional deletion was reverted and `just lint-dead`
+  passed again.
+
+## 2026-07-08 - Pi Review Blocked By Missing Provider Login
+
+- Repo: emerge.
+- Goal or slice: process-configuration `igm_auto_selection` frontend schema
+  alignment.
+- Implementer: Codex / GPT-family.
+- Reviewer: Pi / openai-codex/gpt-5.5.
+- Expected: the requested Pi plan review would run before implementation using
+  the tmux review-cycle wrapper.
+- Actual: Pi exited before review with `No API key found for openai-codex`;
+  `pi --list-models` and provider-specific list-model checks reported no
+  available models and requested login/API-key setup.
+- Impact: the user-requested clean Pi plan-review gate could not run, so
+  implementation was not started.
+- Fix or follow-up: log Pi into an available provider or export the required
+  provider API key before running the review loop; do not silently substitute a
+  Codex-family subagent when the user explicitly asks for Pi.
+- Status: blocked pending Pi provider configuration.
