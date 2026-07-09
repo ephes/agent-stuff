@@ -1077,6 +1077,14 @@ Project-specific execution lessons belong in the project repo, not here.
   transient SQLite lock failures that disappear when rerun sequentially.
   Status: applied.
 
+- 2026-07-08: daybook Pi review first launched `pi` as a background child
+  outside the tmux session while tmux only tailed the log; the process exited
+  with an empty log and no sentinel. Relaunching with a small foreground runner
+  script inside tmux and passing the prompt as `@"$prompt_file"` produced
+  sentinel-bearing reviews. Keep the reviewer process itself as the tmux
+  foreground command instead of backgrounding it from the parent shell. Status:
+  applied.
+
 ## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
 
 - Repo: ops-control / ops-library.
