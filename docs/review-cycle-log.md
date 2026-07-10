@@ -1085,6 +1085,23 @@ Project-specific execution lessons belong in the project repo, not here.
   foreground command instead of backgrounding it from the parent shell. Status:
   applied.
 
+- 2026-07-09: django-cast custom editor-block plan review had two process
+  pitfalls. Building a prompt with an unquoted heredoc expanded Markdown
+  backticks and accidentally started local commands; use quoted heredocs or
+  append prebuilt files when prompts contain code fences/backticks. The first
+  Pi tmux launch also exited before creating a log because of nested quoting
+  around the `@"$prompt_file"` argument; invoking `pi -p --no-session --approve
+  ... @"$prompt_file"` directly produced sentinel-bearing reviews. Status:
+  applied.
+
+- 2026-07-09: daybook Cheap Oracles Fable review ran successfully in tmux, but
+  sandboxed `tmux has-session` checks could not access the host tmux socket and
+  returned status 1. Hiding stderr made that look like an exited review. Inspect
+  host-launched review sessions with the same escalated tmux context, and do not
+  interpret a nonzero status as session exit until `Operation not permitted`
+  has been ruled out. Two Fable rounds completed with sentinels; round 2 had no
+  Critical or Warning findings. Status: applied.
+
 ## 2026-07-01 - Ops-Control Full Test Blocked By Existing Delve Monitoring Metadata
 
 - Repo: ops-control / ops-library.
