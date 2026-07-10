@@ -67,18 +67,20 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
 - **Architecture:** Claude Code drives the *outer* loop (review → fix → re-review)
   because Claude holds the code context and does the fixing. Each *single review* is
   one invocation of a deterministic **foreground harness script** that owns Pi.
-- **Reviewer model:** latest available GPT, resolved at runtime. Parse
-  `pi --list-models gpt` (currently lists `openai-codex/gpt-5.5`), pick the highest
-  semver-ish `gpt-*` row, and pass `<provider>/<model>` **exactly as listed** — do
-  not assume an `openai/gpt-5*` glob, which can miss the actual provider prefix.
-  Fall back to a known-good pin if resolution fails.
+- **Reviewer model:** latest available GPT, resolved at runtime, with Sol preferred
+  when same-version variants tie. Parse `pi --list-models gpt`, select
+  `openai-codex/gpt-5.6-sol` from the current listing, and pass
+  `<provider>/<model>` **exactly as listed** — do not assume an `openai/gpt-5*`
+  glob, which can miss the actual provider prefix. If authenticated model
+  listing or resolution fails, abort the review before spawning Pi. Run the
+  selected model at high reasoning.
 - **Invocation:** spawn Pi **directly** (no shell wrapper) with the bundle passed as
   an `@file`, not a giant argv string:
   ```
   pi --mode json --no-session --no-tools \
      --no-extensions --no-skills --no-prompt-templates --no-context-files \
      --append-system-prompt <reviewer instruction + verdict contract> \
-     --model <provider/gpt> @<run-dir>/review-bundle.md
+     --model <provider/gpt> --thinking high @<run-dir>/review-bundle.md
   ```
   The bundle (`@file`) carries only the diff/data; the reviewer role and the exact
   `REVIEW:` verdict contract are delivered via `--append-system-prompt` (live
@@ -159,8 +161,8 @@ background or polls a log itself.
 The harness:
 
 1. **Preflight** — acquire a slot from the per-user lock pool (reclaim if stale);
-   resolve the GPT model (else pinned fallback); assemble the review bundle (see
-   Scope).
+   resolve an authenticated GPT model or fail the review; assemble the review
+   bundle (see Scope).
 2. **Spawn** Pi directly in its **own session/process group**, e.g.
    `subprocess.Popen([...], start_new_session=True, stdout=PIPE, stderr=PIPE)` — no
    `/bin/zsh -c` wrapper (shell wrapping reintroduces quoting bugs and process-tree
@@ -297,7 +299,7 @@ timings, skipped/truncated files).
 
 | Knob | Override | Default | Rationale |
 |------|----------|---------|-----------|
-| Stall timeout `T` | `--stall-timeout` | 180s since last event (outside retry windows) | gpt-5.5 can pause between events; lower risks false kills. |
+| Stall timeout `T` | `--stall-timeout` | 180s since last event (outside retry windows) | High-reasoning reviewers can pause between events; lower risks false kills. |
 | Retry grace | `--retry-grace` | 30s | Slack added to `delayMs` before a retry window counts as `STALLED_RETRY`. |
 | Per-review deadline `global_deadline` | `--review-deadline` | 1500s (25m) | Hard wall-clock cap per review; **never suspended**, even during retries. Backstops every timer. |
 | File size cap | `--max-file-size` | 256 KB | Larger files are excluded from the bundle + listed as skipped. |
@@ -324,14 +326,17 @@ All are overridable as skill arguments.
 
 ## Verification results & implementation deltas (post-build)
 
-Built subagent-driven (2026-06-03); 75 stdlib `unittest` tests; live-verified
-against real `pi` / gpt-5.5. See `docs/review-cycle-log.md` for the smoke record.
-Deltas from the design above, all discovered/confirmed during build + live smoke:
+Originally built subagent-driven (2026-06-03) with 75 stdlib `unittest` tests
+and live verification against real `pi` / gpt-5.5. Current verification
+(2026-07-10): 99 tests and live resolution to `openai-codex/gpt-5.6-sol`. See
+`docs/review-cycle-log.md` for the original smoke record. Deltas from the design
+above, all discovered or confirmed during build and live smoke:
 
 - **`pi --list-models` format (resolved):** it prints a whitespace **table**
   (`provider  model  context …`) to **stderr**, not `provider/model` tokens to
-  stdout. `model.resolve_model` parses both the table and the slash form;
-  `resolve_from_cli` reads stdout+stderr. Live: resolves `openai-codex/gpt-5.5`.
+  stdout. `model.resolve_model` parses both the table and the slash form,
+  preferring Sol when same-version variants tie; `resolve_from_cli` reads
+  stdout+stderr. Current live resolution: `openai-codex/gpt-5.6-sol`.
 - **Reviewer instruction (resolved):** the bundle is diff-only, so Pi emits no
   verdict from it alone. The reviewer role + `REVIEW:` contract are passed via
   `--append-system-prompt`. Live: returns a parseable `REVIEW: CLEAN`.

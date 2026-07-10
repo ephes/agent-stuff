@@ -9,7 +9,7 @@ from pi_review_loop.states import CLEAN, ISSUES
 class TestReviewResult(unittest.TestCase):
     def test_scoped_clean_true_when_clean_with_skips(self):
         r = result.ReviewResult(
-            state=CLEAN, items=[], model="openai-codex/gpt-5.5", cost=0.1,
+            state=CLEAN, items=[], model="openai-codex/gpt-5.6-sol", cost=0.1,
             started_at=1.0, ended_at=2.0,
             skipped_files=[{"path": "big.json", "reason": "size", "size": 999999}],
             truncations=[], error=None, raw_verdict_line="REVIEW: CLEAN",

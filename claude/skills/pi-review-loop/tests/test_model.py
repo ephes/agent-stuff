@@ -3,6 +3,7 @@ from unittest import mock
 from pi_review_loop import model
 
 SAMPLE = """\
+openai-codex/gpt-5.6-sol
 openai-codex/gpt-5.5
 openai-codex/gpt-5.1
 anthropic/claude-opus-4-8
@@ -16,13 +17,20 @@ openai-codex  gpt-5.2              272K     128K     yes       yes
 openai-codex  gpt-5.3-codex        272K     128K     yes       yes
 openai-codex  gpt-5.4              272K     128K     yes       yes
 openai-codex  gpt-5.5              272K     128K     yes       yes
+openai-codex  gpt-5.6-luna         372K     128K     yes       yes
+openai-codex  gpt-5.6-sol          372K     128K     yes       yes
+openai-codex  gpt-5.6-terra        372K     128K     yes       yes
 anthropic     claude-opus-4-8      200K     64K      yes       yes
 """
 
 
 class TestResolveModel(unittest.TestCase):
     def test_picks_highest_gpt(self):
-        self.assertEqual(model.resolve_model(SAMPLE), "openai-codex/gpt-5.5")
+        self.assertEqual(model.resolve_model(SAMPLE), "openai-codex/gpt-5.6-sol")
+
+    def test_sol_preference_does_not_override_newer_version(self):
+        out = "openai-codex/gpt-5.6-sol\nopenai-codex/gpt-5.7-terra\n"
+        self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.7-terra")
 
     def test_passes_provider_prefix_exactly(self):
         out = "someprovider/gpt-9000-turbo\nother/gpt-3"
@@ -51,9 +59,9 @@ class TestResolveModel(unittest.TestCase):
             self.assertEqual(model.resolve_from_cli(fallback="pin/x"), "pin/x")
 
     def test_resolve_from_cli_parses_stdout(self):
-        completed = mock.Mock(stdout="openai-codex/gpt-5.5\n", stderr="", returncode=0)
+        completed = mock.Mock(stdout="openai-codex/gpt-5.6-sol\n", stderr="", returncode=0)
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
-            self.assertEqual(model.resolve_from_cli(), "openai-codex/gpt-5.5")
+            self.assertEqual(model.resolve_from_cli(), "openai-codex/gpt-5.6-sol")
 
     def test_diagnostic_line_does_not_hide_listed_gpt_model(self):
         completed = mock.Mock(
@@ -151,12 +159,36 @@ class TestResolveModel(unittest.TestCase):
             with self.assertRaises(model.PiUnavailable):
                 model.ensure_available()
 
+    def test_ensure_model_available_strips_thinking_suffix(self):
+        completed = mock.Mock(
+            stdout="provider model\nopenai-codex gpt-5.6-sol\n",
+            stderr="",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed) as run:
+            self.assertIsNone(
+                model.ensure_model_available("openai-codex/gpt-5.6-sol:high")
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            ["pi", "--list-models", "openai-codex/gpt-5.6-sol"],
+        )
+
+    def test_ensure_model_available_rejects_no_match(self):
+        completed = mock.Mock(
+            stdout='', stderr='No models matching "bogus/model"\n', returncode=0
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable) as raised:
+                model.ensure_model_available("bogus/model")
+        self.assertIn("requested model is not available", str(raised.exception))
+
 
 class TestResolveTableFormat(unittest.TestCase):
     def test_parses_real_table_and_picks_highest(self):
-        # fallback "pin/x" is wrong on purpose: returning gpt-5.5 proves it parsed.
+        # fallback "pin/x" is wrong on purpose: returning Sol proves it parsed.
         self.assertEqual(model.resolve_model(REAL_TABLE, fallback="pin/x"),
-                         "openai-codex/gpt-5.5")
+                         "openai-codex/gpt-5.6-sol")
 
     def test_skips_header_row(self):
         # header's model column is the literal word "model" (no gpt) -> ignored

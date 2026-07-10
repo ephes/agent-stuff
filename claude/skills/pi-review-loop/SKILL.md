@@ -1,6 +1,6 @@
 ---
 name: pi-review-loop
-description: "Use when you want a fresh-context code-review gate before committing — runs Pi (newest GPT model) as a reviewer over the current git diff in a bounded, observable loop, and only proceeds when Pi returns CLEAN. Drives review → fix → re-review up to a round cap. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
+description: "Use when you want a fresh-context code-review gate before committing — runs Pi with the newest GPT (currently GPT-5.6 Sol) at high reasoning as a reviewer over the current git diff in a bounded, observable loop, and only proceeds when Pi returns CLEAN. Drives review → fix → re-review up to a round cap. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
 # Pi Review Loop
@@ -68,7 +68,9 @@ implement and fix; Pi reviews with fresh context.
 
 ## Useful flags
 
-`--model <id>` (default: newest GPT auto-resolved), `--review-deadline <s>` (hard
+`--model <id>` overrides runtime model resolution. When omitted, the harness
+selects the newest GPT and prefers `openai-codex/gpt-5.6-sol` among the current
+same-version variants. Pi runs at `high` reasoning. `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-only`,
 `--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
 files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single

@@ -18,7 +18,7 @@ slice. The reviewer must be a different model family from the implementer.
 - `REVIEWER_MODEL` may override the default model for the selected reviewer.
 - If `REVIEWER_AGENT` is unset or `auto`:
   - Claude-family implementer: use `codex` with
-    `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.5}"`.
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.6-sol}"` at high reasoning.
   - Codex/GPT-family implementer: use `claude-plan` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-opus}"`.
 - Prefer `claude-plan` over `claude-no-tools` when the reviewer needs to inspect
@@ -95,32 +95,36 @@ without explicit user direction.
            claude -p --model "$reviewer_model" --no-session-persistence \
              --tools "" --disable-slash-commands < "$prompt_file" 2>&1 | tee "$log_file"
        case codex
-           test -n "$reviewer_model"; or set reviewer_model gpt-5.5
-           codex -a never exec --sandbox read-only -m "$reviewer_model" - < "$prompt_file" 2>&1 | tee "$log_file"
+           test -n "$reviewer_model"; or set reviewer_model gpt-5.6-sol
+           codex -a never exec --sandbox read-only -m "$reviewer_model" \
+             -c 'model_reasoning_effort="high"' - < "$prompt_file" 2>&1 | tee "$log_file"
        case pi
-           test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.5
+           test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.6-sol
            if not command -q pi
                echo "pi reviewer unavailable: pi command not found on PATH" | tee "$log_file"
                exit 127
            end
-           set pi_models (env PI_TELEMETRY=0 pi --list-models gpt 2>&1 | string collect)
+           set reviewer_model_lookup (string replace -r ':(off|minimal|low|medium|high|xhigh|max)$' '' -- "$reviewer_model")
+           set pi_models (env PI_TELEMETRY=0 pi --list-models "$reviewer_model_lookup" 2>&1 | string collect)
            set pi_models_status $pipestatus[1]
            if test $pi_models_status -ne 0
                echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
                printf "%s\n" "$pi_models" | tee -a "$log_file"
                exit 69
            end
-           if not string match -rq '(^|[[:space:]])gpt-[^[:space:]]+' -- "$pi_models"
+           if string match -q '*No models matching*' -- "$pi_models"; or string match -q '*No models available*' -- "$pi_models"; or string match -q '*No API key found*' -- "$pi_models"
                if string match -q '*No models available*' -- "$pi_models"; or string match -q '*No API key found*' -- "$pi_models"
                    echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
                else
-                   echo "pi reviewer unavailable: no GPT model listed by pi in this environment" | tee "$log_file"
+                   echo "pi reviewer unavailable: requested model $reviewer_model is not listed by pi in this environment" | tee "$log_file"
                end
                printf "%s\n" "$pi_models" | tee -a "$log_file"
                exit 69
            end
+           set reviewer_model "$reviewer_model_lookup"
            set prompt_text (cat "$prompt_file" | string collect)
-           env PI_TELEMETRY=0 pi -p --no-session --no-context-files --approve --model "$reviewer_model" \
+           env PI_TELEMETRY=0 pi -p --no-session --no-context-files --approve \
+             --model "$reviewer_model" --thinking high \
              --tools read,grep,find,ls "$prompt_text" 2>&1 | tee "$log_file"
        case '*'
            echo "unsupported REVIEWER_AGENT=$reviewer_agent" | tee "$log_file"

@@ -80,7 +80,7 @@ def _pi_cmd(model, bundle_path):
         "pi", "--mode", "json", "--no-session", "--no-tools",
         "--no-extensions", "--no-skills", "--no-prompt-templates",
         "--no-context-files", "--append-system-prompt", REVIEW_INSTRUCTION,
-        "--model", model, f"@{bundle_path}",
+        "--model", model, "--thinking", "high", f"@{bundle_path}",
     ]
 
 
@@ -129,7 +129,7 @@ def main(argv=None):
         if os.environ.get("PI_REVIEW_FAKE_CMD"):
             model = args.model or "fake/model"
         elif args.model:
-            model_mod.ensure_available()
+            model_mod.ensure_model_available(args.model)
             model = args.model
         else:
             model = model_mod.resolve_from_cli(require_available=True)

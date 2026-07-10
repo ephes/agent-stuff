@@ -45,7 +45,7 @@ class TestParseVerdict(unittest.TestCase):
         ])
 
     def test_issues_with_items_before_verdict_line(self):
-        # gpt-5.5 commonly lists findings BEFORE the trailing verdict line.
+        # Reviewers commonly list findings BEFORE the trailing verdict line.
         text = (
             "1. [Warning] src/a.py: careful\n"
             "2. [Critical] src/b.py: boom\n"

@@ -148,12 +148,13 @@ class TestPiCmd(unittest.TestCase):
         from pi_review_loop import cli
         env = {k: v for k, v in os.environ.items() if k != "PI_REVIEW_FAKE_CMD"}
         with mock.patch.dict(os.environ, env, clear=True):
-            cmd = cli._pi_cmd("openai-codex/gpt-5.5", "/tmp/bundle.md")
+            cmd = cli._pi_cmd("openai-codex/gpt-5.6-sol", "/tmp/bundle.md")
         self.assertEqual(cmd[0], "pi")
         self.assertIn("--mode", cmd)
         self.assertIn("--no-tools", cmd)
         self.assertIn("@/tmp/bundle.md", cmd)
         self.assertIn("--append-system-prompt", cmd)
+        self.assertEqual(cmd[cmd.index("--thinking") + 1], "high")
         i = cmd.index("--append-system-prompt")
         instruction = cmd[i + 1]
         self.assertIn("REVIEW: CLEAN", instruction)
