@@ -123,7 +123,7 @@ class _Streams:
 
 def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                global_deadline, poll_interval=0.5, env=None, on_spawn=None,
-               input_path=None):
+               input_path=None, cwd=None, effort=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
         "raw": "stdout.raw.log", "events": "events.jsonl",
@@ -135,8 +135,11 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
     if env:
         sub_env.update(env)
 
-    monitor = Monitor(started_at=started, stall_timeout=stall_timeout,
-                      retry_grace=retry_grace, global_deadline=global_deadline)
+    monitor = Monitor(
+        started_at=started, stall_timeout=stall_timeout,
+        retry_grace=retry_grace, global_deadline=global_deadline,
+        review_root=cwd or run_dir,
+    )
     proc = None
     pgid = None
     streams = None
@@ -144,9 +147,9 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
     error = None
     stdin_f = None
 
-    raw_f = open(paths["raw"], "w")
-    ev_f = open(paths["events"], "w")
-    err_f = open(paths["stderr"], "w")
+    raw_f = open(paths["raw"], "w", encoding="utf-8")
+    ev_f = open(paths["events"], "w", encoding="utf-8")
+    err_f = open(paths["stderr"], "w", encoding="utf-8")
     try:
         if input_path is not None:
             stdin_f = open(input_path, "rb")
@@ -155,7 +158,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             stdin=stdin_f if stdin_f is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            start_new_session=True, env=sub_env, bufsize=0,
+            start_new_session=True, env=sub_env, bufsize=0, cwd=cwd,
         )
         try:
             pgid = os.getpgid(proc.pid)  # cache immediately, before any exit
@@ -187,10 +190,15 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                     _kill_group(proc, pgid)
                 break
         state = decision_state or CRASHED
+    except KeyboardInterrupt:
+        error = "review interrupted by user (KeyboardInterrupt)"
+        state = CRASHED
+        if proc is not None:
+            _kill_group(proc, pgid)
     except Exception:  # never leave Claude polling a result that never appears
         error = traceback.format_exc()
         state = CRASHED
-        if proc is not None and proc.poll() is None:
+        if proc is not None:
             _kill_group(proc, pgid)
     finally:
         raw_f.close(); ev_f.close(); err_f.close()
@@ -209,20 +217,33 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             except OSError:
                 pass
 
-    if monitor.provider_error and not error:
-        error = monitor.provider_error
+    if not error:
+        # A forbidden tool is the stronger local safety signal; preserve it
+        # ahead of any provider failure observed in the same stream.
+        observed_errors = [e for e in (
+            monitor.invalid_error, monitor.provider_error
+        ) if e]
+        error = "; ".join(observed_errors) or None
     if error is None and state == CRASHED:
         try:
-            with open(paths["stderr"]) as fh:
-                error = fh.read()[-2000:] or None
+            with open(paths["stderr"], encoding="utf-8") as fh:
+                error = fh.read()[-2000:].strip() or None
         except OSError:
             pass
+        if error is None:
+            returncode = proc.returncode if proc is not None else None
+            error = (
+                f"reviewer exited with status {returncode} without a valid "
+                "structured verdict"
+            )
 
     try:
         result = ReviewResult(
             state=state, items=monitor.verdict_items, model=model, cost=monitor.cost,
             started_at=started, ended_at=_now(), error=error,
-            raw_verdict_line=monitor.verdict_text,
+            effort=effort, structured_output=monitor.structured_output,
+            tool_uses=monitor.tool_uses,
+            forbidden_tool_uses=monitor.forbidden_tool_uses,
         )
         result.write(paths["result"])
     except Exception:
@@ -232,7 +253,9 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             state=CRASHED, items=[], model=model, cost=None,
             started_at=started, ended_at=_now(),
             error=((error or "") + "\n" + traceback.format_exc()).strip(),
-            raw_verdict_line=None,
+            effort=effort, structured_output=monitor.structured_output,
+            tool_uses=monitor.tool_uses,
+            forbidden_tool_uses=monitor.forbidden_tool_uses,
         )
         try:
             result.write(paths["result"])

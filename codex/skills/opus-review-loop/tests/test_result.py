@@ -12,7 +12,7 @@ class TestReviewResult(unittest.TestCase):
             state=CLEAN, items=[], model="opus", cost=0.1,
             started_at=1.0, ended_at=2.0,
             skipped_files=[{"path": "big.json", "reason": "size", "size": 999999}],
-            truncations=[], error=None, raw_verdict_line="REVIEW: CLEAN",
+            truncations=[], error=None,
         )
         self.assertTrue(r.scoped_clean)
 
@@ -20,7 +20,7 @@ class TestReviewResult(unittest.TestCase):
         r = result.ReviewResult(
             state=CLEAN, items=[], model="m", cost=None,
             started_at=1.0, ended_at=2.0, skipped_files=[], truncations=[],
-            error=None, raw_verdict_line="REVIEW: CLEAN",
+            error=None,
         )
         self.assertFalse(r.scoped_clean)
 
@@ -29,15 +29,21 @@ class TestReviewResult(unittest.TestCase):
             state=ISSUES, items=[{"severity": "Warning", "path": "a", "message": "b"}],
             model="m", cost=None, started_at=1.0, ended_at=2.0,
             skipped_files=[{"path": "x"}], truncations=[], error=None,
-            raw_verdict_line="REVIEW: ISSUES",
         )
         self.assertFalse(r.scoped_clean)
+
+    def test_scoped_clean_true_when_content_was_redacted(self):
+        r = result.ReviewResult(
+            state=CLEAN, items=[], model="m", cost=None,
+            started_at=1.0, ended_at=2.0,
+            redactions=[{"path": ".env", "section": "untracked file"}],
+        )
+        self.assertTrue(r.scoped_clean)
 
     def test_write_roundtrips_json(self):
         r = result.ReviewResult(
             state=CLEAN, items=[], model="m", cost=0.0, started_at=1.0,
             ended_at=2.0, skipped_files=[], truncations=[], error=None,
-            raw_verdict_line=None,
         )
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "result.json")
@@ -53,7 +59,7 @@ class TestReviewResult(unittest.TestCase):
         r = result.ReviewResult(
             state=CLEAN, items=[], model="m", cost=None, started_at=0.0,
             ended_at=1.5, skipped_files=[{"path": "big.json"}], truncations=[],
-            error=None, raw_verdict_line="REVIEW: CLEAN",
+            error=None,
         )
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "result.json")

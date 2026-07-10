@@ -6,11 +6,12 @@ Skills and command prompts for Claude Code.
 
 | Skill | Purpose |
 |-------|---------|
-| `cross-agent-review-cycle` | Run a bounded tmux review loop with a different model family before commit |
+| `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use `opus-review-loop` |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |
 | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
+| `opus-review-loop` (shared dependency) | Supervised Claude gate loaded from `../codex/skills/opus-review-loop` |
 | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 
 ## Commands
@@ -18,6 +19,19 @@ Skills and command prompts for Claude Code.
 | Command | Purpose |
 |---------|---------|
 | `cmsg.md` | Commit with a clean message, no self-references |
+
+## Shared review dependency
+
+`cross-agent-review-cycle` resolves Claude reviews through
+`~/projects/agent-stuff/codex/skills/opus-review-loop`. A Claude-only deployment
+must install that sibling harness at the same path; copying only `claude/skills`
+is not sufficient for Claude-family review gates.
+
+```text
+repository root
+  claude/skills/cross-agent-review-cycle
+    -> codex/skills/opus-review-loop
+```
 
 ## What stays private in chezmoi
 

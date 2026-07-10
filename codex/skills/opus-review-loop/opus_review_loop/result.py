@@ -16,14 +16,20 @@ class ReviewResult:
     ended_at: float
     skipped_files: list = field(default_factory=list)
     truncations: list = field(default_factory=list)
+    redactions: list = field(default_factory=list)
+    effort: str | None = None
+    structured_output: dict | None = None
+    tool_uses: list = field(default_factory=list)
+    forbidden_tool_uses: list = field(default_factory=list)
     error: str | None = None
-    raw_verdict_line: str | None = None
 
     @property
     def scoped_clean(self):
         """A CLEAN verdict over a bundle that skipped or truncated content is only
         'clean within provided scope', not absolute."""
-        return self.state == CLEAN and bool(self.skipped_files or self.truncations)
+        return self.state == CLEAN and bool(
+            self.skipped_files or self.truncations or self.redactions
+        )
 
     def to_dict(self):
         d = asdict(self)
@@ -32,5 +38,5 @@ class ReviewResult:
         return d
 
     def write(self, path):
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             json.dump(self.to_dict(), fh, indent=2, sort_keys=True)

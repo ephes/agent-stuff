@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 from opus_review_loop import runner
-from opus_review_loop.states import CLEAN, ISSUES, CRASHED, STALLED, PROVIDER_ERROR
+from opus_review_loop.states import CLEAN, ISSUES, INVALID, CRASHED, STALLED, PROVIDER_ERROR
 
 FAKE = [sys.executable, os.path.join(os.path.dirname(__file__), "fake_claude.py")]
 
@@ -39,13 +39,30 @@ class TestRunner(unittest.TestCase):
         r = self._run("hang", stall_timeout=1)
         self.assertEqual(r.state, STALLED)
 
+    def test_keyboard_interrupt_kills_group_and_writes_crashed_result(self):
+        seen = []
+        with mock.patch.object(runner._Streams, "pump", side_effect=KeyboardInterrupt):
+            r = self._run("hang", on_spawn=seen.append)
+        self.assertEqual(r.state, CRASHED)
+        self.assertIn("interrupted by user", r.error or "")
+        self.assertTrue(os.path.exists(os.path.join(self.run_dir, "result.json")))
+        self.assertTrue(seen)
+        self.assertFalse(runner._group_alive(seen[0]))
+
     def test_crash_with_malformed_output(self):
         r = self._run("crash")
         self.assertEqual(r.state, CRASHED)
+        self.assertIn("reviewer exited with status", r.error or "")
+        self.assertIn("without a valid structured verdict", r.error or "")
         import json
         with open(os.path.join(self.run_dir, "events.jsonl")) as fh:
             for line in fh:
                 json.loads(line)  # must not raise
+
+    def test_whitespace_stderr_does_not_hide_crash_diagnostic(self):
+        r = self._run("crash_whitespace")
+        self.assertEqual(r.state, CRASHED)
+        self.assertIn("reviewer exited with status", r.error or "")
 
     def test_posthang_returns_clean_without_waiting(self):
         # M3: verdict present, process won't exit -> must finish CLEAN promptly.
@@ -57,6 +74,30 @@ class TestRunner(unittest.TestCase):
         r = self._run("provider_error")
         self.assertEqual(r.state, PROVIDER_ERROR)
         self.assertIn("529", r.error or "")
+
+    def test_forbidden_tool_is_invalid_and_recorded(self):
+        r = self._run("forbidden_tool")
+        self.assertEqual(r.state, INVALID)
+        self.assertIn("Bash", r.error or "")
+        self.assertEqual(r.forbidden_tool_uses[0]["tool"], "Bash")
+
+    def test_out_of_scope_allowed_tool_is_invalid_and_recorded(self):
+        r = self._run("out_of_scope_read", cwd=self.run_dir)
+        self.assertEqual(r.state, INVALID)
+        self.assertIn("out-of-scope Claude Read target", r.error or "")
+        self.assertEqual(r.forbidden_tool_uses[0]["tool"], "Read")
+
+    def test_forbidden_tool_error_precedes_provider_error(self):
+        r = self._run("forbidden_provider_error")
+        self.assertEqual(r.state, INVALID)
+        self.assertIn("forbidden Claude tool use: Bash", r.error or "")
+        self.assertIn("529 overloaded", r.error or "")
+        self.assertLess(r.error.index("Bash"), r.error.index("529"))
+
+    def test_missing_structured_output_error_reaches_result(self):
+        r = self._run("missing_structured")
+        self.assertEqual(r.state, INVALID)
+        self.assertEqual(r.error, "missing structured output")
 
     def test_default_stdin_is_closed(self):
         r = self._run("stdin_empty")

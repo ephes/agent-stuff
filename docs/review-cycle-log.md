@@ -1214,3 +1214,103 @@ Project-specific execution lessons belong in the project repo, not here.
   that mode after a short empty-log timeout. Kill the silent plan-mode session
   and verify no child Claude process remains before retrying.
 - Status: applied for rerun and re-review.
+
+## 2026-07-10 - Consolidated: Fail-Closed Verdict And Lifecycle Contract
+
+- Repo: agent-stuff.
+- Scope: supervised Claude review lifecycle, structured output, error mapping,
+  interruption, and global serialization.
+- Durable lesson: a review gate must distinguish findings from infrastructure
+  failure. Schema-invalid or missing verdicts, provider errors, stalls, crashes,
+  unexpected exceptions, and user interrupts all produce failed states and exit
+  2; only schema-consistent CLEAN can exit 0.
+- Implementation: the runner owns a separate reviewer process group, drains and
+  records stream evidence, terminates and reaps on deadlines and Ctrl-C, and
+  always attempts a structured result. The lock holds an OS advisory guard across
+  acquisition, reclaim, ownership, and release; it also uses atomic mkdir,
+  unique stale tombstones, metadata owner tokens, and token-checked updates.
+- Verification: lifecycle, timeout, malformed-output, provider, SIGINT subprocess,
+  process-group escalation, stale-reclaim race, and replacement-owner tests.
+- Status: implemented; covered by the 155-test standard suite.
+
+## 2026-07-10 - Consolidated: Isolation Is A Capability And Target Boundary
+
+- Repo: agent-stuff.
+- Scope: Claude configuration, filesystem isolation, tool policy, delegation,
+  and live inspection targets.
+- Durable lesson: allowing a tool name is not enough. Reviewer capabilities must
+  be constrained both by OS isolation and by validating each requested target.
+- Implementation: safe mode, no setting sources, strict empty MCP, dontAsk,
+  read-only inspection tools, no filesystem writes, no raw-repository access,
+  and explicit rejection of Bash/edit/delegation/web/MCP tools. Read, Grep, and
+  Glob targets are canonicalized against the harness-owned artifact root;
+  absolute, tilde, traversal, and out-of-root requests invalidate the review even
+  if the sandbox would deny them. Incomplete stream-start inputs are deferred
+  until the complete tool call arrives.
+- Verification: unit and runner tests cover allowed artifact reads, forbidden
+  tools, malformed inputs, /etc/hosts, traversal, tilde, and absolute Glob
+  patterns. The installed-Claude canary covers outside-root, raw-repository,
+  mixed-case secret paths, denied Grep, and a permitted artifact control.
+- Status: implemented; production invocation remains covered by the passing
+  six-case installed-Claude Haiku canary.
+
+## 2026-07-10 - Consolidated: Redaction And Git Collection Must Be Byte-Exact
+
+- Repo: agent-stuff.
+- Scope: Git invocation, secret detection, private-key state, encodings, control
+  characters, and exact model egress.
+- Durable lesson: redaction must model Git's actual byte and record structure,
+  including removed lines, hunk headings, blank-context configuration, lone CR,
+  Unicode line separators, and non-UTF repository data.
+- Implementation: Git disables external/textconv drivers, color, mnemonic/no
+  prefixes, and suppressed blank markers. Raw stdout bytes are decoded explicitly
+  without universal-newline conversion. Secret paths, key blocks, connection
+  credentials, token families, JSON/assignment keys, and base64url values are
+  redacted. Replacement decoding is recorded and scopes CLEAN; caller context
+  remains strict UTF-8. Bundle and prompt writes disable newline translation.
+- Verification: focused tests cover secret filenames with spaces, color/ANSI,
+  removed key blocks across hunks, function headings, blank key lines, CR/control
+  characters, non-UTF Git/untracked data, and exact prompt suffix bytes.
+- Status: implemented; redaction metadata remains part of the gate result.
+
+## 2026-07-10 - Consolidated: Review Evidence Must Be Complete, Bounded, And Scoped
+
+- Repo: agent-stuff.
+- Scope: staged/unstaged/untracked collection, explicit context, trust boundaries,
+  bundle limits, skips, truncations, and audit artifacts.
+- Durable lesson: a CLEAN verdict is meaningful only for exact, attributable
+  evidence. Caller-authored context must be structurally separated from
+  repository-controlled data, and every omission or lossy transformation must be
+  visible in authoritative result metadata.
+- Implementation: the bundle includes staged, unstaged, and regular untracked
+  content; never follows symlinks or opens special files; fails hard for unsafe
+  explicit context; preserves mandatory diffstat/context sections; bounds
+  per-file and total evidence; and records skipped files, truncations, redactions,
+  and affected Git commands. Only context before the repository-evidence boundary
+  is trusted. Prompt delivery stays on stdin and artifacts preserve exact input.
+- Verification: tests cover forged headings, blocking file types, oversized
+  sections, droppable manifests, filenames with spaces/control characters,
+  missing/binary/non-UTF context, scoped CLEAN serialization, and exact artifacts.
+- Status: implemented; operators must inspect scope metadata before accepting a
+  scoped CLEAN.
+
+## 2026-07-10 - Consolidated: One Claude Gate, Reliable Alternate Routing
+
+- Repo: agent-stuff.
+- Scope: cross-agent workflow consolidation, Pi/Codex branches, deployment path,
+  verification policy, and documentation.
+- Durable lesson: keep one authoritative Claude gate and make alternate-agent
+  transport match its proven reliability constraints instead of maintaining
+  contradictory review paths.
+- Implementation: every Claude alias delegates to opus-review-loop; direct
+  Claude tmux/plan/Bash-allowlist paths are removed. Codex and Pi remain separate
+  tmux branches with resolved reviewer/model arguments passed explicitly. Pi uses
+  @prompt-file with direct log redirection, never a large positional prompt or
+  tee pipeline. The repository documents the shared review workflow's current
+  ~/projects/agent-stuff deployment-path exception.
+- Verification: mirrored Codex/Claude skill instructions are kept in sync; skill
+  validation, Python compilation, diff checks, 155 standard tests, paid isolation
+  canaries when invocation policy changes, and a fresh different-family review
+  form the completion gate.
+- Status: implemented; packaging remains deferred until the local workflow is
+  stable.
