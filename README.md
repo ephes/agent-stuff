@@ -11,15 +11,15 @@ chezmoi symlinks.
 | Codex | `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use the supervised local harness |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
-| Codex | `opus-review-loop` | Run the supervised, fail-closed Claude Opus review gate |
+| Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus default) |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
 | Claude | `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use the supervised local harness |
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
-| Claude | `pi-review-loop` | Bounded, observable review gate: drive Pi (newest GPT) over the diff until CLEAN |
+| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-5.6-sol` until CLEAN |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
-| Claude | `opus-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
+| Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 | Claude | `cmsg` (command) | Commit with a clean message, no self-references |
 | Pi | `commit-ready` | Assess commit readiness without creating a commit |
@@ -41,7 +41,8 @@ agent-stuff/
       cross-agent-review-cycle/
       goal-handoff/
       implement-handoff/
-      opus-review-loop/
+      claude-review-loop/
+      opus-review-loop/  # legacy compatibility shim
       review-handoff/
   claude/
     README.md

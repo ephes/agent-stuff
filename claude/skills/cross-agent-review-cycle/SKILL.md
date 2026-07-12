@@ -1,6 +1,6 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating up to three fix/re-review cycles with Claude, Codex, or Pi. Claude reviews delegate to the supervised opus-review-loop harness.
+description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating up to three fix/re-review cycles with Claude, Codex, or Pi. Claude reviews delegate to the supervised claude-review-loop harness.
 ---
 
 # Cross-Agent Review Cycle
@@ -23,13 +23,19 @@ slice. The reviewer must be a different model family from the implementer.
     `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.6-sol}"` at high reasoning.
   - Codex/GPT-family implementer: use `claude` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-opus}"`.
-- Every Claude-family review must use `opus-review-loop`. Do not invoke direct
+- Every Claude-family review must use `claude-review-loop`. Do not invoke direct
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
   output, lifecycle supervision, and fail-closed verdicts.
+- Every Pi review must use `openai-codex/gpt-5.6-sol`. Never ask Pi to run a
+  Claude/Anthropic model, a local model such as Qwen/Ollama/LM Studio, an
+  OpenRouter model, or any other provider. Claude models run only through
+  Claude Code and `claude-review-loop`.
 
 Do not silently substitute a same-family reviewer. If the requested reviewer
-command or model is unavailable, report the blocker.
+command or model is unavailable, report the blocker. For Pi, fail closed if
+the approved model or authentication is unavailable; never make an automatic
+model, provider, or transport fallback.
 
 Do not add `--max-budget-usd`, `--dangerously-skip-permissions`, or equivalent
 ad hoc permission/budget flags to Claude review commands. Subscription usage
@@ -75,7 +81,7 @@ without explicit user direction.
    ```bash
    reviewer_model="${REVIEWER_MODEL:-opus}"
    run_dir="$(mktemp -d -t claude-review.XXXXXX)"
-   python3 ~/projects/agent-stuff/codex/skills/opus-review-loop/bin/opus-review-loop \
+   python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
      --repo "$PWD" \
      --run-dir "$run_dir" \
      --model "$reviewer_model" \
@@ -117,12 +123,16 @@ without explicit user direction.
              -c 'model_reasoning_effort="high"' - < "$prompt_file" 2>&1 | tee "$log_file"
        case pi
            test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.6-sol
+           set reviewer_model_lookup (string replace -r ':(off|minimal|low|medium|high|xhigh|max)$' '' -- "$reviewer_model")
+           if test "$reviewer_model_lookup" != openai-codex/gpt-5.6-sol
+               echo "unsupported Pi review model: $reviewer_model; mandatory Pi reviews use openai-codex/gpt-5.6-sol only (no Claude/Anthropic, local models, OpenRouter, or provider fallback)" | tee "$log_file"
+               exit 64
+           end
            if not command -q pi
                echo "pi reviewer unavailable: pi command not found on PATH" | tee "$log_file"
                exit 127
            end
-           set reviewer_model_lookup (string replace -r ':(off|minimal|low|medium|high|xhigh|max)$' '' -- "$reviewer_model")
-           set pi_models (env PI_TELEMETRY=0 pi --list-models "$reviewer_model_lookup" 2>&1 | string collect)
+           set pi_models (env PI_TELEMETRY=0 pi --list-models gpt 2>&1 | string collect)
            set pi_models_status $pipestatus[1]
            if test $pi_models_status -ne 0
                echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
@@ -135,6 +145,11 @@ without explicit user direction.
                else
                    echo "pi reviewer unavailable: requested model $reviewer_model is not listed by pi in this environment" | tee "$log_file"
                end
+               printf "%s\n" "$pi_models" | tee -a "$log_file"
+               exit 69
+           end
+           if not string match -rq 'openai-codex[ /]+gpt-5\.6-sol' -- "$pi_models"
+               echo "pi reviewer unavailable: required model openai-codex/gpt-5.6-sol is not listed by pi in this environment" | tee "$log_file"
                printf "%s\n" "$pi_models" | tee -a "$log_file"
                exit 69
            end
@@ -163,10 +178,12 @@ without explicit user direction.
    redirection. Do not replace it with a positional prompt, stdin, or a `tee`
    pipeline; those forms have produced empty-log wrapper hangs in observed runs.
 
-   The Pi branch preflights `pi --list-models gpt` before starting the review.
-   Exit `127` means `pi` was not on PATH; exit `69` means this environment could
-   not list an authenticated GPT model. Report that blocker instead of treating
-   the review as queued or clean.
+   The Pi branch rejects every model except `openai-codex/gpt-5.6-sol`, then
+   preflights that exact model before starting the review.
+   Exit `64` means the caller requested a forbidden Pi review model, exit `127`
+   means `pi` was not on PATH, and exit `69` means this environment could not
+   list the authenticated approved model. Report that blocker instead of
+   treating the review as queued or clean.
 
 4. For the Codex/Pi tmux branches only, poll the log file until the reviewer
    prints the required completion sentinel. With one-shot `-p`, the prompt is
@@ -204,7 +221,7 @@ without explicit user direction.
    remains. Tmux can exit while its child process continues; terminate the
    surviving reviewer process group before starting another cycle.
 
-   Claude lifecycle cleanup belongs exclusively to `opus-review-loop`; do not
+   Claude lifecycle cleanup belongs exclusively to `claude-review-loop`; do not
    recreate it with tmux polling.
 
 ## Review Prompt Contents

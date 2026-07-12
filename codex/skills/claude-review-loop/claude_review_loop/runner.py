@@ -1,4 +1,4 @@
-"""Drive one Claude Opus review: spawn in its own process group, monitor JSON
+"""Drive one Claude review: spawn in its own process group, monitor JSON
 stream non-blockingly (raw-fd os.read so a buffered text object can never wedge
 us), reap on every exit path, and always write artifacts."""
 import json

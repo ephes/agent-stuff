@@ -1,5 +1,10 @@
 # Pi Review Loop Implementation Plan
 
+> **Historical plan:** Model-selection steps below describe the original
+> implementation. Since 2026-07-12 the production gate permits only
+> `openai-codex/gpt-5.6-sol` and fails closed if it is unavailable. It never
+> falls back to Claude/Anthropic, OpenRouter, a local model, or another provider.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Claude Code skill that runs a bounded review loop — Claude implements, hands the diff to a foreground Python harness that drives Pi as a fresh-context reviewer over its `--mode json` event stream, and only proceeds when Pi returns a clean, parseable verdict.
@@ -23,7 +28,8 @@ All under `claude/skills/pi-review-loop/` (the skill root, which is also the tes
 - `pi_review_loop/verdict.py` — extract final assistant text + parse `REVIEW:` verdict (fail-closed).
 - `pi_review_loop/result.py` — `ReviewResult` dataclass + JSON serialization.
 - `pi_review_loop/monitor.py` — `Monitor` state machine + `decide()` (the 8-way check).
-- `pi_review_loop/model.py` — resolve newest GPT model from `pi --list-models gpt`.
+- `pi_review_loop/model.py` — require the approved GPT-5.6 Sol model from
+  `pi --list-models gpt` and reject every alternative.
 - `pi_review_loop/lock.py` — atomic global-per-user lock with reuse-safe stale reclaim.
 - `pi_review_loop/bundle.py` — build the bounded review bundle from git (size/diff/total caps).
 - `pi_review_loop/runner.py` — spawn Pi, drive the monitor over real IO, reap, write artifacts.
@@ -592,7 +598,7 @@ git commit -m "feat(pi-review-loop): 8-way monitor state machine"
 
 ---
 
-## Task 4: Model resolution (newest GPT from `pi --list-models`)
+## Task 4: Model resolution (historical; superseded by the fixed-model policy)
 
 **Files:**
 - Create: `pi_review_loop/model.py`

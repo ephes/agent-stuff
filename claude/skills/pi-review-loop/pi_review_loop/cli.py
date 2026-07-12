@@ -60,7 +60,10 @@ def _build_parser():
     p.add_argument("--max-concurrent", type=_positive_int,
                    default=_default_max_concurrent(),
                    help="maximum concurrent Pi review slots for this user")
-    p.add_argument("--model", default=None, help="override model id")
+    p.add_argument(
+        "--model", default=None,
+        help="review model (only openai-codex/gpt-5.6-sol is permitted)",
+    )
     p.add_argument("--stall-timeout", type=float, default=180)
     p.add_argument("--retry-grace", type=float, default=30)
     p.add_argument("--review-deadline", type=float, default=1500)
@@ -129,8 +132,7 @@ def main(argv=None):
         if os.environ.get("PI_REVIEW_FAKE_CMD"):
             model = args.model or "fake/model"
         elif args.model:
-            model_mod.ensure_model_available(args.model)
-            model = args.model
+            model = model_mod.ensure_model_available(args.model)
         else:
             model = model_mod.resolve_from_cli(require_available=True)
     except model_mod.PiUnavailable as e:

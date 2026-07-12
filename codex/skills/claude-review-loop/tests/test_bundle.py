@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest import mock
-from opus_review_loop import bundle
+from claude_review_loop import bundle
 
 
 def git(repo, *args):

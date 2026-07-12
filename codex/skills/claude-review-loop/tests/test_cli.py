@@ -12,6 +12,9 @@ from unittest import mock
 
 SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(SKILL_ROOT, "tests", "fake_claude.py")
+LEGACY_BIN = os.path.realpath(os.path.join(
+    SKILL_ROOT, "..", "opus-review-loop", "bin", "opus-review-loop"
+))
 
 
 class TestCli(unittest.TestCase):
@@ -35,9 +38,9 @@ class TestCli(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_clean_exit_zero(self):
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
              "--lock-dir", os.path.join(self.tmp.name, "lock"),
              "--model", "fake/model"],
@@ -46,10 +49,41 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("CLEAN", proc.stdout)
 
-    def test_issues_exit_one(self):
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} issues")
+    def test_non_opus_model_is_recorded_with_non_opus_effort_default(self):
+        run_dir = os.path.join(self.tmp.name, "run-sonnet")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock-sonnet"),
+             "--model", "sonnet"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            result = json.load(fh)
+        self.assertEqual(result["model"], "sonnet")
+        self.assertEqual(result["effort"], "high")
+
+    def test_legacy_entrypoint_forwards_to_canonical_opus_default(self):
+        run_dir = os.path.join(self.tmp.name, "run-legacy")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, LEGACY_BIN,
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock-legacy")],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            result = json.load(fh)
+        self.assertEqual(result["model"], "opus")
+        self.assertEqual(result["effort"], "xhigh")
+
+    def test_issues_exit_one(self):
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} issues")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
              "--lock-dir", os.path.join(self.tmp.name, "lock"), "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -60,9 +94,9 @@ class TestCli(unittest.TestCase):
     def test_sigint_kills_reviewer_and_preserves_crashed_result(self):
         run_dir = os.path.join(self.tmp.name, "run-interrupt")
         lock_dir = os.path.join(self.tmp.name, "lock-interrupt")
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang")
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_dir,
              "--lock-dir", lock_dir, "--model", "fake/model"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
@@ -105,10 +139,10 @@ class TestCli(unittest.TestCase):
         lock_dir = os.path.join(self.tmp.name, "lock")
         os.mkdir(lock_dir)
         with open(os.path.join(lock_dir, "meta.json"), "w") as fh:
-            fh.write('{"harness_pid": %d, "command": "opus-review-loop"}' % os.getpid())
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+            fh.write('{"harness_pid": %d, "command": "claude-review-loop"}' % os.getpid())
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
              "--lock-dir", lock_dir, "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -118,9 +152,9 @@ class TestCli(unittest.TestCase):
 
     def test_nonexistent_repo_exits_two_cleanly(self):
         missing = os.path.join(self.tmp.name, "does-not-exist")
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", missing, "--run-dir", os.path.join(self.tmp.name, "run3"),
              "--lock-dir", os.path.join(self.tmp.name, "lock3"), "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -136,9 +170,9 @@ class TestCli(unittest.TestCase):
     def test_non_git_dir_exits_two_cleanly(self):
         nongit = tempfile.mkdtemp()  # standalone, not under the setUp repo
         self.addCleanup(shutil.rmtree, nongit, ignore_errors=True)
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", nongit, "--run-dir", os.path.join(self.tmp.name, "run2"),
              "--lock-dir", os.path.join(self.tmp.name, "lock2"), "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -147,9 +181,9 @@ class TestCli(unittest.TestCase):
         self.assertNotIn("Traceback", proc.stderr)
 
     def test_missing_explicit_context_exits_two_cleanly(self):
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run4"),
              "--lock-dir", os.path.join(self.tmp.name, "lock4"), "--model", "fake/model",
              "--context-file", os.path.join(self.tmp.name, "missing.md")],
@@ -162,10 +196,10 @@ class TestCli(unittest.TestCase):
     def test_non_utf8_diff_is_replaced_and_scopes_clean_result(self):
         with open(os.path.join(self.repo, "a.py"), "wb") as fh:
             fh.write(b"changed = '\xff'\n")
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         run_dir = os.path.join(self.tmp.name, "run5")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_dir,
              "--lock-dir", os.path.join(self.tmp.name, "lock5"), "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -188,7 +222,7 @@ class TestCli(unittest.TestCase):
                             for command in git_entries[0]["commands"]))
 
     def test_git_failure_bytes_stderr_reaches_crashed_result(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         run_dir = os.path.join(self.tmp.name, "run-git-error")
         failure = subprocess.CalledProcessError(
             128, ["git", "diff"], stderr=b"fatal: broken repository\n"
@@ -212,9 +246,9 @@ class TestCli(unittest.TestCase):
         marker = os.path.join(run_dir, "caller-data.txt")
         with open(marker, "w") as fh:
             fh.write("must remain untouched")
-        env = dict(os.environ, OPUS_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_dir,
              "--lock-dir", os.path.join(self.tmp.name, "lock6"), "--model", "fake/model"],
             capture_output=True, text=True, env=env,
@@ -230,7 +264,7 @@ class TestCli(unittest.TestCase):
         with open(run_path, "w") as fh:
             fh.write("caller data")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_path,
              "--lock-dir", os.path.join(self.tmp.name, "lock7"),
              "--model", "fake/model"],
@@ -246,7 +280,7 @@ class TestCli(unittest.TestCase):
             fh.write("caller data")
         run_dir = os.path.join(self.tmp.name, "run8")
         proc = subprocess.run(
-            [sys.executable, os.path.join(SKILL_ROOT, "bin", "opus-review-loop"),
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_dir,
              "--lock-dir", os.path.join(blocker, "lock"),
              "--model", "fake/model"],
@@ -259,7 +293,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual(json.load(fh)["state"], "CRASHED")
 
     def test_lock_acquisition_oserror_exits_two_with_crashed_result(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         run_dir = os.path.join(self.tmp.name, "run9")
         failing_lock = mock.MagicMock()
         failing_lock.__enter__.side_effect = PermissionError("denied")
@@ -277,7 +311,7 @@ class TestCli(unittest.TestCase):
         failing_lock.__exit__.assert_not_called()
 
     def test_review_body_oserror_is_not_mislabeled_as_lock_failure(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         run_dir = os.path.join(self.tmp.name, "run10")
         with mock.patch.object(cli, "run_review", side_effect=OSError("log denied")):
             code = cli.main([
@@ -293,7 +327,7 @@ class TestCli(unittest.TestCase):
         self.assertNotIn("acquire review lock", data["error"])
 
     def test_unexpected_review_exception_exits_two_with_crashed_result(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         run_dir = os.path.join(self.tmp.name, "run-unexpected")
         with mock.patch.object(
             cli, "run_review", side_effect=AttributeError("malformed event")
@@ -311,15 +345,17 @@ class TestCli(unittest.TestCase):
         self.assertIn("AttributeError", data["error"])
 
     def test_main_runs_reviewer_from_isolated_review_directory(self):
-        from opus_review_loop import cli
-        from opus_review_loop.result import ReviewResult
-        from opus_review_loop.states import CLEAN
+        from claude_review_loop import cli
+        from claude_review_loop.result import ReviewResult
+        from claude_review_loop.states import CLEAN
         run_dir = os.path.join(self.tmp.name, "isolated-run")
         finished = ReviewResult(
             state=CLEAN, items=[], model="fake/model", cost=0.0,
             started_at=1.0, ended_at=2.0,
         )
-        with mock.patch.dict(os.environ, {"OPUS_REVIEW_FAKE_CMD": ""}), \
+        with mock.patch.dict(os.environ, {
+                    "CLAUDE_REVIEW_FAKE_CMD": "", "OPUS_REVIEW_FAKE_CMD": "",
+                }), \
                 mock.patch.object(cli, "run_review", return_value=finished) as run:
             code = cli.main([
                 "--repo", self.repo, "--run-dir", run_dir,
@@ -342,8 +378,9 @@ class TestCli(unittest.TestCase):
 
 class TestClaudeCmd(unittest.TestCase):
     def test_direct_claude_cmd_includes_review_instruction(self):
-        from opus_review_loop import cli
-        env = {k: v for k, v in os.environ.items() if k != "OPUS_REVIEW_FAKE_CMD"}
+        from claude_review_loop import cli
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CLAUDE_REVIEW_FAKE_CMD", "OPUS_REVIEW_FAKE_CMD")}
         with mock.patch.dict(os.environ, env, clear=True):
             cmd = cli._claude_cmd("opus", "xhigh", ".")
         self.assertEqual(cmd[0], "claude")
@@ -381,18 +418,28 @@ class TestClaudeCmd(unittest.TestCase):
         self.assertIn("Read(./**/id_dsa)", settings["permissions"]["deny"])
 
     def test_fake_cmd_seam_used_when_env_set(self):
-        from opus_review_loop import cli
-        with mock.patch.dict(os.environ, {"OPUS_REVIEW_FAKE_CMD": "echo hi there"}, clear=False):
+        from claude_review_loop import cli
+        with mock.patch.dict(os.environ, {"CLAUDE_REVIEW_FAKE_CMD": "echo hi there"}, clear=False):
             self.assertEqual(cli._claude_cmd("m", "high", "."), ["echo", "hi", "there"])
 
+    def test_legacy_fake_cmd_seam_remains_compatible(self):
+        from claude_review_loop import cli
+        with mock.patch.dict(os.environ, {
+            "CLAUDE_REVIEW_FAKE_CMD": "",
+            "OPUS_REVIEW_FAKE_CMD": "echo legacy seam",
+        }, clear=False):
+            self.assertEqual(
+                cli._claude_cmd("m", "high", "."), ["echo", "legacy", "seam"]
+            )
+
     def test_opus_defaults_to_xhigh_other_models_to_high(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         self.assertEqual(cli._default_effort("opus"), "xhigh")
         self.assertEqual(cli._default_effort("claude-opus-4-7"), "xhigh")
         self.assertEqual(cli._default_effort("fable"), "high")
 
     def test_sandbox_review_root_is_canonical_and_only_read_allowance(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         with tempfile.TemporaryDirectory() as root:
             real_root = os.path.join(root, "real")
             link_root = os.path.join(root, "link")
@@ -409,7 +456,7 @@ class TestClaudeCmd(unittest.TestCase):
         self.assertEqual(filesystem["allowRead"], [os.path.realpath(real_root)])
 
     def test_write_prompt_preserves_bundle_carriage_returns(self):
-        from opus_review_loop import cli
+        from claude_review_loop import cli
         with tempfile.TemporaryDirectory() as root:
             bundle_path = os.path.join(root, "bundle.md")
             prompt_path = os.path.join(root, "prompt.txt")
@@ -422,7 +469,7 @@ class TestClaudeCmd(unittest.TestCase):
         self.assertTrue(prompt_bytes.endswith(bundle_bytes))
 
     def test_live_read_denies_share_bundle_secret_path_registry(self):
-        from opus_review_loop import cli, redact
+        from claude_review_loop import cli, redact
         for pattern in redact.SECRET_PATH_PATTERNS:
             representative = pattern.replace("*", "sample")
             self.assertTrue(redact.is_secret_path(f"nested/{representative}"), pattern)
@@ -434,7 +481,7 @@ class TestClaudeCmd(unittest.TestCase):
                 self.assertIn(f"{tool}(./**/{casefold_glob})", cli.SECRET_READ_DENIES)
 
     def test_launch_and_monitor_share_inspection_tool_registry(self):
-        from opus_review_loop import cli, monitor
+        from claude_review_loop import cli, monitor
         self.assertEqual(tuple(cli.REVIEW_TOOLS.split(",")), monitor.INSPECTION_TOOLS)
         self.assertEqual(
             monitor.ALLOWED_REVIEW_TOOLS,
@@ -469,11 +516,11 @@ class TestClaudeCmd(unittest.TestCase):
             self.assertIn(flag, help_text)
 
     @unittest.skipUnless(
-        os.environ.get("OPUS_REVIEW_RUN_CLAUDE_CANARY") == "1",
-        "set OPUS_REVIEW_RUN_CLAUDE_CANARY=1 for the paid installed-CLI isolation canary",
+        os.environ.get("CLAUDE_REVIEW_RUN_CLAUDE_CANARY") == "1",
+        "set CLAUDE_REVIEW_RUN_CLAUDE_CANARY=1 for the paid installed-CLI isolation canary",
     )
     def test_installed_claude_enforces_read_boundaries(self):
-        from opus_review_loop import cli, verdict
+        from claude_review_loop import cli, verdict
         claude = shutil.which("claude")
         if claude is None:
             self.skipTest("claude CLI not installed")
@@ -502,16 +549,17 @@ class TestClaudeCmd(unittest.TestCase):
                 ("Read", raw_path, f"Call Read exactly once on {raw_path}.", True),
                 ("Read", "public.txt", "Call Read exactly once on public.txt.", False),
             )
-            target_filter = os.environ.get("OPUS_REVIEW_CANARY_TARGET")
+            target_filter = os.environ.get("CLAUDE_REVIEW_CANARY_TARGET")
             if target_filter:
                 cases = tuple(case for case in cases if case[1] == target_filter)
                 self.assertTrue(cases, f"unknown canary target: {target_filter}")
             for tool, target, instruction, expect_denied in cases:
                 with self.subTest(tool=tool, target=target):
-                    model = os.environ.get("OPUS_REVIEW_CANARY_MODEL", "haiku")
-                    with mock.patch.dict(
-                        os.environ, {"OPUS_REVIEW_FAKE_CMD": ""}, clear=False
-                    ):
+                    model = os.environ.get("CLAUDE_REVIEW_CANARY_MODEL", "haiku")
+                    with mock.patch.dict(os.environ, {
+                        "CLAUDE_REVIEW_FAKE_CMD": "",
+                        "OPUS_REVIEW_FAKE_CMD": "",
+                    }, clear=False):
                         cmd = cli._claude_cmd(
                             model, cli._default_effort(model), review_root
                         )

@@ -67,13 +67,11 @@ This converts "is it stuck?" into deterministic state, covering all four shapes:
 - **Architecture:** Claude Code drives the *outer* loop (review → fix → re-review)
   because Claude holds the code context and does the fixing. Each *single review* is
   one invocation of a deterministic **foreground harness script** that owns Pi.
-- **Reviewer model:** latest available GPT, resolved at runtime, with Sol preferred
-  when same-version variants tie. Parse `pi --list-models gpt`, select
-  `openai-codex/gpt-5.6-sol` from the current listing, and pass
-  `<provider>/<model>` **exactly as listed** — do not assume an `openai/gpt-5*`
-  glob, which can miss the actual provider prefix. If authenticated model
-  listing or resolution fails, abort the review before spawning Pi. Run the
-  selected model at high reasoning.
+- **Reviewer model:** `openai-codex/gpt-5.6-sol` only, at high reasoning. Verify
+  that exact model through Pi's authenticated listing and abort before spawning
+  Pi if it is unavailable. Never route Claude/Anthropic through Pi, and never
+  substitute a local model, OpenRouter, another provider, or another model.
+  Claude review belongs to Claude Code and `claude-review-loop`.
 - **Invocation:** spawn Pi **directly** (no shell wrapper) with the bundle passed as
   an `@file`, not a giant argv string:
   ```

@@ -1,5 +1,5 @@
 import unittest
-from opus_review_loop import states
+from claude_review_loop import states
 
 
 class TestStates(unittest.TestCase):

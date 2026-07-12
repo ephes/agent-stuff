@@ -1,6 +1,6 @@
 import unittest
-from opus_review_loop.monitor import Monitor, Decision
-from opus_review_loop.states import (
+from claude_review_loop.monitor import Monitor, Decision
+from claude_review_loop.states import (
     CLEAN, ISSUES, INVALID, CRASHED, STALLED, STALLED_RETRY, PROVIDER_ERROR,
 )
 

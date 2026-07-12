@@ -1,5 +1,5 @@
 import unittest
-from opus_review_loop import model
+from claude_review_loop import model
 
 
 class TestResolveModel(unittest.TestCase):

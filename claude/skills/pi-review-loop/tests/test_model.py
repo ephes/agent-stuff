@@ -25,16 +25,16 @@ anthropic     claude-opus-4-8      200K     64K      yes       yes
 
 
 class TestResolveModel(unittest.TestCase):
-    def test_picks_highest_gpt(self):
+    def test_picks_approved_model(self):
         self.assertEqual(model.resolve_model(SAMPLE), "openai-codex/gpt-5.6-sol")
 
-    def test_sol_preference_does_not_override_newer_version(self):
+    def test_does_not_automatically_upgrade_to_newer_version(self):
         out = "openai-codex/gpt-5.6-sol\nopenai-codex/gpt-5.7-terra\n"
-        self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.7-terra")
+        self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.6-sol")
 
-    def test_passes_provider_prefix_exactly(self):
+    def test_rejects_other_provider_even_when_model_name_contains_gpt(self):
         out = "someprovider/gpt-9000-turbo\nother/gpt-3"
-        self.assertEqual(model.resolve_model(out), "someprovider/gpt-9000-turbo")
+        self.assertEqual(model.resolve_model(out, fallback=None), None)
 
     def test_falls_back_when_no_gpt(self):
         self.assertEqual(
@@ -43,8 +43,8 @@ class TestResolveModel(unittest.TestCase):
         )
 
     def test_ignores_blank_and_noise_lines(self):
-        out = "\n  \nAvailable models:\nopenai-codex/gpt-5.5\n"
-        self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.5")
+        out = "\n  \nAvailable models:\nopenai-codex/gpt-5.6-sol\n"
+        self.assertEqual(model.resolve_model(out), "openai-codex/gpt-5.6-sol")
 
     def test_rejects_gpt_text_in_diagnostic_prose_without_table_header(self):
         out = "No models available. Use /login to log into a provider.\nDefault: gpt-5.5\n"
@@ -52,7 +52,7 @@ class TestResolveModel(unittest.TestCase):
 
     def test_rejects_gpt_text_in_diagnostic_prose_after_table_header(self):
         out = "provider model context\nopenai-codex gpt-5.1 272K\nDefault: gpt-5.5\n"
-        self.assertEqual(model.resolve_model(out, fallback="pin/x"), "openai-codex/gpt-5.1")
+        self.assertEqual(model.resolve_model(out, fallback="pin/x"), "pin/x")
 
     def test_resolve_from_cli_falls_back_on_missing_binary(self):
         with mock.patch("pi_review_loop.model.subprocess.run", side_effect=OSError):
@@ -65,14 +65,14 @@ class TestResolveModel(unittest.TestCase):
 
     def test_diagnostic_line_does_not_hide_listed_gpt_model(self):
         completed = mock.Mock(
-            stdout="provider      model\nopenai-codex  gpt-5.5  272K\n",
+            stdout="provider      model\nopenai-codex  gpt-5.6-sol  372K\n",
             stderr="No API key found for anthropic.\n",
             returncode=0,
         )
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
             self.assertEqual(
                 model.resolve_from_cli(require_available=True),
-                "openai-codex/gpt-5.5",
+                "openai-codex/gpt-5.6-sol",
             )
 
     def test_require_available_rejects_no_models(self):
@@ -107,18 +107,19 @@ class TestResolveModel(unittest.TestCase):
                 model.resolve_from_cli(require_available=True)
         self.assertIn("failed with exit 2", str(raised.exception))
 
-    def test_ensure_available_accepts_non_gpt_model_listing(self):
+    def test_ensure_available_rejects_non_gpt_model_listing(self):
         completed = mock.Mock(
             stdout="provider      model\nanthropic     claude-opus-4-8\n",
             stderr="",
             returncode=0,
         )
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
-            self.assertIsNone(model.ensure_available())
+            with self.assertRaises(model.PiUnavailable):
+                model.ensure_available()
 
     def test_ensure_available_accepts_listing_with_unrelated_diagnostic(self):
         completed = mock.Mock(
-            stdout="provider      model\nopenai-codex  gpt-5.5\n",
+            stdout="provider      model\nopenai-codex  gpt-5.6-sol\n",
             stderr="No API key found for anthropic.\n",
             returncode=0,
         )
@@ -166,35 +167,45 @@ class TestResolveModel(unittest.TestCase):
             returncode=0,
         )
         with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed) as run:
-            self.assertIsNone(
+            self.assertEqual(
                 model.ensure_model_available("openai-codex/gpt-5.6-sol:high")
+                , "openai-codex/gpt-5.6-sol"
             )
         self.assertEqual(
             run.call_args.args[0],
-            ["pi", "--list-models", "openai-codex/gpt-5.6-sol"],
+            ["pi", "--list-models", "gpt"],
         )
 
     def test_ensure_model_available_rejects_no_match(self):
-        completed = mock.Mock(
-            stdout='', stderr='No models matching "bogus/model"\n', returncode=0
-        )
-        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
-            with self.assertRaises(model.PiUnavailable) as raised:
-                model.ensure_model_available("bogus/model")
-        self.assertIn("requested model is not available", str(raised.exception))
+        with self.assertRaises(model.PiUnavailable) as raised:
+            model.ensure_model_available("bogus/model")
+        self.assertIn("unsupported Pi review model", str(raised.exception))
+
+    def test_rejects_claude_openrouter_and_local_review_models_before_cli(self):
+        for candidate in (
+            "anthropic/claude-opus-4-8",
+            "openrouter/anthropic/claude-opus-4.8",
+            "ollama/qwen3-coder",
+            "local/qwen2.5-coder",
+        ):
+            with self.subTest(candidate=candidate):
+                with mock.patch("pi_review_loop.model.subprocess.run") as run:
+                    with self.assertRaises(model.PiUnavailable):
+                        model.ensure_model_available(candidate)
+                    run.assert_not_called()
 
 
 class TestResolveTableFormat(unittest.TestCase):
-    def test_parses_real_table_and_picks_highest(self):
+    def test_parses_real_table_and_picks_approved_model(self):
         # fallback "pin/x" is wrong on purpose: returning Sol proves it parsed.
         self.assertEqual(model.resolve_model(REAL_TABLE, fallback="pin/x"),
                          "openai-codex/gpt-5.6-sol")
 
     def test_skips_header_row(self):
-        # header's model column is the literal word "model" (no gpt) -> ignored
+        # The only approved model is absent, so an unrelated GPT is ignored.
         self.assertEqual(
             model.resolve_model("provider model context\nx gpt-4 y\n", fallback="pin/x"),
-            "x/gpt-4",
+            "pin/x",
         )
 
 

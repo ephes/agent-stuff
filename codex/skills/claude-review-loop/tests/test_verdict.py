@@ -1,6 +1,6 @@
 import unittest
-from opus_review_loop import verdict
-from opus_review_loop.states import CLEAN, ISSUES, INVALID
+from claude_review_loop import verdict
+from claude_review_loop.states import CLEAN, ISSUES, INVALID
 
 
 class TestStructuredVerdict(unittest.TestCase):

@@ -1,11 +1,11 @@
-"""Resolve the Claude Code model alias used by the Opus review harness."""
+"""Resolve the Claude Code model alias used by the review harness."""
 
 
 DEFAULT_MODEL = "opus"
 
 
 def resolve_model(value=None, fallback=DEFAULT_MODEL):
-    """Return an explicit model value or the default Claude Code Opus alias."""
+    """Return an explicit model value or the default Claude Code alias."""
     return value or fallback
 
 

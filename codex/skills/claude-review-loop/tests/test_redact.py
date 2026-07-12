@@ -1,6 +1,6 @@
 import unittest
 
-from opus_review_loop import redact
+from claude_review_loop import redact
 
 
 class TestRedact(unittest.TestCase):

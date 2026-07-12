@@ -1,4 +1,4 @@
-"""CLI entry: assemble bundle, run one Claude Opus review, emit result."""
+"""CLI entry: assemble a bundle, run one configured Claude review, emit result."""
 import argparse
 import os
 import subprocess
@@ -87,13 +87,14 @@ EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
 
 
 def _build_parser():
-    p = argparse.ArgumentParser(prog="opus-review-loop",
-                                description="Run one Claude Opus review over a git diff.")
+    p = argparse.ArgumentParser(prog="claude-review-loop",
+                                description="Run one isolated Claude review over a git diff.")
     p.add_argument("--repo", default=".")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--lock-dir",
-                   default=os.path.expanduser("~/.cache/opus-review-loop/lock"))
-    p.add_argument("--model", default=None, help="override model id")
+                   default=os.path.expanduser("~/.cache/claude-review-loop/lock"))
+    p.add_argument("--model", default=None,
+                   help="Claude model id or alias (default: opus)")
     p.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
     p.add_argument("--stall-timeout", type=float, default=300)
     p.add_argument("--retry-grace", type=float, default=30)
@@ -132,8 +133,11 @@ def _sandbox_settings(review_root):
 
 
 def _claude_cmd(model, effort, review_root):
-    # Test seam: OPUS_REVIEW_FAKE_CMD replaces the `claude ...` argv entirely.
-    fake = os.environ.get("OPUS_REVIEW_FAKE_CMD")
+    # Test seam: CLAUDE_REVIEW_FAKE_CMD replaces the `claude ...` argv entirely.
+    fake = (
+        os.environ.get("CLAUDE_REVIEW_FAKE_CMD")
+        or os.environ.get("OPUS_REVIEW_FAKE_CMD")  # legacy compatibility
+    )
     if fake:
         import shlex
         return shlex.split(fake)
@@ -182,7 +186,7 @@ def _main(argv=None):
             if not os.path.isdir(args.run_dir):
                 raise OSError(f"run directory is not a directory: {args.run_dir}")
             if os.listdir(args.run_dir):
-                print("opus-review-loop: run directory must be new or empty",
+                print("claude-review-loop: run directory must be new or empty",
                       file=sys.stderr)
                 return 2
         else:
@@ -192,7 +196,7 @@ def _main(argv=None):
             raise OSError(f"lock path is not a directory: {args.lock_dir}")
     except OSError as exc:
         msg = f"cannot prepare review directories: {exc}"
-        print(f"opus-review-loop: {msg}", file=sys.stderr)
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
         now = time.monotonic()
         if os.path.isdir(args.run_dir):
             try:
@@ -223,7 +227,7 @@ def _main(argv=None):
         elif not isinstance(err, str):
             err = (err or b"").decode("utf-8", errors="replace")
         msg = f"cannot build review bundle: {(err or '').strip()}"
-        print(f"opus-review-loop: {msg}", file=sys.stderr)
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
         now = time.monotonic()
         try:
             ReviewResult(state=CRASHED, items=[], model=model, effort=effort, cost=None,
@@ -234,17 +238,17 @@ def _main(argv=None):
         return 2
 
     meta = {"harness_pid": os.getpid(), "cwd": os.path.abspath(args.repo),
-            "command": "opus-review-loop", "model": model, "run_dir": args.run_dir}
+            "command": "claude-review-loop", "model": model, "run_dir": args.run_dir}
     lock = None
     try:
         lock = Lock(args.lock_dir, meta)
         lock.__enter__()
     except LockHeld as e:
-        print(f"opus-review-loop: {e}", file=sys.stderr)
+        print(f"claude-review-loop: {e}", file=sys.stderr)
         return 3
     except OSError as exc:
         msg = f"cannot acquire review lock: {exc}"
-        print(f"opus-review-loop: {msg}", file=sys.stderr)
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
         now = time.monotonic()
         try:
             ReviewResult(
@@ -267,7 +271,7 @@ def _main(argv=None):
         )
     except OSError as exc:
         msg = f"cannot run review: {exc}"
-        print(f"opus-review-loop: {msg}", file=sys.stderr)
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
         now = time.monotonic()
         try:
             ReviewResult(
@@ -302,7 +306,7 @@ def main(argv=None):
         return _main(argv)
     except Exception as exc:
         msg = f"unexpected harness failure: {type(exc).__name__}: {exc}"
-        print(f"opus-review-loop: {msg}", file=sys.stderr)
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
         try:
             args = _build_parser().parse_args(argv)
             run_dir = os.path.realpath(args.run_dir)

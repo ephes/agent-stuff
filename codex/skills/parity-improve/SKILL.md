@@ -15,7 +15,8 @@ a gated change; run the steps inline.
 
 Honor the body's hard rules:
 - Never self-grade. The different-family review gate is mandatory — since Codex is
-  GPT-family, review with `opus-review-loop` (Claude Opus).
+  GPT-family, review with `claude-review-loop` (Opus by default, or the explicitly
+  configured Claude model).
 - Edits to the workflow's own instructions (`skill-body.md`, `improve-body.md`,
   wrappers) require human or judge-agent sign-off; rejecting a lesson is gated too.
 - Never mark a lesson `applied` without a real materializing commit — the helper

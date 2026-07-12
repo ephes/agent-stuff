@@ -4,8 +4,8 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-from opus_review_loop import runner
-from opus_review_loop.states import CLEAN, ISSUES, INVALID, CRASHED, STALLED, PROVIDER_ERROR
+from claude_review_loop import runner
+from claude_review_loop.states import CLEAN, ISSUES, INVALID, CRASHED, STALLED, PROVIDER_ERROR
 
 FAKE = [sys.executable, os.path.join(os.path.dirname(__file__), "fake_claude.py")]
 
@@ -70,7 +70,7 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.state, CLEAN)
 
     def test_provider_error(self):
-        from opus_review_loop.states import PROVIDER_ERROR
+        from claude_review_loop.states import PROVIDER_ERROR
         r = self._run("provider_error")
         self.assertEqual(r.state, PROVIDER_ERROR)
         self.assertIn("529", r.error or "")
@@ -119,8 +119,8 @@ class TestRunner(unittest.TestCase):
     def test_kill_group_escalates_when_wrapper_exits_but_group_survives(self):
         proc = mock.Mock()
         proc.wait.side_effect = [None, None]
-        with mock.patch("opus_review_loop.runner.os.killpg") as killpg, mock.patch(
-            "opus_review_loop.runner._group_alive",
+        with mock.patch("claude_review_loop.runner.os.killpg") as killpg, mock.patch(
+            "claude_review_loop.runner._group_alive",
             side_effect=[True, False],
         ):
             runner._kill_group(proc, 12345, grace=0.01)

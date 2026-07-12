@@ -2,8 +2,8 @@ import json
 import os
 import tempfile
 import unittest
-from opus_review_loop import result
-from opus_review_loop.states import CLEAN, ISSUES
+from claude_review_loop import result
+from claude_review_loop.states import CLEAN, ISSUES
 
 
 class TestReviewResult(unittest.TestCase):

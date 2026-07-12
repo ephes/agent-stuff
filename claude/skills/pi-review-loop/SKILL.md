@@ -1,6 +1,6 @@
 ---
 name: pi-review-loop
-description: "Use when you want a fresh-context code-review gate before committing — runs Pi with the newest GPT (currently GPT-5.6 Sol) at high reasoning as a reviewer over the current git diff in a bounded, observable loop, and only proceeds when Pi returns CLEAN. Drives review → fix → re-review up to a round cap. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
+description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-5.6 Sol model at high reasoning over the current git diff in a bounded, observable loop, and only proceeds when Pi returns CLEAN. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review up to a round cap. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
 # Pi Review Loop
@@ -55,6 +55,13 @@ implement and fix; Pi reviews with fresh context.
 
 ## Hard rules
 
+- Pi code review uses `openai-codex/gpt-5.6-sol` only. Claude models (Opus,
+  Sonnet, Fable, or any other Anthropic model) must run through Claude Code and
+  `claude-review-loop`, never through Pi.
+- Never use OpenRouter or a local model such as Qwen/Ollama/LM Studio for a
+  mandatory code-review gate. If the approved GPT model is unavailable or its
+  authentication fails, fail closed and report the blocker; do not substitute
+  another model, provider, or transport.
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
   are irrelevant. Exit `1`/`2`/`3` are never clean.
 - Bounded parallelism only — the harness enforces a per-user slot pool. It now
@@ -68,9 +75,10 @@ implement and fix; Pi reviews with fresh context.
 
 ## Useful flags
 
-`--model <id>` overrides runtime model resolution. When omitted, the harness
-selects the newest GPT and prefers `openai-codex/gpt-5.6-sol` among the current
-same-version variants. Pi runs at `high` reasoning. `--review-deadline <s>` (hard
+`--model <id>` exists for explicitness but accepts only
+`openai-codex/gpt-5.6-sol`; any other value fails before Pi starts. When omitted,
+the harness requires that same model to appear in Pi's authenticated listing.
+Pi runs at `high` reasoning. `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-only`,
 `--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
 files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single

@@ -932,12 +932,14 @@ Project-specific execution lessons belong in the project repo, not here.
   --approve` rather than retrying equivalent tmux wrappers.
 - Status: applied; cycle 1 produced one Suggestion, cycle 2 was clean.
 
-## 2026-06-27 - Pi Anthropic Review Route Blocked
-- Expected: Pi review can use an Anthropic model to keep Codex implementation slices under a different-family reviewer while still satisfying a user request for Pi-run reviews.
+## 2026-06-27 - Pi Anthropic Review Route Blocked (superseded)
+- Expected at the time: Pi review could use an Anthropic model to keep Codex implementation slices under a different-family reviewer while still satisfying a user request for Pi-run reviews.
 - Actual: Pi returned an Anthropic third-party-app extra-usage billing error before review text or the sentinel.
 - Impact: the attempted review produced no findings and could not satisfy the different-family review gate.
-- Fix/follow-up: when Pi/Anthropic is blocked, either use another available non-GPT Pi model from `pi --list-models` or explicitly record the limitation before retrying with the user-requested Pi/OpenAI model.
-- Status: applied for the llm-benchpacks product-offer docs slice.
+- Fix/follow-up: superseded on 2026-07-12. Mandatory Pi reviews use
+  `openai-codex/gpt-5.6-sol` only. Never fall back to Anthropic, another
+  non-GPT provider, OpenRouter, or a local model; fail closed instead.
+- Status: historical incident retained, unsafe fallback guidance withdrawn.
 
 ## 2026-06-28 - Pi tmux wrapper can leave only fish and tee
 - Expected: the cross-agent review fish runner would start `pi -p`, stream output
@@ -1302,7 +1304,7 @@ Project-specific execution lessons belong in the project repo, not here.
 - Durable lesson: keep one authoritative Claude gate and make alternate-agent
   transport match its proven reliability constraints instead of maintaining
   contradictory review paths.
-- Implementation: every Claude alias delegates to opus-review-loop; direct
+- Implementation: every Claude alias delegates to claude-review-loop; direct
   Claude tmux/plan/Bash-allowlist paths are removed. Codex and Pi remain separate
   tmux branches with resolved reviewer/model arguments passed explicitly. Pi uses
   @prompt-file with direct log redirection, never a large positional prompt or
@@ -1314,3 +1316,63 @@ Project-specific execution lessons belong in the project repo, not here.
   form the completion gate.
 - Status: implemented; packaging remains deferred until the local workflow is
   stable.
+
+## 2026-07-12 - Pi Preflight Rejects Provider-Qualified Model Lookup
+
+- Repo: ws-ops-misc review workflow.
+- Expected: Pi preflight accepts the provider-qualified model used by
+  `pi --model anthropic/claude-opus-4-8`.
+- Actual: the stale tmux server exported
+  `PI_CODING_AGENT_DIR=/Users/jochen/.config/emerge` from another workspace, so
+  Pi loaded the wrong account/configuration and returned no matching model;
+  provider-qualified lookup also does not match the CLI's bare-name filter.
+- Impact: the runner exited before review; no review round was consumed.
+- Follow-up: clear stale `PI_CODING_AGENT_DIR`/`CODEX_HOME` from the tmux server,
+  refresh workspace environment, use the bare model name for lookup, and
+  consider teaching the shared runner to sanitize stale cross-workspace agent
+  environment before preflight.
+- Status: invocation workaround applied; shared harness follow-up deferred.
+
+## 2026-07-12 - Claude Review Gate Uses A Model-Neutral Identity
+
+- Repo: agent-stuff.
+- Expected: the supervised Claude gate can use Opus by default while allowing an
+  explicit Fable, Sonnet, or other Claude model without contradictory naming.
+- Actual: the skill, package, executable, cache path, and workflow references all
+  used `opus-review-loop` even though `--model` already accepted other models.
+- Impact: callers could mistake Opus for a hard requirement and create parallel
+  review paths for other Claude models.
+- Follow-up: make `claude-review-loop` canonical, keep Opus as the default, pass
+  explicit model identifiers through unchanged, retain a repository-local legacy
+  Opus CLI/skill shim, and install only the canonical skill through chezmoi.
+- Status: implemented; 158 standard tests pass, both canonical and legacy skill
+  surfaces validate, and chezmoi deploys only the canonical skill name.
+
+## 2026-07-12 - Pi Review Model Selection Fails Closed
+
+- Repo: agent-stuff and managed agent instructions.
+- Expected: Pi review always uses the subscription-backed GPT-5.6 Sol route.
+- Actual: the preferred model was documented, but `--model` accepted arbitrary
+  providers and historical guidance allowed non-GPT fallback. Obsolete shell
+  aliases also encouraged routing Claude through Pi.
+- Impact: agents could silently replace the mandatory review gate with Claude
+  over an unsupported Pi route, OpenRouter, or a weak local model such as Qwen.
+- Follow-up: permit only `openai-codex/gpt-5.6-sol`, validate it against
+  `pi --list-models gpt`, reject all other models before spawning Pi, remove the
+  Claude/Pi aliases, and require an explicit blocker when authentication fails.
+- Status: implemented with model-policy tests and targeted chezmoi deployment.
+
+## 2026-07-12 - Preserve Backend Timestamp Authority And Exact Row Identity
+
+- Repo: emerge frontend UMF-1398 review cycle.
+- Expected: mixed Fixed and Automatic Time Domain output is chronological while
+  equal UTC instants are deduplicated and configured entry order stays intact.
+- Actual: the first review exposed an existing all-or-nothing fallback when one
+  backend timestamp was malformed; the second review caught that a proposed
+  seconds-precision normalization silently collapsed distinct subsecond instants.
+- Impact: a superficially small ordering fix could replace valid backend rows
+  with locally expanded ones or create ambiguous dashboard row identities.
+- Follow-up: keep every valid backend timestamp, warn and ignore only malformed
+  siblings, deduplicate exact instants, and use a narrow exact UTC formatter for
+  process-row identity while retaining existing seconds-precision APIs elsewhere.
+- Status: fixed; full project checks pass and Pi round 3 is clean.

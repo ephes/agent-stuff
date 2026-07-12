@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from unittest import mock
-from opus_review_loop import lock
+from claude_review_loop import lock
 
 
 class TestLock(unittest.TestCase):
@@ -72,7 +72,7 @@ class TestLock(unittest.TestCase):
     def test_does_not_reclaim_live_harness_pid(self):
         os.mkdir(self.lock_dir)
         lock.write_meta(self.lock_dir, {"harness_pid": os.getpid(),
-                                        "command": "opus-review-loop"})
+                                        "command": "claude-review-loop"})
         with self.assertRaises(lock.LockHeld):
             with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
                 pass
@@ -80,7 +80,7 @@ class TestLock(unittest.TestCase):
     def test_reclaims_dead_harness_pid(self):
         os.mkdir(self.lock_dir)
         lock.write_meta(self.lock_dir, {"harness_pid": 2_000_000_000,
-                                        "command": "opus-review-loop"})
+                                        "command": "claude-review-loop"})
         with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 
@@ -145,17 +145,17 @@ class TestLock(unittest.TestCase):
 
     def test_pgid_is_claude_accepts_wrapper_command(self):
         completed = mock.Mock(stdout="/opt/homebrew/bin/node /opt/homebrew/bin/claude -p\n")
-        with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
+        with mock.patch("claude_review_loop.lock.subprocess.run", return_value=completed):
             self.assertTrue(lock._pgid_is_claude(12345))
 
     def test_pgid_is_claude_accepts_fish_claude_yolo_wrapper(self):
         completed = mock.Mock(stdout="fish -lc claude-yolo -p --model opus\n")
-        with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
+        with mock.patch("claude_review_loop.lock.subprocess.run", return_value=completed):
             self.assertTrue(lock._pgid_is_claude(12345))
 
     def test_pgid_is_claude_rejects_unrelated_fish(self):
         completed = mock.Mock(stdout="fish -lc echo hi\n")
-        with mock.patch("opus_review_loop.lock.subprocess.run", return_value=completed):
+        with mock.patch("claude_review_loop.lock.subprocess.run", return_value=completed):
             self.assertFalse(lock._pgid_is_claude(12345))
 
     def test_reclaims_dead_harness_even_when_pgid_not_claude(self):
@@ -164,7 +164,7 @@ class TestLock(unittest.TestCase):
         os.mkdir(self.lock_dir)
         lock.write_meta(self.lock_dir, {"harness_pid": 2_000_000_000,
                                         "claude_pgid": os.getpgrp(),
-                                        "command": "opus-review-loop"})
+                                        "command": "claude-review-loop"})
         with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+"""Compatibility entry point for the renamed claude-review-loop harness."""
 import os
 import sys
 
-# Make the skill root importable when run as a standalone script.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from opus_review_loop.cli import main
+HERE = os.path.dirname(os.path.abspath(__file__))
+CANONICAL = os.path.realpath(os.path.join(
+    HERE, "..", "..", "claude-review-loop", "bin", "claude-review-loop"
+))
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    os.execv(sys.executable, [sys.executable, CANONICAL, "--model", "opus", *sys.argv[1:]])
