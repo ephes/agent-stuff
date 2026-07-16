@@ -112,8 +112,41 @@ review are not allowed for this gate.
      Any later attempt must use a fresh `--run-dir` because bundle artifacts were
      already written before lock acquisition.
 
-4. Stop after at most 3 rounds. If still not CLEAN after 3 rounds, report the
-   outstanding items to the user rather than looping forever.
+4. Before the first review, establish one outer bound for the complete loop:
+   use the calling workflow's remaining time budget when it has one, otherwise
+   use an explicit caller-provided round cap, otherwise default to 6 review
+   rounds. A time budget must retain enough margin for the next fix, required
+   checks, and fresh review; do not start a cycle that cannot fit.
+
+   Within that bound, drive fix/re-review rounds under the stopping conditions
+   below. Do not stop merely because one attempted fix round made no progress.
+   Round 3 is not a special stopping point: a new
+   Critical/Warning found there or later must be fixed and reviewed again when
+   time and authority remain. Re-run the caller's required checks after every
+   material fix before starting the next fresh review.
+
+   Treat a round as progress when the previous findings were addressed and the
+   remaining findings are new, narrower, or supported by new evidence. Stop and
+   report the exact outstanding items only when one of these bounded conditions
+   applies:
+
+   - the same substantive required finding survives two consecutive attempted
+     fix rounds without new evidence or a narrower failure;
+   - findings oscillate between incompatible requirements;
+   - the fix needs scope or authority the caller did not grant;
+   - after one fresh review with the recorded disposition as context, the only
+     remaining items are the same already-declined Suggestions; or
+   - the established outer bound cannot fit another fix, checks, and fresh
+     review.
+
+   For Suggestion-only verdicts, make an explicit proportionality decision:
+   implement in-scope suggestions that materially improve the change, or record
+   a concise reason for declining them. A declined Suggestion is still not
+   `CLEAN`; when the calling workflow requires CLEAN, include the disposition as
+   review context and continue or stop under the bounded conditions above. Only
+   a calling workflow that explicitly permits advisory findings may accept a
+   Suggestion-only verdict, and it must record that decision rather than
+   relabelling the review CLEAN.
 
 ## Timing and Retry Policy
 
