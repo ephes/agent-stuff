@@ -1714,3 +1714,394 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   explicit incremental-blob seam.
 - Status: CLEAN in authorized cycle 4; 229 focused tests and documentation/diff
   checks passed, with no commit or push.
+
+## 2026-07-13 - Instrument Wire Attempts And Readiness Completion Separately
+
+- Repo: emerge frontend startup diagnostics review cycle.
+- Expected: request metrics describe backend traffic accurately, while the
+  dashboard-readiness timestamp marks the moment hydration finishes.
+- Actual: the first Pi review found that metrics wrapped the logical retry
+  sequence rather than each wire attempt, and the diagnostics reused the
+  hydration-start ticker cursor as the readiness-completion timestamp.
+- Impact: transient attempts and HTTP-error bodies were undercounted, timing
+  buckets were misleading, and long startups displayed readiness too early.
+- Follow-up: retain logical active-request tracking across retries, add separate
+  per-attempt transport accounting including HTTP-error bodies, and keep the
+  ticker cursor distinct from an independently captured completion timestamp.
+- Status: fixed after review round 1; focused and full validation pass, with
+  re-review pending.
+
+## 2026-07-13 - Diagnostic Collection Must Preserve Retry Control Flow
+
+- Repo: emerge frontend startup diagnostics review cycle.
+- Expected: opt-in metrics observe transient HTTP failures without changing
+  safe-read retry behavior, and disabled metrics leave transport behavior
+  untouched.
+- Actual: the second Pi review found that unconditional error-body reads could
+  replace a retryable HTTP error when the body stream itself failed, and also
+  consumed error bodies when metrics were disabled.
+- Impact: a truncated 502/503 response could suppress the configured retry;
+  merely adding or disabling diagnostics could therefore change application
+  behavior.
+- Follow-up: collect transient error bodies only when metrics are enabled,
+  treat all ordinary body-read/close failures as diagnostic failures while
+  re-raising the original HTTP error, and test both the failed collection and
+  disabled-metrics paths.
+- Status: fixed after review round 2; focused and full validation pass, with
+  final re-review pending.
+
+## 2026-07-13 - Count Partial Bodies Without Replacing Transport Errors
+
+- Repo: emerge frontend startup diagnostics review cycle.
+- Expected: transferred-byte diagnostics include bytes already received before
+  a response stream is truncated, without altering retry or exception behavior.
+- Actual: the final permitted Pi review found that `IncompleteRead.partial` was
+  discarded for both HTTP-error bodies and successful-status response bodies.
+- Impact: the exact incident class being diagnosed could underreport traffic
+  and omit the affected response encoding from byte summaries.
+- Follow-up: extract byte-like partial payloads from body-read exceptions for
+  metrics and cached error parsing, while re-raising the original transport
+  exception; cover both transient HTTP-error and HTTP-200 truncation paths.
+- Status: fixed after review round 3; focused and full validation pass. The
+  bounded three-round review cycle is exhausted, so a further Pi-clean verdict
+  requires explicit direction for a new review cycle.
+
+## 2026-07-13 - Presence Does Not Prove Enriched Snapshot Data Is Redundant
+
+- Repo: emerge frontend startup hydration optimization plan review.
+- Expected: bulk non-enriched Merge reads plus selective fallback enrichment
+  would preserve reducer behavior while removing duplicated Process data.
+- Actual: the first Pi plan review found that enriched slot Process-family data
+  may override status provenance and diagnostics even when the selected model
+  is already present; the proposed identity fallback also maps to per-identity
+  backend reads.
+- Impact: a payload optimization could silently change UCTE or CGMES startup
+  status, or replace response-size pressure with excessive database queries.
+- Follow-up: keep enriched reducer inputs, use the measured gzip plus 100-row
+  pagination mitigation, and treat a slim response as a separate backend or
+  reducer-parity change.
+- Status: plan revised; Pi round 3 closed the plan review with no findings.
+
+## 2026-07-13 - Compatibility Slices Need Their Own Acceptance Gate
+
+- Repo: emerge frontend startup hydration optimization plan review.
+- Expected: the revised safe transport/pagination slice could be judged against
+  the existing startup optimization targets.
+- Actual: Pi round 2 found that the measured compatibility path takes 24.513 s
+  while the broader plan still targets less than 10 s for all Process API work.
+- Impact: a safe timeout fix could be incorrectly rejected, or described as
+  meeting a performance target it demonstrably does not meet.
+- Follow-up: accept the slice on timeout elimination, semantic parity, and
+  compressed wire volume; retain the 10-second goal for later backend response
+  shaping.
+- Status: plan clarified; Pi round 3 closed the plan review with no findings.
+
+## 2026-07-13 - Retryable HTTP Error Bodies Need Explicit Ownership
+
+- Repo: emerge frontend startup hydration optimization review cycle.
+- Expected: HTTP error responses are retried or classified without retaining
+  transport resources, regardless of whether request metrics are enabled.
+- Actual: the first implementation review found that JSON requests only closed
+  HTTP errors while metrics were enabled; metrics-disabled retry attempts could
+  leave response streams open, while terminal parsing still needed their body.
+- Impact: repeated backend failures could leak connections or file descriptors,
+  and closing a response before terminal classification would lose useful error
+  details.
+- Follow-up: always cache the small HTTP error body before closing each JSON
+  response, classify terminal errors from that cache, close other HTTP-error
+  paths after message construction, and test both metrics modes and retries.
+- Status: fixed after implementation review round 1; Pi round 3 is clean and
+  the final full validation passes.
+
+## 2026-07-13 - Compressed-Body Failures Can Occur Before Decompression
+
+- Repo: emerge frontend startup hydration optimization review cycle.
+- Expected: every truncated gzip GET follows the same bounded safe-read retry
+  behavior and reports the compressed bytes and timing already observed.
+- Actual: the second implementation review found that an HTTP-framing
+  `IncompleteRead` exits `response.read()` before gzip decoding, bypassing the
+  retryable decompression error and losing known response dimensions for some
+  read-time failures.
+- Impact: a recoverable truncated UAT response could still fail startup even
+  after gzip retry handling was added, while diagnostics misattributed body-read
+  time to waiting for response headers.
+- Follow-up: preserve status, encoding, header-wait and body-read timing for
+  exceptions after headers; translate an incomplete advertised-gzip GET into the
+  existing retryable gzip error after recording partial wire bytes; test a
+  truncated first response followed by a valid compressed response.
+- Status: fixed after implementation review round 2; Pi round 3 is clean and
+  the final full validation passes.
+
+## 2026-07-13 - Diff-Only Review Bundles Need Source for Diagnostic Audits
+
+- Repo: emerge frontend startup responsiveness diagnostic review.
+- Expected: caller-selected unchanged source paths would be available to a
+  Claude review requested for a root-cause audit with no worktree diff.
+- Actual: the first harness run contained only the trusted context and an empty
+  diff, so Claude correctly failed closed without examining source.
+- Impact: an unchanged-code diagnostic review cannot be grounded by the normal
+  diff-only bundle even when the prompt names the relevant paths.
+- Follow-up: copy only the selected unchanged files into an isolated temporary
+  Git repository as untracked repository-derived evidence, then run the normal
+  supervised Claude harness against that bounded bundle.
+- Status: retry succeeded; Claude independently reviewed the selected source and
+  corroborated the primary quadratic main-thread projection finding.
+
+## 2026-07-13 - Pi Review Must Fail Closed When Authentication Is Unavailable
+
+- Repo: emerge frontend startup responsiveness implementation review.
+- Expected: Pi would review the completed startup projection fix with the pinned
+  `openai-codex/gpt-5.6-sol` model.
+- Actual: the mandatory `pi --list-models gpt` preflight reported no available
+  authenticated models, so no Pi review cycle started.
+- Impact: passing project checks and a local diff audit cannot be represented as
+  a clean independent Pi review.
+- Follow-up: authenticate the `openai-codex` provider in the active Pi shell,
+  confirm the pinned model appears in `pi --list-models gpt`, then resume review
+  round 1 without substituting another provider or model.
+- Status: resolved after provider reauthentication; the pinned model preflight
+  passed and Pi round 1 completed cleanly.
+
+## 2026-07-13 - UI Performance Fixes Benefit From Boundary Call-Count Tests
+
+- Repo: emerge frontend startup responsiveness implementation review.
+- Expected: batching startup slot projection would remove the quadratic
+  main-thread filter work without changing direct single-slot rendering.
+- Actual: explicit tests at the hydration, adapter, and projector boundaries let
+  Pi verify one startup batch, one filter call per batch, invisible timestamp
+  handling, and preserved single-slot filtering without relying on timing tests.
+- Impact: the performance invariant is deterministic and reviewable across
+  machines, while the Qt-thread ownership rule remains unchanged.
+- Follow-up: prefer call-count and batching-boundary assertions for similar UI
+  hot paths; reserve wall-clock checks for representative UAT measurements.
+- Status: Pi round 1 closed with no Critical, Warning, or Suggestion findings.
+
+## 2026-07-13 - Isolated Review Repositories Still Need a HEAD
+
+- Repo: emerge frontend startup concurrency plan review.
+- Expected: an isolated Git repository containing untracked source evidence
+  would be enough for the supervised Claude harness to build a review bundle.
+- Actual: bundle construction failed before review because Git diff collection
+  requires a resolvable `HEAD`, even when all review evidence is untracked.
+- Impact: the first harness attempt could not start Claude and its run directory
+  could not be reused.
+- Follow-up: create an empty baseline commit immediately after initializing an
+  isolated review repository, then use a fresh harness run directory.
+- Status: corrected; Claude plan review round 1 ran successfully on retry.
+
+## 2026-07-13 - Concurrency Plans Must Reconcile Historical Load Evidence
+
+- Repo: emerge frontend startup concurrency plan review.
+- Expected: gzip, bounded pages, and a small read cap would justify overlapping
+  independent startup pipelines.
+- Actual: Claude round 1 found that the plan did not explicitly reconcile its
+  concurrency-first step with documented pre-mitigation API replica restarts,
+  nor update every specification statement whose timing meaning would change.
+- Impact: a locally correct executor change could be promoted without proving
+  backend stability, and diagnostics could misleadingly call overlapping phase
+  durations wall time.
+- Follow-up: default to two reads, require a post-change backend-pressure gate,
+  preserve sequential pages, update all affected spec sections, and define
+  deterministic executor shutdown and infrastructure-failure behavior.
+- Status: round 2 reduced the review to two suggestions; the final revision now
+  names the contradictory historical statements explicitly and adds an
+  executor-submission-failure cleanup test before Claude round 3.
+
+## 2026-07-13 - Bound Concurrency Result Retention, Not Only Active Requests
+
+- Repo: emerge frontend startup concurrency plan review.
+- Expected: a two-worker pool would bound backend pressure while overlapping
+  the dominant IGM and Merge reads.
+- Actual: Claude round 3 found that submitting every Process up front could
+  retain several large decoded Process result sets even though active requests
+  stayed at two.
+- Impact: backend concurrency metrics could look healthy while frontend peak RSS
+  regressed substantially on the largest payloads.
+- Follow-up: submit, gather, and reduce stages for one Process at a time while
+  reusing the two-worker pool; add frontend peak RSS to the post-change UAT gate.
+- Status: sole final suggestion accepted and incorporated; no Critical or
+  Warning findings remain, so the plan gate closed at the three-round limit.
+
+## 2026-07-13 - Sequential Submission Does Not Imply Sequential Object Lifetime
+
+- Repo: emerge frontend startup concurrency implementation review.
+- Expected: gathering and reducing one Process before submitting the next would
+  keep decoded startup data bounded to one Process.
+- Actual: Pi round 1 found that loop-local futures, outcomes, and raw record
+  aliases from Process N remained referenced when Process N+1 was submitted.
+- Impact: two complete Process payloads could briefly coexist, contradicting the
+  documented RSS bound even though request concurrency never exceeded two.
+- Follow-up: explicitly release the completed per-Process stage graph and raw
+  record aliases before the next loop iteration, add a two-Process lifetime
+  regression, and assert successful reusable-executor shutdown as well as the
+  existing infrastructure-failure cleanup path.
+- Status: production Warning and Suggestion accepted and fixed. Pi round 2
+  confirmed the runtime cleanup but found the regression only tracked Futures;
+  the test now also weak-tracks stage outcomes, fetch containers, and raw record
+  sequences. Pi round 3 closed cleanly with no Critical, Warning, or Suggestion
+  findings.
+
+## 2026-07-14 - Make Does-Not-Raise Regression Assertions Explicit
+
+- Repo: emerge frontend Qt network reply buffer fix review.
+- Expected: reproducing the production signal-connection order would clearly
+  protect the weak-reference compatibility fix.
+- Actual: Claude round 1 found that the regression depended on
+  `buffer.attach()` not raising, but did not document that call as its assertion.
+- Impact: a later signal-wiring refactor could leave the test green while making
+  its original guarding intent unclear.
+- Follow-up: label the connection call as the deliberate assertion in the test;
+  also avoid `status` as a zsh wrapper variable because it is read-only.
+- Status: suggestion accepted and fixed; Claude round 2 closed cleanly with no
+  Critical, Warning, or Suggestion findings. The same zsh variable mistake
+  recurred in a later plan-review wrapper after the review itself completed;
+  future wrappers must use `review_exit`, never `status`.
+
+## 2026-07-14 - Workspace Census Must Tolerate Prunable Worktrees
+
+- Repo: emerge workspace coordination.
+- Expected: the workspace census would report active claims before the CGMES
+  merge-progress fix started.
+- Actual: the census aborted on the prunable worktree path
+  `/private/tmp/emerge-prefix-check` after its gitdir disappeared.
+- Impact: automated triage produced no report even though the coordination
+  ledger and remaining worktrees were readable.
+- Follow-up: inspect the ledger and `git worktree list --porcelain` directly
+  without pruning user state; make the census skip explicitly prunable entries.
+- Status: current task claimed manually in the ledger; census hardening remains
+  open outside this implementation scope.
+
+## 2026-07-14 - Order Terminal Progress Across Events, Records, and Reloads
+
+- Repo: emerge frontend CGMES merge-progress implementation review.
+- Expected: accepting a terminal ticker event and reloading the Process would
+  replace the transient percentage with the completed or failed merge state.
+- Actual: Pi review exposed three independent races: terminal records without a
+  ZIP could lose to the transient overlay, older records could resurrect a
+  running state, and overlapping reload callbacks could overwrite newer data or
+  release preservation ownership too early.
+- Impact: a backend-completed merge could remain displayed at 39%, including
+  after switching Processes or receiving later ticker updates.
+- Follow-up: preserve stable Process identity, make terminal task state
+  authoritative without requiring a ZIP, use absorbing timestamp precedence,
+  and gate both cache writes and overlay release with a monotonic reload
+  generation.
+- Status: all findings from three Pi cycles were fixed and the focused and full
+  suites pass; the last fixes could not receive a fourth Pi cycle because the
+  review workflow has a hard three-cycle cap, so the slice is not independently
+  review-clean.
+
+## 2026-07-14 - Pi Model Preflight Can Stall Under Captured Fish Output
+
+- Repo: emerge frontend CGMES IGM status review.
+- Expected: the mandated Pi runner would capture `pi --list-models gpt` through
+  Fish and proceed to the approved `openai-codex/gpt-5.6-sol` review.
+- Actual: two fresh tmux attempts stalled in the captured model-list command
+  with no log output, while the same model listing completed immediately in a
+  direct PTY and confirmed authentication and the required model.
+- Impact: the reviewer never started in either original attempt.
+- Follow-up: after cleanly terminating both process groups, use the successful
+  direct listing as the required preflight and start a fresh tmux runner at the
+  Pi review command itself; investigate whether `string collect` or Pi's TTY
+  detection causes the captured-list hang.
+- Status: recovered; cycle 1 completed normally in the fresh preflighted run,
+  its four Warnings and one Suggestion were fixed, and Pi cycle 2 closed cleanly
+  with no Critical, Warning, or Suggestion findings.
+
+## 2026-07-14 - Keep Claude Plan Context Inside the Review Bundle
+
+- Repo: emerge merge Task Activity Ledger plan review.
+- Expected: Claude would review the docs-repository plan while using companion
+  code paths only as caller-authored orientation.
+- Actual: naming absolute companion-worktree paths prompted an out-of-sandbox
+  Glob, so the harness correctly marked the attempt invalid before a verdict.
+- Impact: no review finding or clean result was produced; implementation stayed
+  blocked at the plan gate.
+- Follow-up: give the isolated reviewer only in-bundle plan/spec paths and keep
+  code-flow evidence summarized in trusted context; use `review_exit` rather
+  than zsh's read-only `status` variable in wrappers.
+- Status: recovered by retrying with a fresh run directory and narrowed context.
+
+## 2026-07-14 - Review Cross-Repo Slices as Separate Claude Bundles
+
+- Repo: emerge frontend merge Task Activity Ledger implementation and specs.
+- Expected: one full-change Claude gate would verify code, lifecycle behavior,
+  and the companion documentation consistently.
+- Actual: the supervised harness accepts one Git repository per bundle, so the
+  code and documentation diffs needed separate reviews in each round. The code
+  pass found missing compile-time enforcement for family-tagged UI opens; the
+  docs passes found traceability drift and verification evidence omitted from
+  the recorded plan command.
+- Impact: relying on the code-repository symlink alone would not have reviewed
+  the actual documentation diff, and repository-wide producer assumptions
+  would have remained conventional rather than enforced.
+- Follow-up: run paired repository bundles for cross-repo work, require family
+  at the UI opener boundary, mirror RTM/feature evidence exactly, and keep the
+  reviewed plan's verification command aligned with added integration modules.
+- Status: accepted findings fixed; frontend review closed clean in round 2 and
+  documentation review closed clean at the round-3 cap.
+
+## 2026-07-15 - Embed Caller-Authored Cross-Repo Plans for Code Review
+
+- Repo: emerge frontend sequential merge queued-visibility plan review.
+- Expected: the code-repository Claude bundle could follow an absolute path to
+  the companion documentation repository's new plan.
+- Actual: the harness rejected that Read target as out of scope before starting
+  a review, consistent with its one-repository isolation boundary.
+- Impact: no review cycle or verdict was produced; implementation remained
+  correctly blocked at the plan gate.
+- Follow-up: embed the caller-authored plan as trusted review intent and expose
+  only code-repository paths for implementation inspection; review the eventual
+  documentation diff in its own repository bundle.
+- Status: retry prepared with a fresh run directory.
+
+## 2026-07-15 - Reuse a Direct Pi Preflight After Captured Listing Stalls
+
+- Repo: emerge frontend sequential merge queued-visibility reviews.
+- Expected: the mandated Pi tmux runner would capture `pi --list-models gpt`
+  and then start the approved `openai-codex/gpt-5.6-sol` reviewer.
+- Actual: the captured Fish preflight stalled with an empty log before the
+  reviewer started, while a direct PTY model listing completed and confirmed
+  the required authenticated model.
+- Impact: the failed preflight consumed no review cycle, but the first slice
+  gate could not start until the orphaned process group was terminated.
+- Follow-up: after verifying the direct listing, use a fresh runner that starts
+  the Pi review command with that exact preflighted model; continue to fail
+  closed rather than substituting a provider or model.
+- Status: recovered; every Pi slice gate ran with the approved model, and the
+  final Slice 3 gate closed cleanly at cycle 3.
+
+## 2026-07-15 - Assert the Targeted Refresh, Not the Startup Gate
+
+- Repo: emerge frontend Process Optional/Recessive sparse-edit flow.
+- Expected: the real-dialog regression would prove the authoritative
+  post-save snapshot had completed.
+- Actual: the first assertion watched the broad startup snapshot flag, which
+  can already be idle while a targeted Process refresh is still running.
+- Impact: the test could pass after checking only the update response and miss
+  a failed targeted snapshot delivery.
+- Follow-up: expose a thread-safe targeted-refresh in-flight query and assert a
+  projected timestamp slot plus hydrated IGM identity that only the snapshot
+  applier can install.
+- Status: fixed; focused and full frontend checks passed, and Pi cycle 3 closed
+  with no Critical, Warning, or Suggestion findings.
+
+## 2026-07-16 - Review Legacy Viewer Removal Through the Generated RTM
+
+- Repo: emerge frontend legacy IGM log-viewer removal and companion specs.
+- Expected: Pi would verify the dead UI path was removed while the rich
+  `Checking logs` path and its documentation stayed intact.
+- Actual: three rounds progressively found a dead synthetic fallback, missing
+  inline-log coverage, stale viewer/action terminology, and semantically weak
+  RTM evidence. The configured extraction catalog was absent, so the official
+  RTM generator used a temporary catalog reconstructed from the committed RTM
+  while still validating current feature mappings and pytest evidence.
+- Impact: passing tests alone would have left dead API surface and misleading
+  operator/traceability documentation; the three-cycle cap ended with one
+  evidence warning and one wording suggestion reported in the final round.
+- Follow-up: fixed both final findings, regenerated the RTM with exact relevant
+  test nodes, reran frontend/spec validation, and did not exceed the review
+  cycle cap. Restore a populated canonical extraction output before the next
+  unrelated RTM regeneration.
+- Status: all reported findings fixed; final post-review checks are green, but
+  the post-round-3 fixes were not eligible for a fourth Pi review.
