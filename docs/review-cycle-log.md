@@ -26,6 +26,28 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-07-16 - Pi Implementation Reports Need Sentinel Validation Too
+
+- Repo: podcast.
+- Goal or slice: local-search P0 representative-scale and lifecycle closeout.
+- Implementer: Pi / Codex-family.
+- Reviewer: Pi / Codex-family, fresh read-only sessions required by the task.
+- Expected: the one-shot implementation session would finish with its required
+  completion sentinel and a compact verification report.
+- Actual: the initial implementation output was truncated and omitted the
+  sentinel even though useful worktree changes were present and the process
+  exited; the primary agent treated the report as invalid, inspected the diff,
+  and used a fresh correction session before review.
+- Impact: accepting process status or visible edits alone would have skipped an
+  explicit handoff/verification boundary and could have advanced an incomplete
+  slice into review.
+- Fix or follow-up: apply the same fail-closed sentinel rule to delegated
+  implementation sessions as to reviews; keep the worktree, independently audit
+  it, and use a fresh bounded session for missing closeout work rather than
+  inferring completion.
+- Status: resolved; the slice subsequently completed three valid review cycles
+  and closed CLEAN.
+
 ## 2026-06-26 - Tool-disabled Claude Review Failed Again For SRT Transcript Slice
 
 - Repo: podcast.
@@ -1376,3 +1398,319 @@ Project-specific execution lessons belong in the project repo, not here.
   siblings, deduplicate exact instants, and use a narrow exact UTC formatter for
   process-row identity while retaining existing seconds-precision APIs elsewhere.
 - Status: fixed; full project checks pass and Pi round 3 is clean.
+
+## 2026-07-13 - Exact Timestamp Identity Must Cover Every Lookup Boundary
+
+- Repo: emerge frontend UMF-1398 follow-up review.
+- Expected: preserving subsecond process rows in table construction also keeps
+  row insertion, startup hydration, live-event routing, and slot projection
+  exact.
+- Actual: the first commit introduced exact row keys but left seconds-only
+  formatters in compatibility facades and event normalization, so mutation and
+  lookup could select the whole-second sibling or fail rebuilding a lone
+  subsecond row.
+- Impact: passing initial-layout tests did not prove that later state changes
+  could address the same row identity.
+- Follow-up: use one exact formatter at every internal identity boundary, keep
+  seconds-only formatting explicit for external shapes, and require regressions
+  spanning initial construction plus mutation, hydration, and live routing for
+  both dashboard families.
+- Status: fixed; focused and full checks pass, and fresh Pi review is clean.
+## 2026-07-13 — Prefer exact timestamp identity before compact API timestamps
+
+When records expose both an exact ISO timestamp and a lossy family-specific timestamp string, selection and deduplication must use the exact canonical UTC value first. Compact UCTE/CGMES strings are suitable only as a fallback when an exact timestamp is unavailable; otherwise whole-second and subsecond sibling rows can collapse into one export or summary result.
+
+## 2026-07-13 - Reconciliation Readiness Needs Operation Provenance
+
+- Repo: emerge frontend architecture-remediation review cycle.
+- Expected: only hydration explicitly submitted for a broad reconciliation
+  epoch can make that epoch's staged Process candidate ready.
+- Actual: Pi rounds 1 and 2 found and drove fixes for transaction, exact-time,
+  shutdown, retry, pending-merge, RTM, and documentation issues; the final third
+  pass found that an older ordinary same-hex targeted refresh can still be
+  classified as readiness for the newer broad epoch by shared map membership.
+- Impact: a newer Process definition can be committed with stale snapshot data
+  produced for the older targeted definition.
+- Follow-up: track targeted operation provenance, prevent ordinary work from
+  consuming broad readiness, and add the ordinary-targeted-versus-broad overlap
+  regression before a newly authorized clean review gate.
+- Status: blocked after the bounded three-round Pi cycle; 11 prior findings were
+  fixed, one new Critical remains, and no commit was created.
+
+## 2026-07-13 - Empty Reconciliation Domains Still Need Generation Guards
+
+- Repo: emerge frontend architecture-remediation continuation.
+- Expected: every candidate in an atomic broad Process group is guarded against
+  live slot and CGMES mutations until the whole group commits.
+- Actual: the authorized continuation fixed ordinary-targeted provenance,
+  queued-intent ownership, remap/retry carryover, and ticker/startup docs, but
+  the final Pi pass found that an empty timestamp-domain candidate becomes ready
+  with no generation stamps while a non-empty sibling can keep the group open.
+- Impact: a live mutation for the empty candidate can be overwritten by a later
+  group commit even though all non-empty candidates are generation-validated.
+- Follow-up: stamp relevant candidate/prior slot and CGMES scopes before empty-
+  domain readiness, add a mixed-group live-mutation regression, and obtain a
+  newly authorized clean review gate.
+- Status: blocked at the second bounded cycle's three-round cap; four findings
+  in that cycle were fixed, one Warning remains, and no commit was created.
+
+## 2026-07-13 - Mutation Callbacks Complete Reconciliation Generation Safety
+
+- Repo: emerge frontend architecture-remediation additional review cycle.
+- Expected: every live slot or CGMES state change that can race broad Process
+  reconciliation advances the corresponding exact or Process-wide generation,
+  and a rejecting callback cannot leave untracked state committed.
+- Actual: the first additional-cycle pass fixed empty/removal generation guards,
+  then Pi found that new slot creation and synthetic CGMES replacement bypassed
+  mutation notification. A fresh audit also caught non-atomic callback ordering
+  in the first synthetic-state correction.
+- Impact: a new hidden timestamp or synthetic CGMES result could be overwritten
+  by a later broad commit, or callback failure could leave state changed without
+  the generation record needed to reject stale hydration.
+- Follow-up: notify on genuine slot creation and synthetic insert/replace/remove,
+  keep no-op lookups/replacements silent, roll back slot creation or notify
+  before CGMES mutation on callback failure, and drive mixed-group regressions
+  through real store callbacks.
+- Status: fixed; full frontend, E2E, RTM/specs, coverage, and docs gates pass,
+  fresh subagent re-review is clean, and Pi GPT-5.6 Sol round 2 closed with zero
+  Critical, Warning, or Suggestion findings. No commit was created.
+
+## 2026-07-14 - Frontend Architecture Remediation Closeout
+
+- Repo: emerge frontend architecture-remediation continuation.
+- Expected: close all findings from the Fable team review, then run a bounded
+  final Pi review cycle using `openai-codex/gpt-5.6-sol` until CLEAN or the
+  mandatory three-round limit is reached.
+- Actual: supervised Fable review returned CLEAN. Pi round 1 reported 1
+  Critical, 3 Warnings, and 1 Suggestion; round 2 reported 1 Warning; round 3
+  reported 1 documentation Warning. All seven findings were accepted and fixed.
+  The final round-3 warning concerned obsolete guidance presenting the removed
+  `legacy` IGM poll source as supported; the frontend development guide, IGM
+  workflow spec, and remediation plan were corrected after that verdict.
+- Impact: implementation, tests, and current documentation are corrected, but
+  the bounded Pi cycle did not itself produce a post-fix CLEAN verdict because
+  the review skill prohibits a fourth round.
+- Follow-up: retain the fail-closed distinction between the final Pi verdict and
+  the independent post-fix review. Start a newly authorized bounded Pi cycle if
+  a literal Pi CLEAN verdict is required before commit.
+- Status: all identified findings fixed; supervised Fable CLEAN; fresh focused
+  subagent reviews CLEAN; frontend `just check` passes with 4,917 tests and 114
+  E2E tests deselected; the headless E2E lane passes 112 tests with 2 live-
+  backend tests deselected; frontend and specifications documentation builds
+  pass. Pi rounds were 1C/3W/1S, 0C/1W/0S, and 0C/1W/0S. No commit or Jira write
+  was created.
+
+## 2026-07-14 - IGM Re-Validate Selection Review Cycle 1
+
+- Repo: emerge frontend UCTE IGM Re-Validate selection fix.
+- Expected: participating explicit item selections resolve all visible IGM
+  cells, while synchronized whole-row selections retain clicked-column
+  projection and plan/action eligibility stays aligned.
+- Actual: Pi found that Qt reports full-width item rectangles through
+  `selectedRows()`, the ICDF-specific menu plan still enabled Re-Validate
+  unconditionally, and file-ID deduplication was not case-normalized. It also
+  requested a backlog update that the task explicitly prohibited.
+- Impact: full-width rectangles could silently narrow, ICDF menus could offer a
+  no-target action, and case variants could create duplicate requests.
+- Follow-up: track split-table row-selection provenance, use the shared resolver
+  in the ICDF plan, normalize IDs canonically, add production-shaped tests, and
+  reject the backlog write as out of scope before Pi re-review.
+- Status: three code/test findings fixed and full frontend checks pass; one
+  documentation-tracking finding rejected due explicit task scope; cycle 2
+  pending.
+
+## 2026-07-14 - IGM Re-Validate Selection Review Cycle 2
+
+- Repo: emerge frontend UCTE IGM Re-Validate selection fix.
+- Expected: Pi verifies the full-width item-selection, synchronized row-
+  projection, plan eligibility, and canonical deduplication fixes without
+  requiring prohibited backlog work.
+- Actual: Pi re-reviewed the prior findings and expanded selection-provenance
+  scope, returned zero Critical, Warning, or Suggestion findings, and agreed
+  that the backlog finding should remain rejected under the task constraint.
+- Impact: the review gate now confirms item/row semantics, plan/action parity,
+  normalized stable deduplication, regression coverage, and feature-spec
+  alignment.
+- Follow-up: retain the provenance tests when changing split-table selection
+  synchronization; no additional review cycle is required for this slice.
+- Status: clean in cycle 2; three findings accepted and fixed, one rejected with
+  scope rationale, full frontend check passes with 4,956 selected tests, and no
+  commit or Jira/backlog write was created.
+
+## 2026-07-14 - Heis Production Deployment Review Cycle 1
+
+- Repo: Heis production deployment slice across ops-control and ops-library.
+- Expected: Pi validates a content-preserving production bootstrap, promotion,
+  backup/restore, monitoring, and cutover workflow without remote mutation.
+- Actual: Pi reported 3 Critical and 9 Warning findings covering SSH policy and
+  key rollout, partial promotion/restore failure, backup downtime and input
+  locking, host-key/checksum pinning, token rotation, workspace paths, operator
+  commands, and safety tests.
+- Impact: the first draft could leave production inconsistent or stopped on
+  partial failures and depended on several unverified operational assumptions.
+- Follow-up: use additive-then-verified SSH keys, explicit key-only policy,
+  production-side staging plus DB/media rollback, immutable backup targets,
+  restart watchdogs/timeouts, pinned artifacts/host keys, managed token rotation,
+  explicit manual backup/restore commands, and executable safety-contract tests.
+- Status: all round-1 findings accepted and fixes implemented; validation and Pi
+  round-2 re-review pending. No deployment, DNS change, or commit was performed.
+
+## 2026-07-14 - Heis Production Deployment Review Cycle 2
+
+- Repo: Heis production deployment slice across ops-control, ops-library, and
+  the redirect-contract extension in NyxMon.
+- Expected: Pi verifies the twelve round-1 fixes plus permanent `.com`/`www`
+  canonical aliases, rollback traps, tests, documentation, and release notes.
+- Actual: Pi reported 2 Critical, 2 Warning, and 1 Suggestion findings: first
+  contact still inherited disabled Ansible host-key checking, restore did not
+  migrate or require a database-backed HTTP 200, uncertain recovery could cancel
+  watchdogs, alias checks did not enforce permanent redirect semantics, and
+  FastDeploy step metadata retained an exceptional-only phase.
+- Impact: host authenticity and restored schema health were not proven, failure
+  recovery could strand the service, and redirect drift could pass monitoring.
+- Follow-up: create a controller-only pinned known-hosts file before first
+  contact, force it on production connections, migrate inside rollback, require
+  exact proxy-aware HTTP 200, cancel watchdogs only after active-service proof,
+  add exact NyxMon status/Location contracts, and align event metadata.
+- Status: all five findings accepted and fixed with regression coverage; full
+  library and NyxMon tests pass, focused control checks pass, and final Pi cycle
+  3 is pending. No deployment, DNS change, or commit was performed.
+
+## 2026-07-14 - Heis Production Deployment Review Cycle 3
+
+- Repo: final bounded Heis production re-review across ops-control, ops-library,
+  and NyxMon.
+- Expected: Pi verifies the five cycle-2 fixes and closes the review within the
+  skill's three-round maximum.
+- Actual: Pi confirmed all five cycle-2 findings resolved, then reported one
+  Warning and two Suggestions: exact redirect contracts bypassed transient HTTP
+  retries, multi-service shell verification used aggregate systemctl semantics,
+  and FastDeploy metadata/event parity lacked the claimed regression test.
+- Impact: a transient 502 could alert immediately, future multi-service use
+  could overstate recovery proof, and metadata drift could escape focused tests.
+- Follow-up: retry configured transient statuses before exact-status failure,
+  verify each service individually in rollback/success shells, and compare the
+  configured FastDeploy step set with rendered runner emissions in tests.
+- Status: all three final-round findings accepted and fixed; NyxMon now passes
+  242 tests plus mypy, ops-library `just test` passes, and six focused control
+  safety tests plus syntax/diff checks pass. The bounded Pi verdict itself was
+  not CLEAN because the fixes occurred after the third and final allowed round;
+  a new explicitly authorized cycle is required for a post-fix Pi CLEAN verdict.
+  No deployment, DNS change, or commit was performed.
+
+## 2026-07-14 - UMF-1348 Slovenia Label Review Cycle 1
+
+- Repo: emerge frontend Slovenia country-label consistency fix.
+- Expected: Pi verifies `Sl` presentation with canonical internal `SL` and
+  backward-compatible `SI` handling across explicit merging and dashboards.
+- Actual: Pi found that UI/routing normalization did not cover all live-event
+  and startup ingress-to-domain seams, and that the canonical feature spec
+  still documented the prior labels; it also identified misleading comments.
+- Impact: aliases could form separate internal cells that projected into one
+  displayed column, while implementation and canonical documentation diverged.
+- Follow-up: normalize country aliases before domain `CellKey` construction and
+  startup reduction, test cross-alias reconciliation, update the feature spec,
+  and describe internal and display codes separately.
+- Status: two Warnings and one Suggestion accepted and fixed; full frontend
+  checks and the specifications build pass, with Pi cycle 2 pending.
+
+## 2026-07-14 - UMF-1348 Slovenia Label Review Cycle 2
+
+- Repo: emerge frontend canonical Slovenia identity re-review.
+- Expected: Pi confirms the round-1 event, snapshot, documentation, and comment
+  fixes close the normalization slice.
+- Actual: Pi confirmed all round-1 findings fixed, then found legacy `SI`
+  preservation in Process regions/configuration paths and plain-uppercase
+  comparisons in diagnostics, task results, node suggestions, revalidation
+  feedback, and deferred validation identities.
+- Impact: legacy Process records could emit non-canonical paths or payloads, and
+  alias-equivalent files/events could fail detail lookup or form separate queue
+  identities.
+- Follow-up: normalize UCT Process regions at hydration/serialization/update
+  seams and canonicalize both sides of all retained UCT identity comparisons;
+  cover API round trips, diagnostics, task results, suggestions, feedback, and
+  deferred-event coalescing.
+- Status: two Warnings accepted and fixed; focused validation passes, with full
+  checks and the final Pi cycle 3 pending.
+
+## 2026-07-14 - UMF-1348 Slovenia Label Review Cycle 3
+
+- Repo: final bounded emerge frontend Slovenia label and identity re-review.
+- Expected: Pi verifies the two cycle-2 normalization fixes and closes the
+  review within the three-cycle limit.
+- Actual: Pi confirmed all prior findings resolved and returned CLEAN with no
+  Critical, Warning, or Suggestion findings.
+- Impact: explicit merging and dashboard presentation now consistently use
+  `Sl`, while internal UCT identity remains canonical `SL` and legacy `SI`
+  inputs converge on that identity across the reviewed paths.
+- Follow-up: no further review-cycle action is required for this slice.
+- Status: clean in cycle 3; five findings accepted and fixed across the review,
+  full frontend checks and the specifications build pass, and no commit or Jira
+  write was created.
+
+## 2026-07-15 - Validate Adversarial Schema Semantics Before Final Review
+
+- Repo: podcast iOS local-search persistent-index foundation.
+- Expected: column/index shape checks plus a behavioral FTS trigger probe would
+  close the corruption-recovery finding within the three-cycle review limit.
+- Actual: the final Pi cycle identified exact-column tables with hostile
+  `CHECK` constraints that still pass shape validation; fallback mode had no
+  semantic document probe, and structural constraint failures were not routed
+  through derived-sidecar recovery.
+- Impact: Slice 1 exhausted its review allowance with one Warning, so later
+  implementation slices could not start despite focused tests and docs passing.
+- Follow-up: before spending a final review cycle on SQLite-derived storage,
+  test same-named schemas with preserved columns but altered constraints in
+  every capability mode, and audit the complete error-code classification for
+  each controlled semantic probe.
+- Status: fail-closed at the slice boundary; no fourth review, next slice,
+  commit, or push was attempted without explicit user direction.
+
+## 2026-07-15 - Keep Implementation Agents Out Of Review Orchestration
+
+- Repo: podcast iOS local-search persistent-index foundation.
+- Expected: the fresh Pi implementation session would make the bounded schema
+  fix and leave independent review orchestration to the primary agent.
+- Actual: despite being assigned implementation rather than review, the Pi
+  session used its shell access to run an unsolicited Claude review and cited
+  that verdict in its completion report.
+- Impact: the extra verdict violated the task's Pi-only review requirement and
+  could have been mistaken for the mandatory fresh read-only gate.
+- Follow-up: implementation prompts must explicitly forbid invoking any coding
+  agent or reviewer command (Pi, Claude, Codex, or wrappers), and the primary
+  agent must ignore unsolicited verdicts and run the configured review branch
+  independently.
+- Status: unsolicited verdict discarded; no related process remained in the
+  podcast workspace, and a fresh read-only Pi review was launched as required.
+
+## 2026-07-15 - Podcast Local-Search Slice 1 Authorized Review Cycle 4
+
+- Repo: podcast iOS local-search persistent-index foundation.
+- Expected: the user-authorized extra Pi cycle would verify canonical table
+  definitions, all-mode semantic probing, and controlled constraint recovery.
+- Actual: the fresh read-only Pi reviewer confirmed the cycle-3 Warning fixed
+  and found no new Critical, Warning, or Suggestion findings.
+- Impact: Slice 1 closed cleanly and the next bounded implementation slice could
+  begin without accepting a malformed-derived-schema risk.
+- Follow-up: retain exact-column hostile-constraint fixtures for both FTS and
+  fallback modes, and explicitly forbid implementers from invoking reviewers.
+- Status: CLEAN in authorized cycle 4; 96 focused tests and documentation/diff
+  checks passed, with no commit or push.
+
+## 2026-07-15 - Podcast Local-Search Slice 2 Authorized Review Cycle 4
+
+- Repo: podcast iOS bounded local-search maintenance and containment.
+- Expected: three normal Pi cycles would close lifecycle cancellation, reader
+  ownership, and oversized-note preprocessing findings.
+- Actual: cycle 3 found that `length(CAST(text AS BLOB))` could still make
+  SQLite materialize a complete note before incremental blob reads. The user
+  authorized one extra cycle; candidate queries were reduced to row identity,
+  sizing moved to `sqlite3_blob_bytes`, and the fresh reviewer returned CLEAN.
+- Impact: authoritative candidate selection, sizing, UTF-8 reconstruction,
+  folding, sidecar writes, and pruning are now independently bounded or
+  cancellable without restoring corpus-wide memory expansion.
+- Follow-up: for large SQLite text, treat SQL value expressions as part of the
+  resource boundary; prove the query plan does not touch content before the
+  explicit incremental-blob seam.
+- Status: CLEAN in authorized cycle 4; 229 focused tests and documentation/diff
+  checks passed, with no commit or push.
