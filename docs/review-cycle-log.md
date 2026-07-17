@@ -2224,3 +2224,18 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
 - Status: fixes implemented and full native checks passed; the final fresh Pi
   cross-repository closure review confirmed all three findings fixed and reported
   CLEAN with zero Critical, Warning, or Suggestion findings.
+
+## 2026-07-16 - Use A Dedicated Fish Runner For Pi Review Tmux Sessions
+
+- Repo: podcast iOS remote-command registration reliability.
+- Expected: the first fresh Pi read-only review would start in tmux and write
+  its report to the configured log.
+- Actual: an inline tmux command mixed outer-shell quoting with Fish-only
+  syntax, exited before Pi started, and created neither a log nor a verdict.
+- Impact: no review cycle was consumed and no worktree mutation occurred, but
+  the slice lost one orchestration round trip before review could begin.
+- Follow-up: create the prompt and a dedicated temporary Fish runner first,
+  then pass prompt/log paths as runner arguments exactly as the review skill
+  documents; do not embed the review pipeline and interactive pause inline.
+- Status: corrected immediately; the fresh Pi review then ran normally, found
+  two Warnings in round 1, and returned CLEAN after both were fixed in round 2.
