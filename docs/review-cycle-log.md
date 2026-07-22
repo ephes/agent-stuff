@@ -2105,3 +2105,122 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   unrelated RTM regeneration.
 - Status: all reported findings fixed; final post-review checks are green, but
   the post-round-3 fixes were not eligible for a fourth Pi review.
+
+## 2026-07-18 - Model Real Pi Isolation and Process Reaping
+
+- Repo: daybook continuous-weeknotes Step-3 MVP authoring boundary.
+- Expected: disabling pi tools, sessions, and context files plus killing the
+  process group would provide a contained, bounded authoring subprocess.
+- Actual: review found that retained global pi configuration could still alter
+  provider/system behavior, and that a terminated but unreaped leader could
+  make a successful group cleanup look permanently alive.
+- Impact: ambient configuration could weaken the fixed contract, while timeout
+  and interruption paths could escalate unnecessarily and mask their real
+  result.
+- Follow-up: require a dedicated owner-only pi agent directory containing only
+  subscription auth, pin the replacement system prompt and telemetry setting,
+  and poll/reap the direct child while supervising descendant group cleanup.
+- Status: all findings fixed with hostile-config, descendant, zombie-leader,
+  malformed-output, and pipe-lifecycle coverage; Pi round 3 closed CLEAN.
+
+## 2026-07-18 - Lock the Write, Not Just the Read
+
+- Repo: django-cast and daybook deterministic draft lookup/find-or-create.
+- Expected: an exact parent+slug lookup plus `SELECT FOR UPDATE` around create
+  would make competing draft creators converge portably.
+- Actual: review found latest-draft slugs diverge from materialized page slugs,
+  and SQLite ignores `SELECT FOR UPDATE` even though django-cast supports it.
+- Impact: lookup could miss an unpublished slug edit, and SQLite creators could
+  both pass a sibling check despite documentation promising serialization.
+- Follow-up: match and serialize the same latest revision, fail closed on legacy
+  ambiguity, use a transactional no-op parent UPDATE followed by a parent reload,
+  and strictly validate query cardinality and client response shapes.
+- Status: all six findings fixed; django-cast remained at 100% coverage on its
+  SQLite test backend, and the third Pi review closed CLEAN.
+
+## 2026-07-18 - Persist the Fence Before Delivery
+
+- Repo: daybook continuous-weeknotes Step-3 MVP reconcile state rails.
+- Expected: rechecking source and steering hashes immediately before delivery
+  would be enough to prevent stale authoring results from being applied.
+- Actual: review found that a successful fence was not persisted, so callers
+  could bypass it when recording delivery; it also found state-file size and
+  FIFO hazards in the local state reader, plus incomplete fenced-recovery wording.
+- Impact: an orchestration bug could record success without proof of a current
+  input fence, and a hostile or corrupt state path could block or become
+  unreadable after an oversized write.
+- Follow-up: add an explicit persisted `fenced` state required by delivery,
+  recover both active `running` and `fenced` attempts by exact UUID, enforce the
+  read-size limit before atomic writes, and validate an `O_NOFOLLOW|O_NONBLOCK`
+  file descriptor rather than a pre-open path check.
+- Status: focused and full tests passed; a fresh Pi closure review reported
+  CLEAN with no changes after all prior findings were resolved.
+
+## 2026-07-18 - Persist Intent Before Crossing the Remote Boundary
+
+- Repo: daybook continuous-weeknotes Step-3 MVP orchestration.
+- Expected: a persisted stale-result fence plus compare-before-PATCH would make
+  delivery safely resumable after any local or remote failure.
+- Actual: review exposed the cast-to-checkpoint crash window, incomplete target
+  identities, uncertain fsync semantics, and lossy media canonicalization.
+- Impact: a crash after a remote commit could re-run a nondeterministic author,
+  a changed target could receive recovery work, and opaque media differences
+  could be misclassified as unchanged.
+- Follow-up: persist and cleanly fsync a content-free pre-cast intent; pin the
+  full non-secret target; recover only exact committed semantics; preserve
+  intent on unobservable interrupts; and use one audience-aware canonicalizer
+  for hashes and cast comparisons that retains every opaque-block field.
+- Status: 566 tests and docs passed; the final fresh Pi closure review reported
+  CLEAN with no findings or changes.
+
+## 2026-07-18 - Bound the Pi Model-List Preflight
+
+- Repo: ops-library and ops-control Daybook weeknotes deployment slice.
+- Expected: the mandatory Pi reviewer preflight would list the authenticated
+  `openai-codex/gpt-5.6-sol` model promptly before starting a read-only review.
+- Actual: `pi --list-models gpt` remained connected and silent for four minutes,
+  so the reviewer never started and no completion report existed.
+- Impact: an unbounded availability check can strand the review gate while an
+  empty log looks superficially like an idle reviewer.
+- Follow-up: terminate and verify cleanup of the stalled session, then retry in
+  a fresh session with an explicit timeout around only the model-list preflight;
+  continue to fail closed rather than falling back to another model/provider.
+- Status: first round-2 attempt terminated cleanly; a fresh bounded-preflight
+  retry completed normally, and the eventual round-3 reviewer closed CLEAN.
+
+## 2026-07-18 - Seed Mutable OAuth State Only Once
+
+- Repo: ops-library and ops-control Daybook weeknotes deployment slice.
+- Expected: copying a dedicated staged `auth.json` on each role application
+  would keep unattended Pi authentication deterministic.
+- Actual: Pi legitimately refreshes and persists OAuth state in the managed
+  agent directory, so an authoritative repeated copy could restore expired or
+  rotated refresh credentials; the initial check-mode test also masked a
+  missing destination parent by pre-creating the managed runtime.
+- Impact: ordinary redeploys could break unattended auth, while a production
+  first-install `--check` could fail despite the regression passing.
+- Follow-up: seed missing auth with `force=false`, preserve safe managed state,
+  require an explicit unloaded-only rotation flag, and test check mode with the
+  entire managed runtime absent plus distinct seed/refreshed auth contents.
+- Status: focused tests and Ansible lint passed; the final fresh Pi review
+  reported CLEAN with no findings or changes.
+
+## 2026-07-18 - Verify Security Preconditions at the Receiving Service
+
+- Repo: daybook, django-cast, ops-library, and ops-control continuous-weeknotes rollout.
+- Expected: a client-supplied bearer header and a pre-PATCH live-state check
+  were sufficient to keep steering private and delivery draft-only.
+- Actual: the final cross-repository review found that weeknotes.home never
+  authenticated the header, django-cast did not atomically enforce unpublished
+  state with the revision write, and top-level rollout docs still described the
+  already-built scheduler as deferred.
+- Impact: steering rows were exposed through the private API boundary, a publish
+  could race the client-side check, and operators could follow stale rollout
+  guidance.
+- Follow-up: enforce one managed bearer secret at weeknotes.home and wire it to
+  Studio, add a transactional row-locked `require_unpublished` PATCH precondition
+  for posts and episodes, validate returned live state, and update Slice-5 status,
+  activation gates, and rollback documentation.
+- Status: fixes implemented and full native checks passed; the final fresh Pi
+  cross-repository closure review confirmed all three findings fixed and reported
+  CLEAN with zero Critical, Warning, or Suggestion findings.
