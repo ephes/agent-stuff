@@ -2352,3 +2352,37 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   transient SQLite failures at every lazy-read boundary.
 - Status: 949 tests, docs build, a real 1,619-item Atlas first/unchanged pair,
   and byte-identical second-run ledger hash passed; Pi round 8 returned CLEAN.
+
+## 2026-07-23 - Keep Crash Diagnostics Fail-Safe And Validate From The Right Root
+
+- Repo: emerge frontend WSLg process-dialog crash investigation.
+- Expected: removing an unused application-global Qt filter and adding
+  low-volume breadcrumbs would be safe to commit after the normal full gate.
+- Actual: the first review found that edit metadata was resolved eagerly and
+  could theoretically block the dialog being diagnosed, and that the new
+  breadcrumbs lacked edit-path and mutation coverage. A validation retry also
+  used repository-root pathspecs while already inside the frontend directory.
+- Impact: no product failure or unintended commit occurred, but the
+  instrumentation needed a fail-safe resolver and the first validation retry
+  stopped before the full gate.
+- Follow-up: isolate diagnostic metadata behind exception-safe resolution,
+  cover the motivating edit path and each breadcrumb category, and use paths
+  relative to the active command working directory.
+- Status: all findings were fixed, the full frontend gate passed, and fresh
+  Opus reviews returned CLEAN for both the implementation and its staged
+  known-issue update.
+
+## 2026-07-24 - Isolate Pi Auth From An Unrelated Application Directory
+
+- Repo: ops-control Emerge Windows publisher planning.
+- Expected: the mandatory Pi/GPT-5.6 preflight would read Pi's own OAuth store
+  and list the approved `openai-codex/gpt-5.6-sol` model.
+- Actual: the parent session exported `PI_CODING_AGENT_DIR` for the Emerge
+  application, whose unrelated `auth.json` schema contains nullable fields;
+  Pi treated that file as its credential store and crashed during discovery.
+- Impact: the review correctly failed closed before implementation began.
+- Follow-up: run review preflight and the reviewer with an explicit
+  `PI_CODING_AGENT_DIR=~/.pi/agent`, continue to avoid provider/model fallback,
+  and keep credential values out of diagnostics.
+- Status: corrected without modifying either application repository; the
+  approved model preflighted successfully and plan review round 1 completed.
