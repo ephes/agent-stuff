@@ -26,6 +26,32 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-07-25 - Finish Review-Clean Automation With Its Real GUI Context
+
+- Repo: daybook, ops-library, and ops-control Apple Photos discovery rollout.
+- Goal or slice: install and activate the reviewed twice-daily Studio
+  LaunchAgent, then prove one scheduled-context run end to end.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol` in fresh read-only sessions.
+- Expected: local tests, Ansible check mode, disabled-first installation, and
+  successful manual runs as the service user would cover the production
+  boundary.
+- Actual: the real Aqua LaunchAgent reached a one-time macOS sandbox approval
+  while opening the Photos library, although the same launcher had succeeded
+  through an SSH/manual context. After the user approved it, the waiting
+  LaunchAgent completed with exit code 0.
+- Impact: stopping after a manual service-user run would have left the schedule
+  apparently healthy but unable to complete its first unattended
+  reconciliation.
+- Fix or follow-up: production verification for macOS GUI-user automation must
+  include an exact launchd-context kickstart and observation through completion,
+  including privacy prompts, persistent enabled state, aggregate-only logs, and
+  unchanged-state idempotency. Keep check mode and manual runs as earlier gates,
+  not as substitutes for this final one.
+- Status: resolved; the scheduled-context run reconciled all 1,619 entries
+  unchanged, preserved the ledger hash, emitted no error output, and the
+  twice-daily service remains enabled and idle.
+
 ## 2026-07-16 - Pi Implementation Reports Need Sentinel Validation Too
 
 - Repo: podcast.
@@ -2239,3 +2265,61 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   documents; do not embed the review pipeline and interactive pause inline.
 - Status: corrected immediately; the fresh Pi review then ran normally, found
   two Warnings in round 1, and returned CLEAN after both were fixed in round 2.
+
+## 2026-07-24 - Probe No-Replace Rename On The Actual Destination Filesystem
+
+- Repo: daybook Apple Photos recovery bundle.
+- Expected: macOS `renameatx_np(RENAME_EXCL)` would provide atomic no-clobber
+  directory publication on both local storage and the mounted Samba share.
+- Actual: the API worked locally but the live SMB filesystem returned
+  `ENOTSUP`. A first reservation fallback then showed that the share also
+  rejects renaming a populated directory into the reserved directory even
+  though it permits file renames.
+- Impact: relying only on the native flag would make verified Fractal bundles
+  fail at their final publication boundary.
+- Follow-up: retain atomic no-replace rename where supported; on unsupported
+  filesystems atomically reserve the destination, publish into the
+  command-owned directory, write the manifest last, and remove an explicit
+  incomplete marker as the final completion event. Recreate verified
+  subdirectories and rename their files individually under that marker. Test
+  both branches and run live SMB no-clobber and full-bundle probes.
+- Status: focused tests, the live SMB success/collision probes, and a full
+  strict-validation bundle/checksum run pass; the final round-3 Pi review
+  returned CLEAN with no Critical, Warning, or Suggestion findings.
+
+## 2026-07-24 - Enforce Explicit Inputs And Wrap Lazy Data-Source Reads
+
+- Repo: daybook Photos offload discovery Slice 1.
+- Expected: an explicit Photos library and a `PhotosError` CLI boundary made
+  the discovery command fail closed.
+- Actual: the option remained syntactically optional, and database construction
+  or lazy asset-property evaluation could still escape as a traceback.
+- Impact: unattended execution could select a fallback library or expose an
+  untyped failure instead of the documented safe boundary.
+- Follow-up: make the safety-critical library option required, wrap the complete
+  construction/read/classification boundary while preserving typed errors, and
+  test constructor plus lazy-property failures.
+- Status: targeted tests and docs build passed; Pi round 2 verified both fixes
+  and returned CLEAN with zero findings.
+
+## 2026-07-24 - Never Unlink A Pathname After A Safety-Critical Exchange
+
+- Repo: daybook Photos offload reconciliation Slice 2.
+- Expected: exact read tokens plus atomic no-replace/exchange publication would
+  make the owner-only ledger safe against concurrent manual replacements.
+- Actual: repeated Pi review found progressively smaller pathname races:
+  post-exchange cleanup could unlink substituted state, interruption could
+  occur immediately after a swap, first publication was not bound to the
+  original temporary file descriptor, and final-component symlinks were being
+  resolved away before validation.
+- Impact: a same-owner concurrent edit or interruption could lose the previous
+  ledger, publish unverified bytes, or redirect state through a symlink even
+  though normal tests remained green.
+- Follow-up: bind generated bytes to their open-file identity, validate both
+  sides after publication, never unlink any pathname that might contain
+  exchanged or substituted state, quarantine prior ledgers under unique
+  private names, preserve recovery paths across fsync failures, and resolve
+  only the state path's parent. Also reject non-scalar Unicode and classify
+  transient SQLite failures at every lazy-read boundary.
+- Status: 949 tests, docs build, a real 1,619-item Atlas first/unchanged pair,
+  and byte-identical second-run ledger hash passed; Pi round 8 returned CLEAN.
