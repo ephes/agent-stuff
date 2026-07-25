@@ -26,6 +26,35 @@ Project-specific execution lessons belong in the project repo, not here.
 - Status:
 ```
 
+## 2026-07-25 - Safety Specs Need Identities And Choreography, Not Adjectives
+
+- Repo: daybook Apple Photos archive/render preparation planning.
+- Goal or slice: converge completed discovery documentation and define the
+  next non-destructive implementation handoff.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: explicit selection, plan-by-default operation, verified Fractal
+  packages, pinned quality, and no Photos mutation would be enough to make the
+  next slice implementation-ready.
+- Actual: three reviews found nine, four, and five warnings where words such as
+  “mounted,” “pinned,” “idempotent,” and “verified” still hid implementation
+  choices: persistent versus transient mount identity, lock/token choreography,
+  package/adoption schemas, reproducible and use-time tool identity,
+  deterministic metadata/raster mapping, SMB normalization/fsync publication,
+  recovery-schema boundaries, partial batches, and privacy/process tests.
+- Impact: a fresh implementer would have had to invent safety-critical behavior
+  despite the handoff appearing detailed.
+- Fix or follow-up: planning for durable filesystem workflows must define
+  closed schemas, exact persistent identities, transient run tokens, lock
+  lifetimes, commit points, crash/adoption evidence, bounded tools, and
+  fail-fast/resume semantics. Treat existing patterns as evidence to inspect,
+  not automatically reusable primitives.
+- Status: all 18 findings were accepted and the documentation was tightened.
+  The bounded three-cycle gate ended with the five final fixes not re-reviewed,
+  so the slice is not independently CLEAN. After that limitation and the final
+  fixes were reported, the user explicitly directed the synchronized
+  documentation to be committed.
+
 ## 2026-07-25 - Finish Review-Clean Automation With Its Real GUI Context
 
 - Repo: daybook, ops-library, and ops-control Apple Photos discovery rollout.
