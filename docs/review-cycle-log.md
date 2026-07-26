@@ -2386,3 +2386,56 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   and keep credential values out of diagnostics.
 - Status: corrected without modifying either application repository; the
   approved model preflighted successfully and plan review round 1 completed.
+
+## 2026-07-26 - A Backgrounded Pi Implementer Needs Its Own Watchdog
+
+- Repo: podcast platform refactoring plan (RP-0..RP-12 slice execution).
+- Goal or slice: drive Pi as the per-slice implementer with a fresh-context Pi
+  review gate before each commit.
+- Implementer: Pi using `openai-codex/gpt-5.6-terra`.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol` via `pi-review-loop`.
+- Expected: moving the implementer call to a background job would only remove
+  the 10-minute foreground cap that had already truncated one run.
+- Actual: the review-fix invocation wedged with an empty log and zero file
+  writes, and stayed wedged for about eight hours. Liveness checks kept passing
+  because the process existed, so the supervising agent repeatedly reported the
+  slice as in flight. The foreground cap had been the only stall detector, and
+  backgrounding removed it without replacing it.
+- Impact: roughly eight hours of wall clock lost on a single slice; no code was
+  corrupted and the slice's implementation, tests, and docs survived intact.
+  Same failure family as the previously recorded empty-log wrapper hangs, but on
+  the implement path rather than the review path.
+- Fix or follow-up: `pi-review-loop` already supervises the reviewer, so only
+  the implementer path was unguarded. Wrap every noninteractive implementer call
+  in `timeout` with a hard cap, and supervise it with an activity watch that
+  trips on absence of file writes rather than absence of a process. Treat
+  "process alive" as no evidence of progress, and never report a slice as
+  progressing from a liveness check alone.
+- Status: process killed and reissued under `timeout` plus a file-write activity
+  monitor; the slice's other gates were unaffected.
+
+## 2026-07-26 - Fresh-Context Review Caught What A Green Suite Could Not
+
+- Repo: podcast platform refactoring plan (RP-0..RP-12 slice execution).
+- Goal or slice: first two slices of a 13-slice refactoring plan derived from a
+  cross-cutting code review.
+- Implementer: Pi using `openai-codex/gpt-5.6-terra`.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol` via `pi-review-loop`.
+- Expected: the review gate would mostly catch style and consistency issues,
+  with the test suites carrying correctness.
+- Actual: both slices passed their full suites and still produced a substantive
+  round-1 finding. A tooling slice shipped an `--update` flag that would have
+  silently adopted newly oversized files, so the documented remediation command
+  could be used to launder a genuine violation. A concurrency slice shipped a
+  cancellation race in which a SwiftUI `.task(id:)` replacement no-ops against a
+  load key claimed by the task it just cancelled, stranding the load until the
+  user navigates away and back.
+- Impact: neither defect was reachable from the test suites, which were green at
+  1,275 tests and 19 tests respectively. Both would have shipped.
+- Fix or follow-up: keep the review gate mandatory even when suites are green,
+  and prefer a structural directive over point patches when a finding exposes a
+  wrong idiom — here, reusing the codebase's existing stored-`Task` coalescing
+  pattern rather than adding cancellation checks. Independently re-run the
+  implementer's claimed verification rather than trusting the report.
+- Status: first slice fixed and re-reviewed CLEAN, then committed; second slice's
+  fix in progress.

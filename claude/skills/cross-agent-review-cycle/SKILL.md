@@ -61,6 +61,26 @@ Commit only when:
 If Critical or Warning findings remain after three cycles, do not commit
 without explicit user direction.
 
+## Supervising A Noninteractive Implementer
+
+The review harnesses supervise the reviewer. Nothing supervises an implementer
+driven noninteractively in the same loop, so it needs its own guard.
+
+- Wrap every noninteractive implementer invocation in `timeout` with a hard cap.
+  Never rely on a foreground command cap as the stall detector: moving the call
+  to a background job silently removes it.
+- Supervise progress by observed work — new or modified files — not by process
+  liveness. A wedged agent keeps its process, so `pgrep` succeeding is not
+  evidence of progress. An observed hang produced an empty log and zero file
+  writes for about eight hours while liveness checks kept passing.
+- Treat "no output and no file writes" as failure, and say so, rather than
+  reporting the slice as still in flight.
+- This is the same failure family as the empty-log wrapper hangs already
+  recorded for the Pi review branch below; both paths need a bounded wait.
+
+Independently re-run the implementer's claimed verification before the review
+gate. Implementer reports of green suites have proven wrong in practice.
+
 ## Reviewer Procedure
 
 1. Resolve the reviewer branch first, then build the matching prompt described in
