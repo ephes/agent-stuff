@@ -90,6 +90,90 @@ worktree after any external reviewer session.
 - Status:
 ```
 
+## 2026-07-26 - Freeze The Diff Before Asking For A Review
+
+- Repo: daybook Apple Photos archive/render preparation, Slices 2-4.
+- Goal or slice: implement the toolchain fence, rendition pipeline, Fractal
+  publisher, and the `--execute` orchestration.
+- Implementer: Claude.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: running reviews in the background while continuing to write the next
+  slice would use the waiting time productively.
+- Actual: each review bundle was captured at launch, so every round reviewed a
+  *different, larger* diff than the last. Finding counts never converged — a
+  later round returned six findings where an earlier one had returned three,
+  because a whole new slice had landed in between. Two rounds also reported
+  Criticals that were already stale by the time the verdict arrived: one named a
+  function that had since been written, another a docs/code mismatch that had
+  been partly fixed. Both still had to be checked by hand rather than assumed
+  stale, and one turned out to be half real — the roadmap genuinely had not been
+  updated.
+- Impact: roughly twice the review rounds the work needed, plus wasted effort
+  triaging findings against code that no longer existed.
+- Fix or follow-up: freeze the change set before requesting a review. Drive one
+  slice to CLEAN and commit it before starting the next. If waiting time must be
+  used, spend it on documentation, self-review, or reading — not on new code in
+  the same repository. When a verdict does look stale, verify against the
+  current tree rather than dismissing it.
+- Status: adopted mid-project once the pattern became clear; the remaining
+  rounds reviewed a frozen diff.
+
+## 2026-07-26 - A Three-Cycle Cap Can Hide A Critical
+
+- Repo: daybook Apple Photos archive/render preparation, Slices 1-3.
+- Goal or slice: implement the closed schemas and write-free plan, then the
+  pinned toolchain, rendition pipeline, and Fractal publisher.
+- Implementer: Claude.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: the installed review skill's three-cycle cap would be enough to
+  reach a clean gate, as it had been for earlier slices.
+- Actual: Slice 1 needed twelve substantive rounds. Rounds 4-12 found nineteen
+  further defects in code three prior rounds had already read, including a
+  Critical path-anchor bypass. Two of the findings were regressions introduced
+  by the implementer's own earlier fixes: a symlink hardening step added a
+  destination `realpath` that violated the slice's own no-mount-probe rule, and
+  a later output-ceiling fix used a child-side `RLIMIT_FSIZE` that would have
+  truncated legitimate multi-megabyte encoder artifacts. A later round on the
+  rendition pipeline found a Critical that would have rejected every rendition.
+- Impact: stopping at three cycles would have shipped a Critical and several
+  real safety holes while the gate looked converged; findings per round never
+  trended to zero on their own.
+- Fix or follow-up: treat the cap as a checkpoint for asking, not a definition
+  of clean. Report the finding-count trend to the user and request explicit
+  direction to continue. Re-review after every fix round, because fixes to
+  hardening code are themselves a common source of new defects.
+- Status: the user authorized looping past the cap; Slice 1 reached CLEAN at
+  round 13 over the full scope and was committed with synchronized docs.
+
+## 2026-07-26 - Check A Safety Spec Against The Real Environment Early
+
+- Repo: daybook Apple Photos archive/render preparation toolchain.
+- Goal or slice: pin the preparation toolchain by digest and reject anything
+  that is not the exact recorded install.
+- Implementer: Claude.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: the specification's strict path and identity rules could be
+  implemented literally.
+- Actual: two rules were unsatisfiable against a real install. Rejecting
+  dot-dot paths in the Python distribution `RECORD` would fail on every package
+  with a console script, because packaging tools always record it as
+  `../../../bin/<name>`. Requiring a no-follow open of each pinned executable
+  would reject the specification's own example path, because package managers
+  expose binaries through a symlink farm. A third assumption was also wrong: the
+  encoder the specification pins is not installed and is not what a similarly
+  named system binary provides.
+- Impact: a literal implementation would have failed closed permanently, and a
+  careless one would have silently accepted a different encoder whose measured
+  results do not transfer.
+- Fix or follow-up: probe the actual environment for every pinned identity
+  before writing the validator. Preserve the rule's intent rather than its
+  letter — enforce containment on the resolved path, and pin the resolved
+  target's content identity while still re-traversing its parents no-follow.
+  Record each deviation in the specification instead of leaving it implicit.
+- Status: implemented with both deviations documented; the missing encoder and a
+  share mounted under an IP literal rather than its canonical DNS name are
+  reported as blockers for any live pilot.
+
 ## 2026-07-25 - Safety Specs Need Identities And Choreography, Not Adjectives
 
 - Repo: daybook Apple Photos archive/render preparation planning.
