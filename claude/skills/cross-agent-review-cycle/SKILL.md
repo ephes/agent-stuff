@@ -243,13 +243,21 @@ correctly and it hung only at exit.
    before retrying. Tmux exits without taking its child with it.
 
 4. For the Codex/Pi tmux branches only, poll the log file until the reviewer
-   prints the required completion sentinel. With one-shot `-p`, the prompt is
-   not echoed, so one sentinel match is enough.
+   prints the required completion sentinel. **How many matches to require
+   depends on the branch, and getting it wrong ends the poll on the prompt
+   instead of the report:**
+
+   - `pi -p` does not echo the prompt. One match is enough.
+   - `codex exec` **does** echo the full prompt into the log before running, so
+     the sentinel appears once as prompt text within seconds. Require at least
+     two matches, and treat a match inside the first few seconds as the echo.
+
+   Substitute the branch's threshold for `2` below.
 
    ```bash
    completed=0
    for _ in $(seq 1 180); do
-       if [ -f "$log_file" ] && grep -Fq '=== REVIEW COMPLETE ===' "$log_file"; then
+       if [ -f "$log_file" ] && [ "$(grep -Fc '=== REVIEW COMPLETE ===' "$log_file")" -ge 2 ]; then
            tail -200 "$log_file"
            completed=1
            break

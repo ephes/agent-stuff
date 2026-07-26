@@ -28,6 +28,52 @@ without a verdict as an invalid cycle rather than a pass; treat provider
 overload and auth failure as infrastructure blockers, not findings; audit the
 worktree after any external reviewer session.
 
+## 2026-07-26 - Codex Exec Echoes The Prompt, So One Sentinel Is Not Enough
+
+- Repo: agent-stuff shared-review-harness plan review.
+- Goal or slice: four Codex review rounds over a refactoring plan.
+- Implementer: Claude / Opus 5.
+- Reviewer: Codex / gpt-5.6-sol at high reasoning.
+- Expected: the skill's poll loop says one sentinel match suffices for one-shot
+  `-p` reviewers, so the same rule was applied to the `codex exec` branch.
+- Actual: `codex exec` prints its full prompt into the log before running, so the
+  sentinel matched within 10 seconds on round 1 — prompt text, not a report. The
+  real report arrived at ~580 seconds.
+- Impact: caught immediately because a 10-second review is implausible, but the
+  documented rule would have accepted the echo as a completed cycle.
+- Fix or follow-up: the polling threshold is branch-specific. `pi -p` does not
+  echo and needs one match; `codex exec` echoes and needs at least two. Fixed in
+  both `cross-agent-review-cycle` mirrors, including the example loop.
+- Status: fixed in the skill.
+
+## 2026-07-26 - Plan Review Found Live Bugs In Shipped Harness Code
+
+- Repo: agent-stuff, review of `docs/plans/2026-07-26-shared-review-harness.md`.
+- Goal or slice: converge a refactoring plan before implementing it.
+- Implementer: Claude / Opus 5.
+- Reviewer: Codex / gpt-5.6-sol, four rounds.
+- Expected: reviewing a planning document would surface scope and sequencing
+  problems.
+- Actual: rounds 1-3 produced 1 Critical, 19 Warnings, and 4 Suggestions, and two
+  findings were defects in already-shipped code rather than plan defects: both
+  runners call `_kill_group` only when `proc.poll()` reports the leader alive, so
+  a wrapper that emits a verdict, forks a surviving descendant, and exits
+  normally is reported clean with the descendant running; and both bundles
+  `lstat` a path and then open it by name, for untracked files and for explicit
+  context files, so a swap between the two calls can follow a symlink or block on
+  a FIFO. Round 4 returned zero findings and confirmed convergence.
+- Impact: the plan changed shape entirely — a five-phase structural
+  consolidation became safety-parity-first with extraction deferred behind a
+  decision-record gate — and two orphan/exfiltration classes the harnesses exist
+  to prevent are now scheduled to be fixed on both sides.
+- Fix or follow-up: review plans against the code, not only for internal
+  coherence; ask the reviewer to verify the plan's factual claims. Every finding
+  was independently verified against the source before acceptance, which is what
+  made adopting all of them safe. When asking whether a loop has converged, ask
+  explicitly and permit a zero-finding answer, or the reviewer will keep
+  producing material.
+- Status: plan converged and committed; implementation follows.
+
 ## Entry Template
 
 ```md
