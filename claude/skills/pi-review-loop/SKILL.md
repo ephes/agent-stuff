@@ -73,6 +73,19 @@ implement and fix; Pi reviews with fresh context.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering — do not chase every nit).
 
+## Environment isolation
+
+Every Pi subprocess the harness starts — the model preflight and the reviewer —
+runs with `PI_CODING_AGENT_DIR` pinned rather than inherited, and with an
+inherited `CODEX_HOME` stripped. Pi reads its credential store from that
+directory, so a value exported by an unrelated workspace has blocked the gate
+before any reviewer started: once by loading a different account so the approved
+model was never listed, once by crashing on a foreign `auth.json` schema.
+
+The pinned default is `~/.pi/agent`. Set `PI_REVIEW_AGENT_DIR` to point review
+subprocesses somewhere else deliberately; that override is honored, ambient
+`PI_CODING_AGENT_DIR` is not.
+
 ## Useful flags
 
 `--model <id>` exists for explicitness but accepts only

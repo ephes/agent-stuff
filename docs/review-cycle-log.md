@@ -10,6 +10,24 @@ secrets, credentials, or large tool output.
 
 Project-specific execution lessons belong in the project repo, not here.
 
+## Superseded: Direct Claude Review Transports
+
+Entries about driving a Claude reviewer directly — `--tools ""` no-tools
+prompts, `--permission-mode plan`, tmux paste/sentinel polling, prompt-echo
+sentinel counting, readiness-glyph matching, stdin redirection, and the
+missing-sentinel and status-143 failures around them — describe a workflow that
+no longer exists. `claude-review-loop` replaced it, and
+`cross-agent-review-cycle` now forbids those paths outright.
+
+They are retained as incident history. Do not mine them for current guidance,
+and do not port their fixes into skills. Their durable content is already
+consolidated in the four `2026-07-10 - Consolidated:` entries.
+
+Still live from that era, because they are transport-independent: treat a review
+without a verdict as an invalid cycle rather than a pass; treat provider
+overload and auth failure as infrastructure blockers, not findings; audit the
+worktree after any external reviewer session.
+
 ## Entry Template
 
 ```md

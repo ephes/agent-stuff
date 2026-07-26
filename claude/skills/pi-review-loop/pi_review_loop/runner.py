@@ -9,6 +9,7 @@ import subprocess
 import time
 import traceback
 
+from .env import pi_env
 from .monitor import Monitor
 from .result import ReviewResult
 from .states import CRASHED
@@ -115,10 +116,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         "stderr": "stderr.log", "result": "result.json"}.items()}
 
     started = _now()
-    sub_env = dict(os.environ)
-    sub_env.update({"PI_SKIP_VERSION_CHECK": "1", "PI_TELEMETRY": "0"})
-    if env:
-        sub_env.update(env)
+    sub_env = pi_env(env)
 
     monitor = Monitor(started_at=started, stall_timeout=stall_timeout,
                       retry_grace=retry_grace, global_deadline=global_deadline)

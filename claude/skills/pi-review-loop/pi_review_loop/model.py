@@ -7,6 +7,8 @@ rejected instead of being treated as fallbacks.
 import re
 import subprocess
 
+from .env import pi_env
+
 DEFAULT_MODEL = "openai-codex/gpt-5.6-sol"
 
 
@@ -100,6 +102,7 @@ def resolve_from_cli(fallback=DEFAULT_MODEL, timeout=30,
         proc = subprocess.run(
             ["pi", "--list-models", "gpt"],
             capture_output=True, text=True, timeout=timeout, check=False,
+            env=pi_env(),
         )
         # pi writes the table to stderr; combine both streams so the parser
         # handles whichever stream a future version may use.
@@ -149,6 +152,7 @@ def ensure_model_available(model_pattern, timeout=30):
         proc = subprocess.run(
             ["pi", "--list-models", "gpt"],
             capture_output=True, text=True, timeout=timeout, check=False,
+            env=pi_env(),
         )
         out = proc.stdout + proc.stderr
     except OSError as e:

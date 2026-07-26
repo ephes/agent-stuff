@@ -78,8 +78,21 @@ driven noninteractively in the same loop, so it needs its own guard.
 - This is the same failure family as the empty-log wrapper hangs already
   recorded for the Pi review branch below; both paths need a bounded wait.
 
-Independently re-run the implementer's claimed verification before the review
-gate. Implementer reports of green suites have proven wrong in practice.
+`pi --print` sometimes never exits, and its wrapper outlives it. Because Pi
+buffers its summary until the end, the log stays empty either way — so an empty
+log distinguishes nothing on its own. Observed three times: once before any work
+was done, and once after the implementation, tests, and docs were all written
+correctly and it hung only at exit.
+
+- The working tree is the evidence, not the report. Adjudicate a missing report
+  by inspecting what is actually on disk.
+- A missing report means the slice is unverified, not that it is finished and
+  not that it is empty. Read the diff yourself and re-run the verification
+  before the review gate, then use a fresh bounded session only for whatever is
+  genuinely missing.
+- Independently re-run the implementer's claimed verification even when a report
+  does arrive. Reports of green suites have proven wrong in practice.
+- Kill the orphan before starting anything else.
 
 ## Reviewer Procedure
 
@@ -152,8 +165,13 @@ gate. Implementer reports of green suites have proven wrong in practice.
                echo "pi reviewer unavailable: pi command not found on PATH" | tee "$log_file"
                exit 127
            end
-           set pi_models (env PI_TELEMETRY=0 pi --list-models gpt 2>&1 | string collect)
+           set pi_models (env PI_CODING_AGENT_DIR=$HOME/.pi/agent PI_TELEMETRY=0 \
+             timeout 60 pi --list-models gpt 2>&1 | string collect)
            set pi_models_status $pipestatus[1]
+           if test $pi_models_status -eq 124
+               echo "pi model-list preflight timed out after 60s; no review cycle was consumed. Verify the model directly in a PTY, then rerun a fresh runner." | tee "$log_file"
+               exit 69
+           end
            if test $pi_models_status -ne 0
                echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
                printf "%s\n" "$pi_models" | tee -a "$log_file"
@@ -174,7 +192,8 @@ gate. Implementer reports of green suites have proven wrong in practice.
                exit 69
            end
            set reviewer_model "$reviewer_model_lookup"
-           env PI_TELEMETRY=0 pi -p --no-session --no-context-files --approve \
+           env PI_CODING_AGENT_DIR=$HOME/.pi/agent PI_TELEMETRY=0 \
+             pi -p --no-session --no-context-files --approve \
              --model "$reviewer_model" --thinking high \
              --tools read,grep,find,ls @"$prompt_file" > "$log_file" 2>&1
        case '*'
@@ -204,6 +223,24 @@ gate. Implementer reports of green suites have proven wrong in practice.
    means `pi` was not on PATH, and exit `69` means this environment could not
    list the authenticated approved model. Report that blocker instead of
    treating the review as queued or clean.
+
+   Both Pi commands pin `PI_CODING_AGENT_DIR` explicitly. Pi reads its
+   credential store from that directory, and a value exported by an unrelated
+   workspace has twice blocked the gate before any reviewer started — once by
+   loading another account so the approved model was not listed, once by
+   crashing on a foreign `auth.json` schema. Never let it be inherited.
+
+   The model-list preflight is wrapped in `timeout` because it is the step that
+   strands the gate: captured through Fish it has hung with an empty log while
+   the same listing returned immediately in a direct PTY. A preflight timeout
+   consumes no review cycle — verify the model directly, then start a fresh
+   runner at the review command itself. Do not extend the timeout to `pi -p`
+   itself; the harness deadlines own that. This uses GNU coreutils `timeout`
+   (exit `124`); on a host without it, bound the preflight some other way rather
+   than dropping the bound.
+
+   After any pre-sentinel failure, check for an orphaned `pi` process group
+   before retrying. Tmux exits without taking its child with it.
 
 4. For the Codex/Pi tmux branches only, poll the log file until the reviewer
    prints the required completion sentinel. With one-shot `-p`, the prompt is
@@ -244,6 +281,25 @@ gate. Implementer reports of green suites have proven wrong in practice.
    Claude lifecycle cleanup belongs exclusively to `claude-review-loop`; do not
    recreate it with tmux polling.
 
+## Wrapper Shell Hazards
+
+Both of these have recurred after being recorded once, so treat them as rules
+rather than trivia.
+
+- Never name a wrapper variable `status`. It is read-only in zsh and the
+  assignment fails. Use `review_exit`.
+- Quote literal search patterns in single quotes. A pattern copied from
+  Markdown carries backticks, and inside double quotes the shell runs them as
+  command substitution — this started a full iOS test suite twice during
+  closeout checks and destroyed an in-progress result bundle both times. The
+  same applies to heredocs used to build prompts: quote the delimiter
+  (`<<'EOF'`) whenever the body contains code fences.
+
+Build prompts and runners as files with arguments passed positionally. Nested
+quoting inside a single `tmux new-session` string has repeatedly expanded in the
+outer shell before tmux started, producing a pane that exits before the reviewer
+launches.
+
 ## Review Prompt Contents
 
 For Claude, `--context-file` is a trusted caller-authored region. Include only:
@@ -266,7 +322,8 @@ include:
   allowed review
 - implementation intent and scope
 - relevant project instructions, specs, docs, or backlog item paths
-- touched files and what changed
+- touched files and what changed, including untracked files from
+  `git status --short --untracked-files=all`
 - verification commands already run and results
 - known trade-offs or explicit non-goals
 - prior findings and how they were addressed for re-reviews

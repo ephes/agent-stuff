@@ -69,6 +69,9 @@ Use this skill when the user asks for things like:
 
 - a one-line implementation task statement
 - an explicit statement that this is an implementation task, not a review task
+- an explicit ban on invoking any coding agent or reviewer command, and a
+  statement that a self-produced verdict will be discarded (an implementer with
+  shell access has run an unsolicited review and cited it as the gate)
 - a short statement of the implementation scope and why that is the scope now
 - the primary repo or subdirectory scope
 - context files or docs to load first
@@ -105,6 +108,8 @@ The generated prompt should follow this structure. Adapt the content to the actu
 
 ```text
 You are implementing the work described below. This is an implementation task, not a review task. Read this context before writing code. Inspect the actual code before choosing an approach or design.
+
+Do not invoke any coding agent or reviewer command — no `pi`, `claude`, `codex`, no yolo wrappers, no review-loop harness, no review skill. Review is orchestrated separately and independently. If you believe this work needs review, say so in your report and stop; a verdict you produce yourself does not count and will be discarded.
 
 ## Goal
 
