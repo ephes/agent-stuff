@@ -1,14 +1,16 @@
 ---
 name: claude-review-loop
-description: Run a bounded, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model and strict read-only isolation. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive fix and re-review rounds until the configured reviewer returns CLEAN.
+description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model and strict read-only isolation. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive valuable fix and re-review rounds until the configured reviewer returns CLEAN or further review no longer adds material value.
 ---
 
 # Claude Review Loop
 
-Run a bounded review cycle: hand the current git worktree delta to the configured
-Claude Code model as a fresh-context reviewer, read its structured verdict, and
-only continue when it is `CLEAN`. Default to `opus`; select another model with
-`--model` or the calling workflow's `REVIEWER_MODEL`.
+Run a progress-driven review cycle: hand the current git worktree delta to the configured
+Claude Code model as a fresh-context reviewer and read its structured verdict.
+Treat unresolved Critical/Warning findings as fail-closed; treat Suggestions
+proportionately and stop cycling when further review no longer adds material
+value. Default to `opus`; select another model with `--model` or the calling
+workflow's `REVIEWER_MODEL`.
 The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Claude is stuck. A hung or blocked spawned review is detected,
 killed, and recorded in a structured result. Pre-spawn non-empty-run-directory
@@ -119,23 +121,21 @@ are not allowed. Separate harness invocations may run concurrently.
      `--max-concurrent`. Any later attempt must use a fresh `--run-dir` because
      bundle artifacts were already written before slot acquisition.
 
-4. Before the first review, establish one outer bound for the complete loop:
-   use the calling workflow's remaining time budget when it has one, otherwise
-   use an explicit caller-provided round cap, otherwise default to 6 review
-   rounds. A time budget must retain enough margin for the next fix, required
-   checks, and fresh review; do not start a cycle that cannot fit.
+4. Drive fix/re-review rounds while they add material value. Do not impose a
+   default or absolute round cap. If review 20 still produces useful new
+   evidence or materially improves the change, perform review 20. A real
+   caller-provided time or cost budget may constrain the loop, but absent such
+   a constraint, round count alone is never a stopping reason.
 
-   Within that bound, drive fix/re-review rounds under the stopping conditions
-   below. Do not stop merely because one attempted fix round made no progress.
-   Round 3 is not a special stopping point: a new
-   Critical/Warning found there or later must be fixed and reviewed again when
+   Do not stop merely because one attempted fix round made no progress. A new
+   Critical/Warning found in any round must be fixed and reviewed again when
    time and authority remain. Re-run the caller's required checks after every
    material fix before starting the next fresh review.
 
    Treat a round as progress when the previous findings were addressed and the
    remaining findings are new, narrower, or supported by new evidence. Stop and
-   report the exact outstanding items only when one of these bounded conditions
-   applies:
+   report the exact outstanding items only when one of these value-based
+   conditions applies:
 
    - the same substantive required finding survives two consecutive attempted
      fix rounds without new evidence or a narrower failure;
@@ -143,17 +143,19 @@ are not allowed. Separate harness invocations may run concurrently.
    - the fix needs scope or authority the caller did not grant;
    - after one fresh review with the recorded disposition as context, the only
      remaining items are the same already-declined Suggestions; or
-   - the established outer bound cannot fit another fix, checks, and fresh
-     review.
+   - the remaining findings are Suggestions and an explicit proportionality
+     decision concludes that another fix/re-review cycle would not materially
+     improve confidence or the change; or
+   - a real caller-provided time or cost budget cannot fit another fix, checks,
+     and fresh review.
 
    For Suggestion-only verdicts, make an explicit proportionality decision:
    implement in-scope suggestions that materially improve the change, or record
    a concise reason for declining them. A declined Suggestion is still not
-   `CLEAN`; when the calling workflow requires CLEAN, include the disposition as
-   review context and continue or stop under the bounded conditions above. Only
-   a calling workflow that explicitly permits advisory findings may accept a
-   Suggestion-only verdict, and it must record that decision rather than
-   relabelling the review CLEAN.
+   `CLEAN`; include the disposition in the next review context when another
+   review would add value. A Suggestion-only verdict may be accepted as advisory
+   after recording the proportionality decision. Never relabel an advisory
+   verdict as `CLEAN`.
 
 ## Timing and Retry Policy
 
