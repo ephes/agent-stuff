@@ -2503,3 +2503,78 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   implementer's claimed verification rather than trusting the report.
 - Status: first slice fixed and re-reviewed CLEAN, then committed; second slice's
   fix in progress.
+
+## 2026-07-27 - Verify That Your Assertion Can Fail Before Trusting It Green
+
+- Repo: podcast platform refactoring plan (RP-0..RP-12 slice execution).
+- Goal or slice: a 13-slice refactoring derived from a cross-cutting code review,
+  implemented by Claude with a fresh-context Pi review gate per slice.
+- Implementer: Claude.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol` via `pi-review-loop`.
+- Expected: tests written alongside each slice would establish that the slice's
+  central claim held.
+- Actual: at least three assertions passed while the thing they guarded was
+  broken. A ranking-equivalence test compared two empty result sets and passed on
+  `0 == 0`, because the fixture never produced an eligible candidate. A
+  performance test compared a counter that was never incremented, so it asserted
+  `0 == 0` too. A third compared two instances of the NEW implementation, so it
+  structurally could not detect divergence from the OLD one the slice claimed to
+  preserve. In each case the review caught what the green test did not.
+- Impact: the "optimisation" in one slice was a copy-on-write clone that made the
+  operation exactly as expensive as what it replaced, while every correctness
+  test passed. Without the review gate all three would have shipped as verified.
+- Fix or follow-up: before trusting a green assertion, make it fail on purpose —
+  break the implementation, confirm the test reports it, restore. Add an explicit
+  non-vacuity guard (assert the fixture produced a non-empty result, assert an
+  instrumentation counter actually moves) so the test cannot silently degrade
+  later. Write the assertion from the requirement, not from the code just
+  written: an assertion derived from the implementation encodes the same blind
+  spot. **A mutation only validates an assertion if it reproduces the ORIGINAL
+  defect** — one attempt here changed something adjacent, passed, and nearly
+  caused a good test to be discarded as worthless.
+- Status: all three assertions rewritten with non-vacuity guards and confirmed to
+  fail against a deliberately broken implementation.
+
+## 2026-07-27 - Gates Chained Onto A Commit Command Are Not Gates
+
+- Repo: podcast platform refactoring plan (RP-0..RP-12 slice execution).
+- Implementer: Claude.
+- Expected: `just size-check && just docs-check && git commit ...` would prevent a
+  commit whenever a gate failed.
+- Actual: two commits landed with a failing gate. Once from `;` instead of `&&`,
+  and once from `just docs-check 2>&1 | tail -1 && ... && git commit`, where the
+  pipe makes the exit status that of `tail`, which is always zero. Both produced a
+  commit that the developer believed was verified. This is the same family as the
+  already-recorded "do not rely on zero pipeline status as review completion", but
+  on the commit path rather than the review path.
+- Impact: one commit had to be amended after an independent ratchet check caught
+  the violation; the other was caught only by re-reading output.
+- Fix or follow-up: never place a verification pipeline in the same `&&` chain as
+  the commit. Run gates as their own command, read the result, then commit. Never
+  pipe a gate whose exit status matters. Prefer at least one gate that is
+  independent of the agent's own discipline — a ratcheting check that fails the
+  build caught the author's own regression three times in this run, including once
+  where the author had just written the check.
+- Status: both commits corrected; gates now run separately from the commit.
+
+## 2026-07-27 - DEBUG-Only Verification Cannot See Release-Only Breaks
+
+- Repo: podcast platform refactoring plan (RP-0..RP-12 slice execution).
+- Implementer: Claude.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: a full simulator unit-test suite plus lint/docs gates would catch
+  compilation problems.
+- Actual: a `#if DEBUG` stored property was passed through a struct's memberwise
+  initializer. That compiles in DEBUG and fails in Release, because the
+  initializer's signature differs by build configuration. Every gate run that day
+  was DEBUG — 1,281 simulator tests, scoped runs, lint, docs — and none could see
+  it. The review caught it.
+- Impact: would have broken the release build.
+- Fix or follow-up: build the release configuration at least once per slice that
+  touches conditionally-compiled code, and treat "which configurations has this
+  actually been compiled in?" as a distinct question from "do the tests pass?".
+  Note the platform caveat: a Release build may also surface unrelated
+  environment failures (here, a prebuilt xcframework missing an architecture), so
+  confirm the compile phase succeeded rather than reading only the final verdict.
+- Status: fixed by assigning the counter after construction under `#if DEBUG`;
+  Release build added to the per-slice gates for the remaining player slices.
