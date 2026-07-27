@@ -18,7 +18,8 @@ class BundleResult:
 
 def _git(repo, *args, replacement_log):
     env = dict(os.environ, LC_ALL="C", LANG="C")
-    completed = subprocess.run(["git", *args], cwd=repo, check=True,
+    completed = subprocess.run(["git", "--no-optional-locks", *args],
+                               cwd=repo, check=True,
                                capture_output=True, env=env)
     # Decode explicitly after byte capture: subprocess text mode performs
     # universal-newline conversion, which would turn repository-controlled lone
@@ -199,7 +200,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
             lines_.append(f"- {item['path']} ({detail})")
         sections.append((4, "Skipped files", "\n".join(lines_)))
 
-    for context_path in context_files or []:
+    for context_index, context_path in enumerate(context_files or [], start=1):
         if is_secret_path(context_path):
             raise OSError(
                 f"explicit context file has a secret-looking path: {context_path}"
@@ -232,9 +233,15 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 f"explicit context file is not UTF-8: {context_path}"
             ) from exc
         content, changed = redact_text(decoded)
+        context_label = f"[{context_index}] {os.path.basename(context_path)}"
         if changed:
-            redactions.append({"path": context_path, "section": "review context"})
-        title = f"Review context: {context_path}"
+            redactions.append(
+                {"path": context_label, "section": "review context"}
+            )
+        # Do not expose the caller's filesystem layout to the reviewer. Apart
+        # from leaking local path details, an absolute source path can invite
+        # the model to inspect the raw file or repository outside its sandbox.
+        title = f"Review context: {context_label}"
         context_titles.add(title)
         sections.append((0, title, content))
 

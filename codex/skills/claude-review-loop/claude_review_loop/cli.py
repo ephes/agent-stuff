@@ -8,7 +8,7 @@ import json
 
 from . import bundle as bundle_mod
 from . import model as model_mod
-from .lock import Lock, LockHeld
+from .lock import LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
 from .monitor import INSPECTION_TOOLS
@@ -86,13 +86,38 @@ SECRET_READ_DENIES = [
 EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
 
 
+def _positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be an integer")
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
 def _build_parser():
     p = argparse.ArgumentParser(prog="claude-review-loop",
                                 description="Run one isolated Claude review over a git diff.")
+    env_limit = os.environ.get("CLAUDE_REVIEW_MAX_CONCURRENT")
+    if env_limit is None:
+        default_max_concurrent = 3
+    else:
+        try:
+            default_max_concurrent = _positive_int(env_limit)
+        except argparse.ArgumentTypeError as exc:
+            p.error(
+                "CLAUDE_REVIEW_MAX_CONCURRENT="
+                f"{env_limit!r}: {exc}"
+            )
     p.add_argument("--repo", default=".")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--lock-dir",
-                   default=os.path.expanduser("~/.cache/claude-review-loop/lock"))
+                   default=os.path.expanduser("~/.cache/claude-review-loop/locks"),
+                   help="directory containing concurrent review slots")
+    p.add_argument("--max-concurrent", type=_positive_int,
+                   default=default_max_concurrent,
+                   help="maximum concurrent Claude review slots for this user")
     p.add_argument("--model", default=None,
                    help="Claude model id or alias (default: opus)")
     p.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
@@ -241,7 +266,7 @@ def _main(argv=None):
             "command": "claude-review-loop", "model": model, "run_dir": args.run_dir}
     lock = None
     try:
-        lock = Lock(args.lock_dir, meta)
+        lock = LockPool(args.lock_dir, meta, args.max_concurrent)
         lock.__enter__()
     except LockHeld as e:
         print(f"claude-review-loop: {e}", file=sys.stderr)

@@ -49,6 +49,50 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("CLEAN", proc.stdout)
 
+    def test_invalid_environment_concurrency_limit_fails_loudly(self):
+        env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+            CLAUDE_REVIEW_MAX_CONCURRENT="not-a-number",
+        )
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo,
+             "--run-dir", os.path.join(self.tmp.name, "invalid-limit-run"),
+             "--lock-dir", os.path.join(self.tmp.name, "invalid-limit-locks"),
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("CLAUDE_REVIEW_MAX_CONCURRENT='not-a-number'", proc.stderr)
+        self.assertIn("must be an integer", proc.stderr)
+        self.assertFalse(os.path.exists(
+            os.path.join(self.tmp.name, "invalid-limit-run")
+        ))
+
+    def test_zero_concurrency_limit_is_rejected(self):
+        env = dict(os.environ)
+        env.pop("CLAUDE_REVIEW_MAX_CONCURRENT", None)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo,
+             "--run-dir", os.path.join(self.tmp.name, "zero-limit-run"),
+             "--lock-dir", os.path.join(self.tmp.name, "zero-limit-locks"),
+             "--max-concurrent", "0",
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("must be >= 1", proc.stderr)
+
+    def test_default_concurrency_limit_is_three(self):
+        from claude_review_loop import cli
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_REVIEW_MAX_CONCURRENT", None)
+            args = cli._build_parser().parse_args(["--run-dir", "unused"])
+        self.assertEqual(args.max_concurrent, 3)
+
     def test_non_opus_model_is_recorded_with_non_opus_effort_default(self):
         run_dir = os.path.join(self.tmp.name, "run-sonnet")
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
@@ -93,17 +137,18 @@ class TestCli(unittest.TestCase):
 
     def test_sigint_kills_reviewer_and_preserves_crashed_result(self):
         run_dir = os.path.join(self.tmp.name, "run-interrupt")
-        lock_dir = os.path.join(self.tmp.name, "lock-interrupt")
+        lock_pool_dir = os.path.join(self.tmp.name, "lock-interrupt")
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang")
         proc = subprocess.Popen(
             [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", run_dir,
-             "--lock-dir", lock_dir, "--model", "fake/model"],
+             "--lock-dir", lock_pool_dir, "--model", "fake/model"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
         )
         pgid = None
         try:
-            meta_path = os.path.join(lock_dir, "meta.json")
+            slot_dir = os.path.join(lock_pool_dir, "slot-0")
+            meta_path = os.path.join(slot_dir, "meta.json")
             for _ in range(100):
                 try:
                     with open(meta_path) as fh:
@@ -122,7 +167,7 @@ class TestCli(unittest.TestCase):
                 result = json.load(fh)
             self.assertEqual(result["state"], "CRASHED")
             self.assertIn("interrupted by user", result["error"])
-            self.assertFalse(os.path.exists(lock_dir))
+            self.assertFalse(os.path.exists(slot_dir))
             with self.assertRaises(ProcessLookupError):
                 os.killpg(pgid, 0)
         finally:
@@ -136,19 +181,77 @@ class TestCli(unittest.TestCase):
                     pass
 
     def test_lock_held_exit_three(self):
-        lock_dir = os.path.join(self.tmp.name, "lock")
-        os.mkdir(lock_dir)
-        with open(os.path.join(lock_dir, "meta.json"), "w") as fh:
+        lock_pool_dir = os.path.join(self.tmp.name, "lock")
+        slot_dir = os.path.join(lock_pool_dir, "slot-0")
+        os.makedirs(slot_dir)
+        with open(os.path.join(slot_dir, "meta.json"), "w") as fh:
             fh.write('{"harness_pid": %d, "command": "claude-review-loop"}' % os.getpid())
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
             [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
              "--repo", self.repo, "--run-dir", os.path.join(self.tmp.name, "run"),
-             "--lock-dir", lock_dir, "--model", "fake/model"],
+             "--lock-dir", lock_pool_dir, "--max-concurrent", "1",
+             "--model", "fake/model"],
             capture_output=True, text=True, env=env,
         )
         self.assertEqual(proc.returncode, 3, proc.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "run", "result.json")))
+
+    def test_second_review_runs_while_first_review_is_active(self):
+        lock_pool_dir = os.path.join(self.tmp.name, "parallel-locks")
+        first_run_dir = os.path.join(self.tmp.name, "parallel-run-a")
+        second_run_dir = os.path.join(self.tmp.name, "parallel-run-b")
+        hanging_env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang",
+        )
+        first = subprocess.Popen(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", first_run_dir,
+             "--lock-dir", lock_pool_dir, "--max-concurrent", "2",
+             "--model", "fake/model"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=hanging_env,
+        )
+        pgid = None
+        try:
+            first_meta_path = os.path.join(lock_pool_dir, "slot-0", "meta.json")
+            for _ in range(100):
+                try:
+                    with open(first_meta_path) as fh:
+                        pgid = json.load(fh).get("claude_pgid")
+                except (OSError, ValueError):
+                    pass
+                if pgid:
+                    break
+                time.sleep(0.05)
+            self.assertTrue(pgid, "first reviewer process group was not recorded")
+
+            clean_env = dict(
+                os.environ,
+                CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+            )
+            second = subprocess.run(
+                [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+                 "--repo", self.repo, "--run-dir", second_run_dir,
+                 "--lock-dir", lock_pool_dir, "--max-concurrent", "2",
+                 "--model", "fake/model"],
+                capture_output=True, text=True, env=clean_env, timeout=10,
+            )
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+            self.assertIn("CLEAN", second.stdout)
+            self.assertIsNone(first.poll(), "first review should still be active")
+            self.assertTrue(os.path.isdir(os.path.join(lock_pool_dir, "slot-0")))
+            self.assertFalse(os.path.exists(os.path.join(lock_pool_dir, "slot-1")))
+        finally:
+            if first.poll() is None:
+                os.kill(first.pid, signal.SIGINT)
+                first.communicate(timeout=10)
+            if pgid:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_nonexistent_repo_exits_two_cleanly(self):
         missing = os.path.join(self.tmp.name, "does-not-exist")
@@ -297,7 +400,7 @@ class TestCli(unittest.TestCase):
         run_dir = os.path.join(self.tmp.name, "run9")
         failing_lock = mock.MagicMock()
         failing_lock.__enter__.side_effect = PermissionError("denied")
-        with mock.patch.object(cli, "Lock", return_value=failing_lock):
+        with mock.patch.object(cli, "LockPool", return_value=failing_lock):
             code = cli.main([
                 "--repo", self.repo, "--run-dir", run_dir,
                 "--lock-dir", os.path.join(self.tmp.name, "lock9"),

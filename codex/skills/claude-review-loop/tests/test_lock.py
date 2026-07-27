@@ -28,6 +28,18 @@ class TestLock(unittest.TestCase):
             self.assertEqual(meta["owner_token"], held.owner_token)
             self.assertEqual(meta["claude_pgid"], 12345)
 
+    def test_metadata_update_reports_changed_ownership_as_runtime_error(self):
+        held = lock.Lock(self.lock_dir, {"harness_pid": os.getpid()})
+        held.__enter__()
+        try:
+            meta = lock.read_meta(self.lock_dir)
+            meta["owner_token"] = "replacement-owner"
+            lock.write_meta(self.lock_dir, meta)
+            with self.assertRaisesRegex(RuntimeError, "ownership changed"):
+                held.update_meta({"claude_pgid": 12345})
+        finally:
+            held.__exit__(None, None, None)
+
     def test_meta_write_failure_cleans_only_owned_partial_lock(self):
         candidate = lock.Lock(self.lock_dir, {"claude_pgid": -1})
         with mock.patch.object(lock, "write_meta", side_effect=PermissionError("denied")):
@@ -167,6 +179,165 @@ class TestLock(unittest.TestCase):
                                         "command": "claude-review-loop"})
         with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
             self.assertTrue(os.path.isdir(self.lock_dir))
+
+    def test_pool_uses_next_slot_when_first_slot_is_held(self):
+        pool_dir = os.path.join(self.tmp.name, "pool")
+        first = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=2,
+        )
+        first.__enter__()
+        try:
+            with lock.LockPool(
+                pool_dir,
+                {"harness_pid": os.getpid()},
+                max_concurrent=2,
+            ) as second:
+                self.assertEqual(first.slot, 0)
+                self.assertEqual(second.slot, 1)
+                self.assertNotEqual(first.lock_dir, second.lock_dir)
+        finally:
+            first.__exit__(None, None, None)
+
+    def test_pool_skips_live_guard_with_displaced_slot_directory(self):
+        pool_dir = os.path.join(self.tmp.name, "displaced-slot-pool")
+        first = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=2,
+        )
+        first.__enter__()
+        displaced = first.lock_dir + ".displaced-by-test"
+        os.rename(first.lock_dir, displaced)
+        try:
+            with lock.LockPool(
+                pool_dir,
+                {"harness_pid": os.getpid()},
+                max_concurrent=2,
+            ) as second:
+                self.assertEqual(second.slot, 1)
+        finally:
+            first.__exit__(None, None, None)
+
+    def test_pool_raises_only_when_all_slots_are_held(self):
+        pool_dir = os.path.join(self.tmp.name, "full-pool")
+        first = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=1,
+        )
+        first.__enter__()
+        try:
+            with self.assertRaisesRegex(
+                lock.LockHeld, r"1 review slot\(s\) held, active limit 1"
+            ):
+                with lock.LockPool(
+                    pool_dir,
+                    {"harness_pid": os.getpid()},
+                    max_concurrent=1,
+                ):
+                    pass
+        finally:
+            first.__exit__(None, None, None)
+
+    def test_restrictive_live_holder_limits_other_invocations(self):
+        pool_dir = os.path.join(self.tmp.name, "restrictive-holder-pool")
+        with lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=1,
+        ):
+            with self.assertRaisesRegex(
+                lock.LockHeld, r"1 review slot\(s\) held, active limit 1"
+            ):
+                with lock.LockPool(
+                    pool_dir,
+                    {"harness_pid": os.getpid()},
+                    max_concurrent=3,
+                ):
+                    pass
+
+    def test_restrictive_incoming_limit_does_not_join_larger_pool(self):
+        pool_dir = os.path.join(self.tmp.name, "restrictive-incoming-pool")
+        first = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+        )
+        second = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+        )
+        first.__enter__()
+        second.__enter__()
+        try:
+            with self.assertRaisesRegex(
+                lock.LockHeld, r"2 review slot\(s\) held, active limit 1"
+            ):
+                with lock.LockPool(
+                    pool_dir,
+                    {"harness_pid": os.getpid()},
+                    max_concurrent=1,
+                ):
+                    pass
+        finally:
+            second.__exit__(None, None, None)
+            first.__exit__(None, None, None)
+
+    def test_pool_selection_guard_timeout_fails_as_contention(self):
+        pool_dir = os.path.join(self.tmp.name, "busy-selection-pool")
+        held = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+            selection_timeout=0,
+        )
+
+        def busy_selection(_fd, operation):
+            if operation == lock.fcntl.LOCK_EX | lock.fcntl.LOCK_NB:
+                raise BlockingIOError
+
+        with mock.patch.object(lock.fcntl, "flock", side_effect=busy_selection):
+            with self.assertRaisesRegex(lock.LockHeld, "slot selection busy"):
+                held.__enter__()
+
+    def test_pool_metadata_update_preserves_slot_metadata(self):
+        pool_dir = os.path.join(self.tmp.name, "metadata-pool")
+        with lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+        ) as held:
+            held.update_meta({"claude_pgid": 12345})
+            meta = lock.read_meta(held.lock_dir)
+            self.assertEqual(meta["lock_slot"], 0)
+            self.assertEqual(meta["max_concurrent"], 3)
+            self.assertEqual(meta["claude_pgid"], 12345)
+
+    def test_pool_exit_clears_local_ownership_state(self):
+        pool_dir = os.path.join(self.tmp.name, "cleared-state-pool")
+        held = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+        )
+        held.__enter__()
+        held.__exit__(None, None, None)
+        self.assertIsNone(held._lock)
+        self.assertIsNone(held.lock_dir)
+        self.assertIsNone(held.slot)
+
+    def test_unowned_pool_metadata_update_is_not_reported_as_contention(self):
+        pool_dir = os.path.join(self.tmp.name, "unowned-pool")
+        held = lock.LockPool(
+            pool_dir,
+            {"harness_pid": os.getpid()},
+            max_concurrent=3,
+        )
+        with self.assertRaisesRegex(RuntimeError, "unowned review slot"):
+            held.update_meta({"claude_pgid": 12345})
 
 
 if __name__ == "__main__":

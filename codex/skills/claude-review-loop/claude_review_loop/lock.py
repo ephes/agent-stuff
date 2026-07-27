@@ -1,16 +1,20 @@
-"""Atomic, global-per-user lock so only one Claude review runs at a time.
+"""Atomic, bounded per-user locks for concurrent Claude reviews.
 
-An OS advisory file lock serializes the full lifecycle; mkdir provides the
-visible ownership record. Proven-stale directories are atomically renamed to a
-unique tombstone before cleanup, and owner tokens protect metadata updates and
-release from deleting a replacement owner's lock.
+Each review acquires one slot from a shared pool. A short-lived pool guard
+serializes slot selection, while a per-slot advisory lock is held for the
+review's full lifecycle. Independent occupied slots therefore run concurrently.
+Proven-stale directories are atomically renamed to a unique tombstone before
+cleanup, and owner tokens protect metadata updates and release from deleting a
+replacement owner's lock.
 """
 import errno
 import fcntl
 import json
 import os
+import re
 import signal
 import subprocess
+import time
 import uuid
 
 META_NAME = "meta.json"
@@ -207,10 +211,10 @@ class Lock:
 
     def update_meta(self, updates):
         if not self.acquired:
-            raise LockHeld("cannot update an unowned review lock")
+            raise RuntimeError("cannot update an unowned review lock")
         current = read_meta(self.lock_dir)
         if current.get("owner_token") != self.owner_token:
-            raise LockHeld("review lock ownership changed before metadata update")
+            raise RuntimeError("review lock ownership changed before metadata update")
         self.meta.update(updates)
         self.meta["owner_token"] = self.owner_token
         write_meta(self.lock_dir, self.meta)
@@ -226,3 +230,134 @@ class Lock:
             self.acquired = False
             self._release_guard()
         return False
+
+
+class LockPool:
+    """Acquire one lifecycle slot without serializing unrelated reviews."""
+
+    def __init__(
+        self,
+        pool_dir,
+        meta,
+        max_concurrent=3,
+        selection_timeout=5.0,
+    ):
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+        if selection_timeout < 0:
+            raise ValueError("selection_timeout must be >= 0")
+        self.pool_dir = pool_dir
+        self.selection_guard_path = os.path.join(pool_dir, ".pool.guard")
+        self.meta = dict(meta)
+        self.max_concurrent = max_concurrent
+        self.selection_timeout = selection_timeout
+        self._lock = None
+        self.lock_dir = None
+        self.slot = None
+
+    def _active_slots(self):
+        active = []
+        highest_slot = -1
+        with os.scandir(self.pool_dir) as entries:
+            for entry in entries:
+                match = re.fullmatch(r"slot-(\d+)", entry.name)
+                if not match or not entry.is_dir(follow_symlinks=False):
+                    continue
+                slot = int(match.group(1))
+                highest_slot = max(highest_slot, slot)
+                if _reclaim_if_stale(entry.path):
+                    continue
+                if not os.path.isdir(entry.path):
+                    continue
+                meta = read_meta(entry.path)
+                try:
+                    recorded_limit = int(meta["max_concurrent"])
+                    if recorded_limit < 1:
+                        raise ValueError
+                except (KeyError, TypeError, ValueError):
+                    # Fail closed for old, malformed, or mid-write metadata.
+                    recorded_limit = 1
+                active.append((slot, recorded_limit))
+        return active, highest_slot
+
+    def _acquire_selection_guard(self, selection_fd):
+        deadline = time.monotonic() + self.selection_timeout
+        while True:
+            try:
+                fcntl.flock(selection_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise LockHeld(
+                        f"review slot selection busy: {self.pool_dir}"
+                    ) from exc
+                time.sleep(min(0.05, remaining))
+
+    def __enter__(self):
+        os.makedirs(self.pool_dir, exist_ok=True)
+        selection_fd = os.open(
+            self.selection_guard_path, os.O_CREAT | os.O_RDWR, 0o600
+        )
+        selection_acquired = False
+        try:
+            self._acquire_selection_guard(selection_fd)
+            selection_acquired = True
+            active, highest_slot = self._active_slots()
+            effective_limit = min(
+                [self.max_concurrent, *(limit for _, limit in active)]
+            )
+            if len(active) >= effective_limit:
+                raise LockHeld(
+                    f"{len(active)} review slot(s) held, "
+                    f"active limit {effective_limit}: {self.pool_dir}"
+                )
+
+            occupied = {slot for slot, _ in active}
+            search_span = max(self.max_concurrent, highest_slot + 1)
+            for slot in range(search_span):
+                if slot in occupied:
+                    continue
+                slot_dir = os.path.join(self.pool_dir, f"slot-{slot}")
+                slot_meta = {
+                    **self.meta,
+                    "lock_slot": slot,
+                    "max_concurrent": self.max_concurrent,
+                }
+                candidate = Lock(slot_dir, slot_meta)
+                try:
+                    candidate.__enter__()
+                except LockHeld:
+                    # A live per-slot guard can outlast a displaced directory.
+                    # Try another slot without misclassifying it as pool-wide
+                    # exhaustion.
+                    continue
+                self._lock = candidate
+                self.lock_dir = slot_dir
+                self.slot = slot
+                return self
+            raise LockHeld(
+                f"no selectable review slot among {search_span} candidates "
+                f"(active limit {effective_limit}): {self.pool_dir}"
+            )
+        finally:
+            try:
+                if selection_acquired:
+                    fcntl.flock(selection_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(selection_fd)
+
+    def update_meta(self, updates):
+        if self._lock is None:
+            raise RuntimeError("cannot update an unowned review slot")
+        self._lock.update_meta(updates)
+
+    def __exit__(self, *exc):
+        if self._lock is None:
+            return False
+        try:
+            return self._lock.__exit__(*exc)
+        finally:
+            self._lock = None
+            self.lock_dir = None
+            self.slot = None

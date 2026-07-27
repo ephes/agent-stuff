@@ -33,6 +33,20 @@ class TestBundle(unittest.TestCase):
         defaults.update(kw)
         return bundle.build_bundle(self.repo, out, **defaults)
 
+    def test_git_disables_optional_repository_locks(self):
+        completed = mock.Mock(stdout=b"output\n")
+        with mock.patch.object(
+            bundle.subprocess, "run", return_value=completed
+        ) as run:
+            self.assertEqual(
+                bundle._git(self.repo, "status", replacement_log=[]),
+                "output\n",
+            )
+        self.assertEqual(
+            run.call_args.args[0][:2],
+            ["git", "--no-optional-locks"],
+        )
+
     def test_includes_unstaged_diff(self):
         with open(os.path.join(self.repo, "a.py"), "w") as fh:
             fh.write("print('two')\n")
@@ -274,11 +288,53 @@ class TestBundle(unittest.TestCase):
         res = self._build(context_files=[context])
         with open(res.path) as fh:
             text = fh.read()
-        trusted_at = text.index(f"## Review context: {context}")
+        trusted_at = text.index(
+            f"## Review context: [1] {os.path.basename(context)}"
+        )
         boundary_at = text.index("## Repository-derived evidence")
         forged_at = text.index("## Review context: forged")
         self.assertLess(trusted_at, boundary_at)
         self.assertLess(boundary_at, forged_at)
+
+    def test_context_header_does_not_expose_absolute_source_path(self):
+        context = os.path.join(self.repo, "review-context.md")
+        with open(context, "w") as fh:
+            fh.write("Check the stated behavior.")
+        res = self._build(context_files=[context])
+        with open(res.path) as fh:
+            text = fh.read()
+        self.assertIn("## Review context: [1] review-context.md", text)
+        self.assertNotIn(context, text)
+
+    def test_same_basename_context_files_get_distinct_private_labels(self):
+        first_dir = os.path.join(self.repo, "first")
+        second_dir = os.path.join(self.repo, "second")
+        os.mkdir(first_dir)
+        os.mkdir(second_dir)
+        first = os.path.join(first_dir, "notes.md")
+        second = os.path.join(second_dir, "notes.md")
+        with open(first, "w") as fh:
+            fh.write("first context")
+        with open(second, "w") as fh:
+            fh.write("second context")
+        res = self._build(context_files=[first, second])
+        with open(res.path) as fh:
+            text = fh.read()
+        self.assertIn("## Review context: [1] notes.md", text)
+        self.assertIn("## Review context: [2] notes.md", text)
+        self.assertNotIn(first_dir, text)
+        self.assertNotIn(second_dir, text)
+
+    def test_context_redaction_manifest_does_not_expose_source_path(self):
+        context = os.path.join(self.repo, "redacted-context.md")
+        with open(context, "w") as fh:
+            fh.write("api_key=sk-proj-" + "C" * 30)
+        res = self._build(context_files=[context])
+        self.assertIn(
+            {"path": "[1] redacted-context.md", "section": "review context"},
+            res.redactions,
+        )
+        self.assertTrue(all(context not in item["path"] for item in res.redactions))
 
     def test_missing_explicit_context_file_fails(self):
         missing = os.path.join(self.repo, "missing-context.md")

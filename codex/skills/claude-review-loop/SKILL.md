@@ -12,7 +12,9 @@ only continue when it is `CLEAN`. Default to `opus`; select another model with
 The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Claude is stuck. A hung or blocked spawned review is detected,
 killed, and recorded in a structured result. Pre-spawn non-empty-run-directory
-rejection and lock contention return only their documented exit code/message.
+rejection and exhausted review-slot contention return only their documented
+exit code/message. Independent reviews may run concurrently; the per-user slot
+pool defaults to three active Claude reviews.
 
 The harness runs direct `claude -p` and supplies the review prompt from a prompt
 file on stdin. Claude runs with `--safe-mode`, an empty setting-source list, a
@@ -34,10 +36,12 @@ to `INVALID` if Claude emits any forbidden tool use or requests an inspection
 target outside the canonical review directory. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
-recorded and make a clean verdict scoped.
-The review must remain a single direct Claude context. Claude Code `Agent`
-subagents, Task-style delegation, parallel reviewers, or any other delegated
-review are not allowed for this gate.
+recorded and make a clean verdict scoped. Git itself runs with
+`--no-optional-locks` so parallel read-only bundle collection does not contend
+on optional repository locks.
+Each review must remain one direct Claude context. Claude Code `Agent`
+subagents, Task-style delegation, or reviewer fanout from within that context
+are not allowed. Separate harness invocations may run concurrently.
 
 ## The loop (you drive this)
 
@@ -84,7 +88,8 @@ review are not allowed for this gate.
 
    `--run-dir` must be new or empty so no unrelated local content can enter the
    reviewer's read sandbox. The command is foreground and returns a structured
-   result. Do NOT background it and poll.
+   result. Do NOT background one invocation and poll it; independent agents may
+   invoke separate reviews concurrently.
 
 3. Interpret by exit code (and read `result.json`):
    - `0` -> CLEAN. If it printed `(scoped)`, the bundle skipped, truncated, or
@@ -107,10 +112,10 @@ review are not allowed for this gate.
      non-empty-run-directory rejection occurs
      before artifacts and has no new result. Fix the cause and re-run with a
      fresh `--run-dir`. Never treat a failed review as a pass.
-   - `3` -> another review already holds the global lock. No reviewer result is
-     created. Wait or investigate the stale lock; do not run concurrent reviews.
-     Any later attempt must use a fresh `--run-dir` because bundle artifacts were
-     already written before lock acquisition.
+   - `3` -> all bounded review slots are busy. No reviewer result is created.
+     Retry later, inspect stale slot metadata, or deliberately adjust
+     `--max-concurrent`. Any later attempt must use a fresh `--run-dir` because
+     bundle artifacts were already written before slot acquisition.
 
 4. Before the first review, establish one outer bound for the complete loop:
    use the calling workflow's remaining time budget when it has one, otherwise
@@ -169,7 +174,19 @@ review are not allowed for this gate.
   are irrelevant AND the review was direct. Exit `1`/`2`/`3` are never clean.
 - Direct review only: no Claude Code `Agent` tool, Task-style delegation,
   subagents, or parallel reviewer fanout. The harness rejects those tool events.
-- One review at a time - the harness enforces this with a global lock.
+- Bounded parallelism: independent harness invocations use a per-user slot pool
+  and may run concurrently. The default is three active Claude reviews. Live
+  invocations honor the lowest limit requested by any current holder, so
+  different callers cannot accidentally exceed a restrictive limit. Set
+  `CLAUDE_REVIEW_MAX_CONCURRENT=1` or pass `--max-concurrent 1` only when
+  deliberate serialization is needed. Invalid values fail before review.
+  Slot selection has a bounded five-second wait and fails with exit `3` if its
+  short-lived guard remains busy.
+- Per-review artifacts, prompts, logs, result files, process groups, working
+  directories, and sandboxes are isolated by the required fresh `--run-dir`.
+  Claude runs with `--no-session-persistence` and no setting sources. Its
+  installed authentication/configuration remains shared, as it is for normal
+  concurrent Claude Code terminals.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering - do not chase every nit).
 
@@ -182,7 +199,9 @@ per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 (default 2MB), `--max-file-size <n>` (default 256KB, untracked files larger are
 skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single file's diff
 is truncated past this), `--context-file <path>` (repeatable),
-`--max-context-file-size <n>` (default 256KB), `--lock-dir <dir>`.
+`--max-context-file-size <n>` (default 256KB), `--lock-dir <dir>` (slot-pool
+directory), `--max-concurrent <n>` (default 3, or
+`CLAUDE_REVIEW_MAX_CONCURRENT`).
 
 ## Artifacts (in `--run-dir`)
 
