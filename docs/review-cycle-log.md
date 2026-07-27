@@ -2578,3 +2578,22 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   confirm the compile phase succeeded rather than reading only the final verdict.
 - Status: fixed by assigning the counter after construction under `#if DEBUG`;
   Release build added to the per-slice gates for the remaining player slices.
+
+## 2026-07-27 - Bound Pi Model Preflight Still Needs Orphan Verification
+
+- Repo: pipy architecture-quality Slice 8b.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: the Fish runner's `timeout 60 pi --list-models gpt` preflight would
+  either confirm the approved model or exit 124 within one minute.
+- Actual: the model-list process remained alive beyond the bound inside Fish
+  command substitution and emitted no log. No review had started.
+- Impact: the gate stalled before consuming a review round and could have been
+  mistaken for a buffered in-progress review.
+- Fix or follow-up: inspect the process tree as well as the log, kill the tmux
+  session and verify no reviewer child survives, then run the exact model-list
+  preflight directly in a PTY. After direct verification succeeds, start a fresh
+  runner at the read-only review command itself; do not fall back to another
+  model or provider.
+- Status: resolved; the fresh Pi review completed, one finding was fixed, and
+  the second round was CLEAN.
