@@ -233,11 +233,14 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 f"explicit context file is not UTF-8: {context_path}"
             ) from exc
         content, changed = redact_text(decoded)
-        context_label = f"[{context_index}] {os.path.basename(context_path)}"
+        # The caller-supplied basename is intentionally excluded: filenames
+        # may contain newlines or heading syntax. A synthetic ordinal keeps the
+        # trusted pre-boundary structure unambiguous and collision-free.
+        context_label = f"[{context_index}]"
         if changed:
-            redactions.append(
-                {"path": context_label, "section": "review context"}
-            )
+            # Keep the manifest schema stable: every redaction has a `path`
+            # key, using the private synthetic identifier for copied context.
+            redactions.append({"path": context_label, "section": "review context"})
         # Do not expose the caller's filesystem layout to the reviewer. Apart
         # from leaking local path details, an absolute source path can invite
         # the model to inspect the raw file or repository outside its sandbox.

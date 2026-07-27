@@ -258,6 +258,26 @@ class TestLock(unittest.TestCase):
                 ):
                     pass
 
+    def test_live_legacy_or_malformed_slot_falls_back_to_limit_one(self):
+        for index, recorded_limit in enumerate((None, "invalid", 0)):
+            with self.subTest(recorded_limit=recorded_limit):
+                pool_dir = os.path.join(self.tmp.name, f"legacy-pool-{index}")
+                slot_dir = os.path.join(pool_dir, "slot-0")
+                os.makedirs(slot_dir)
+                meta = {"harness_pid": os.getpid()}
+                if recorded_limit is not None:
+                    meta["max_concurrent"] = recorded_limit
+                lock.write_meta(slot_dir, meta)
+                with self.assertRaisesRegex(
+                    lock.LockHeld, r"1 review slot\(s\) held, active limit 1"
+                ):
+                    with lock.LockPool(
+                        pool_dir,
+                        {"harness_pid": os.getpid()},
+                        max_concurrent=3,
+                    ):
+                        pass
+
     def test_restrictive_incoming_limit_does_not_join_larger_pool(self):
         pool_dir = os.path.join(self.tmp.name, "restrictive-incoming-pool")
         first = lock.LockPool(

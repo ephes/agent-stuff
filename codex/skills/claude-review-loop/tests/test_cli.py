@@ -1,3 +1,5 @@
+import argparse
+import fcntl
 import os
 import re
 import signal
@@ -92,6 +94,65 @@ class TestCli(unittest.TestCase):
             os.environ.pop("CLAUDE_REVIEW_MAX_CONCURRENT", None)
             args = cli._build_parser().parse_args(["--run-dir", "unused"])
         self.assertEqual(args.max_concurrent, 3)
+
+    def test_slot_selection_timeout_is_finite_and_bounded(self):
+        from claude_review_loop import cli
+
+        self.assertEqual(cli._nonnegative_float("0"), 0.0)
+        self.assertEqual(cli._nonnegative_float("60"), 60.0)
+        for value in ("nan", "inf", "-inf", "-1", "60.1"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    argparse.ArgumentTypeError, "finite|between 0 and 60"
+                ):
+                    cli._nonnegative_float(value)
+
+    def test_slot_selection_timeout_reaches_lock_pool(self):
+        from claude_review_loop import cli
+
+        run_dir = os.path.join(self.tmp.name, "selection-timeout-forwarding")
+        pool_type = mock.MagicMock()
+        pool_type.return_value.__enter__.side_effect = cli.LockHeld("busy")
+        with mock.patch.object(cli, "LockPool", pool_type):
+            code = cli.main([
+                "--repo", self.repo,
+                "--run-dir", run_dir,
+                "--lock-dir", os.path.join(self.tmp.name, "forwarded-locks"),
+                "--slot-selection-timeout", "7.5",
+                "--model", "fake/model",
+            ])
+        self.assertEqual(code, 3)
+        self.assertEqual(
+            pool_type.call_args.kwargs["selection_timeout"],
+            7.5,
+        )
+
+    def test_zero_slot_selection_timeout_is_immediate_contention(self):
+        pool_dir = os.path.join(self.tmp.name, "guard-contention-locks")
+        os.makedirs(pool_dir)
+        guard_path = os.path.join(pool_dir, ".pool.guard")
+        guard_fd = os.open(guard_path, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(guard_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            env = dict(
+                os.environ,
+                CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+            )
+            proc = subprocess.run(
+                [sys.executable,
+                 os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+                 "--repo", self.repo,
+                 "--run-dir", os.path.join(self.tmp.name, "guard-contention-run"),
+                 "--lock-dir", pool_dir,
+                 "--slot-selection-timeout", "0",
+                 "--model", "fake/model"],
+                capture_output=True, text=True, env=env, timeout=10,
+            )
+        finally:
+            fcntl.flock(guard_fd, fcntl.LOCK_UN)
+            os.close(guard_fd)
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertIn("review slot selection busy", proc.stderr)
 
     def test_non_opus_model_is_recorded_with_non_opus_effort_default(self):
         run_dir = os.path.join(self.tmp.name, "run-sonnet")
@@ -253,6 +314,62 @@ class TestCli(unittest.TestCase):
                 except ProcessLookupError:
                     pass
 
+    def test_same_run_directory_is_atomically_rejected(self):
+        from claude_review_loop import cli
+
+        run_dir = os.path.join(self.tmp.name, "shared-run")
+        lock_pool_dir = os.path.join(self.tmp.name, "shared-run-locks")
+        hanging_env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang",
+        )
+        first = subprocess.Popen(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", lock_pool_dir, "--model", "fake/model"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=hanging_env,
+        )
+        pgid = None
+        try:
+            claim_path = os.path.join(run_dir, cli.RUN_CLAIM_NAME)
+            for _ in range(100):
+                if os.path.lexists(claim_path):
+                    break
+                time.sleep(0.05)
+            self.assertTrue(os.path.lexists(claim_path))
+
+            second = subprocess.run(
+                [sys.executable,
+                 os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+                 "--repo", self.repo, "--run-dir", run_dir,
+                 "--lock-dir", lock_pool_dir, "--model", "fake/model"],
+                capture_output=True, text=True, env=hanging_env, timeout=10,
+            )
+            self.assertEqual(second.returncode, 2, second.stdout + second.stderr)
+            self.assertIn("already claimed", second.stderr)
+            self.assertIsNone(first.poll(), "first review should remain active")
+            meta_path = os.path.join(lock_pool_dir, "slot-0", "meta.json")
+            for _ in range(100):
+                try:
+                    with open(meta_path) as fh:
+                        pgid = json.load(fh).get("claude_pgid")
+                except (OSError, ValueError):
+                    pass
+                if pgid:
+                    break
+                time.sleep(0.05)
+            self.assertTrue(pgid, "first reviewer process group was not recorded")
+        finally:
+            if first.poll() is None:
+                os.kill(first.pid, signal.SIGINT)
+                first.communicate(timeout=10)
+            if pgid:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
     def test_nonexistent_repo_exits_two_cleanly(self):
         missing = os.path.join(self.tmp.name, "does-not-exist")
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
@@ -362,6 +479,71 @@ class TestCli(unittest.TestCase):
         with open(marker) as fh:
             self.assertEqual(fh.read(), "must remain untouched")
 
+    def test_completed_run_directory_is_not_reported_as_live_claim(self):
+        run_dir = os.path.join(self.tmp.name, "completed-run")
+        env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+        )
+        command = [
+            sys.executable,
+            os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+            "--repo", self.repo,
+            "--run-dir", run_dir,
+            "--lock-dir", os.path.join(self.tmp.name, "completed-locks"),
+            "--model", "fake/model",
+        ]
+        first = subprocess.run(
+            command, capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        second = subprocess.run(
+            command, capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(second.returncode, 2, second.stdout + second.stderr)
+        self.assertIn("already claimed or non-empty", second.stderr)
+
+    def test_abandoned_claim_directory_requires_a_fresh_path(self):
+        from claude_review_loop import cli
+
+        run_dir = os.path.join(self.tmp.name, "stale-claim-run")
+        os.mkdir(run_dir)
+        os.mkdir(os.path.join(run_dir, cli.RUN_CLAIM_NAME))
+        env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+        )
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "stale-claim-locks"),
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("already claimed or non-empty", proc.stderr)
+
+    def test_legacy_claim_file_requires_a_fresh_path(self):
+        from claude_review_loop import cli
+
+        run_dir = os.path.join(self.tmp.name, "legacy-claim-run")
+        os.mkdir(run_dir)
+        with open(os.path.join(run_dir, cli.RUN_CLAIM_NAME), "w") as fh:
+            fh.write("2000000000\n")
+        env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean",
+        )
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "empty-claim-locks"),
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("already claimed or non-empty", proc.stderr)
+
     def test_run_directory_file_exits_two_without_traceback(self):
         run_path = os.path.join(self.tmp.name, "not-a-directory")
         with open(run_path, "w") as fh:
@@ -428,6 +610,44 @@ class TestCli(unittest.TestCase):
         self.assertEqual(data["state"], "CRASHED")
         self.assertIn("cannot run review: log denied", data["error"])
         self.assertNotIn("acquire review lock", data["error"])
+
+    def test_lock_ownership_loss_after_spawn_fails_closed_and_reaps(self):
+        from claude_review_loop import cli
+
+        run_dir = os.path.join(self.tmp.name, "run-ownership-loss")
+        failing_lock = mock.MagicMock()
+        failing_lock.update_meta.side_effect = RuntimeError(
+            "review lock ownership changed before metadata update"
+        )
+        env = dict(
+            os.environ,
+            CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang",
+        )
+        pgid = None
+        try:
+            with mock.patch.dict(os.environ, env, clear=True):
+                with mock.patch.object(cli, "LockPool", return_value=failing_lock):
+                    code = cli.main([
+                        "--repo", self.repo, "--run-dir", run_dir,
+                        "--lock-dir", os.path.join(self.tmp.name, "ownership-locks"),
+                        "--model", "fake/model",
+                    ])
+            self.assertEqual(code, 2)
+            failing_lock.update_meta.assert_called_once()
+            pgid = failing_lock.update_meta.call_args.args[0]["claude_pgid"]
+            with open(os.path.join(run_dir, "result.json")) as fh:
+                result = json.load(fh)
+            self.assertEqual(result["state"], "CRASHED")
+            self.assertIn("ownership changed", result["error"])
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(pgid, 0)
+            failing_lock.__exit__.assert_called_once()
+        finally:
+            if pgid:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_unexpected_review_exception_exits_two_with_crashed_result(self):
         from claude_review_loop import cli

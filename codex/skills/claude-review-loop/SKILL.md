@@ -87,7 +87,9 @@ are not allowed. Separate harness invocations may run concurrently.
    it is never silently omitted or replacement-decoded.
 
    `--run-dir` must be new or empty so no unrelated local content can enter the
-   reviewer's read sandbox. The command is foreground and returns a structured
+   reviewer's read sandbox. Every concurrent invocation must use a distinct
+   path; the harness enforces this with an atomic marker directory before
+   writing any artifact. The command is foreground and returns a structured
    result. Do NOT background one invocation and poll it; independent agents may
    invoke separate reviews concurrently.
 
@@ -201,10 +203,16 @@ skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single file's diff
 is truncated past this), `--context-file <path>` (repeatable),
 `--max-context-file-size <n>` (default 256KB), `--lock-dir <dir>` (slot-pool
 directory), `--max-concurrent <n>` (default 3, or
-`CLAUDE_REVIEW_MAX_CONCURRENT`).
+`CLAUDE_REVIEW_MAX_CONCURRENT`), `--slot-selection-timeout <seconds>` (default
+5, range 0-60; `0` means immediate contention and a timeout has distinct
+`review slot selection busy` diagnostics).
+Synthetic context identifiers such as `[1]` are the one-based positions of
+repeated `--context-file` arguments; the same identifiers appear in trusted
+bundle headings and context-redaction manifest entries.
 
 ## Artifacts (in `--run-dir`)
 
+`.claude-review-loop.claim/` (atomic run-directory ownership marker),
 `result.json` (`state`, `items`, `model`, `effort`, `cost`, `started_at`,
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
 `forbidden_tool_uses`, `skipped_files`, `truncations`, `redactions`, `error`, and

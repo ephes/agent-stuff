@@ -1,5 +1,6 @@
 """CLI entry: assemble a bundle, run one configured Claude review, emit result."""
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -59,6 +60,7 @@ REVIEW_SCHEMA = {
 EMPTY_MCP = '{"mcpServers":{}}'
 REVIEW_TOOLS = ",".join(INSPECTION_TOOLS)
 FORBIDDEN_TOOLS = "Bash,Edit,Write,Agent,Task,Skill,WebFetch,WebSearch"
+RUN_CLAIM_NAME = ".claude-review-loop.claim"
 
 
 def _case_insensitive_glob(pattern):
@@ -96,6 +98,46 @@ def _positive_int(value):
     return parsed
 
 
+def _nonnegative_float(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be a number")
+    if not math.isfinite(parsed):
+        raise argparse.ArgumentTypeError("must be finite")
+    if not 0 <= parsed <= 60:
+        raise argparse.ArgumentTypeError("must be between 0 and 60")
+    return parsed
+
+
+def _acquire_run_dir_claim(run_dir):
+    entries = os.listdir(run_dir)
+    if entries:
+        if RUN_CLAIM_NAME in entries:
+            message = (
+                "run directory is already claimed or non-empty; "
+                "use a distinct fresh path"
+            )
+        else:
+            message = "run directory must be new or empty"
+        print(f"claude-review-loop: {message}", file=sys.stderr)
+        return False
+    claim_path = os.path.join(run_dir, RUN_CLAIM_NAME)
+    try:
+        # mkdir is the complete atomic publication. Claims are deliberately
+        # never taken over: an abandoned claim makes the path non-empty, and
+        # callers must use the already-documented distinct fresh run path.
+        os.mkdir(claim_path, 0o700)
+    except FileExistsError:
+        print(
+            "claude-review-loop: run directory is already claimed "
+            "by another invocation",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def _build_parser():
     p = argparse.ArgumentParser(prog="claude-review-loop",
                                 description="Run one isolated Claude review over a git diff.")
@@ -118,6 +160,15 @@ def _build_parser():
     p.add_argument("--max-concurrent", type=_positive_int,
                    default=default_max_concurrent,
                    help="maximum concurrent Claude review slots for this user")
+    p.add_argument(
+        "--slot-selection-timeout",
+        type=_nonnegative_float,
+        default=5.0,
+        help=(
+            "seconds to wait for the short-lived slot-selection guard "
+            "(0 = immediate contention, maximum 60)"
+        ),
+    )
     p.add_argument("--model", default=None,
                    help="Claude model id or alias (default: opus)")
     p.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
@@ -206,16 +257,34 @@ def _main(argv=None):
     model = args.model or model_mod.resolve_from_cli()
     effort = args.effort or _default_effort(model)
     args.run_dir = os.path.realpath(args.run_dir)
+    run_dir_claimed = False
     try:
         if os.path.exists(args.run_dir):
             if not os.path.isdir(args.run_dir):
                 raise OSError(f"run directory is not a directory: {args.run_dir}")
-            if os.listdir(args.run_dir):
-                print("claude-review-loop: run directory must be new or empty",
-                      file=sys.stderr)
-                return 2
         else:
-            os.makedirs(args.run_dir)
+            os.makedirs(args.run_dir, exist_ok=True)
+        claim_path = os.path.join(args.run_dir, RUN_CLAIM_NAME)
+        if not _acquire_run_dir_claim(args.run_dir):
+            return 2
+        existing_entries = [
+            name for name in os.listdir(args.run_dir)
+            if name != RUN_CLAIM_NAME
+        ]
+        if existing_entries:
+            try:
+                os.rmdir(claim_path)
+            except OSError as exc:
+                print(
+                    "claude-review-loop: cannot release run directory claim: "
+                    f"{exc}",
+                    file=sys.stderr,
+                )
+                return 2
+            print("claude-review-loop: run directory must be new or empty",
+                  file=sys.stderr)
+            return 2
+        run_dir_claimed = True
         os.makedirs(os.path.dirname(args.lock_dir) or ".", exist_ok=True)
         if os.path.exists(args.lock_dir) and not os.path.isdir(args.lock_dir):
             raise OSError(f"lock path is not a directory: {args.lock_dir}")
@@ -223,7 +292,7 @@ def _main(argv=None):
         msg = f"cannot prepare review directories: {exc}"
         print(f"claude-review-loop: {msg}", file=sys.stderr)
         now = time.monotonic()
-        if os.path.isdir(args.run_dir):
+        if run_dir_claimed and os.path.isdir(args.run_dir):
             try:
                 ReviewResult(
                     state=CRASHED, items=[], model=model, effort=effort,
@@ -266,7 +335,12 @@ def _main(argv=None):
             "command": "claude-review-loop", "model": model, "run_dir": args.run_dir}
     lock = None
     try:
-        lock = LockPool(args.lock_dir, meta, args.max_concurrent)
+        lock = LockPool(
+            args.lock_dir,
+            meta,
+            args.max_concurrent,
+            selection_timeout=args.slot_selection_timeout,
+        )
         lock.__enter__()
     except LockHeld as e:
         print(f"claude-review-loop: {e}", file=sys.stderr)

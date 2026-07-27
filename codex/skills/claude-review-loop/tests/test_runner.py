@@ -116,6 +116,31 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.state, CLEAN)
         self.assertTrue(seen and isinstance(seen[0], int))
 
+    def test_on_spawn_failure_reaps_process_and_closes_pipes(self):
+        spawned = []
+        real_popen = runner.subprocess.Popen
+
+        def capture_popen(*args, **kwargs):
+            proc = real_popen(*args, **kwargs)
+            spawned.append(proc)
+            return proc
+
+        def fail_spawn(_pgid):
+            raise RuntimeError("ownership lost")
+
+        with mock.patch.object(
+            runner.subprocess, "Popen", side_effect=capture_popen
+        ):
+            result = self._run("hang", on_spawn=fail_spawn)
+        self.assertEqual(result.state, CRASHED)
+        self.assertIn("ownership lost", result.error or "")
+        self.assertEqual(len(spawned), 1)
+        self.assertIsNotNone(spawned[0].stdout)
+        self.assertIsNotNone(spawned[0].stderr)
+        self.assertTrue(spawned[0].stdout.closed)
+        self.assertTrue(spawned[0].stderr.closed)
+        self.assertFalse(runner._group_alive(spawned[0].pid))
+
     def test_kill_group_escalates_when_wrapper_exits_but_group_survives(self):
         proc = mock.Mock()
         proc.wait.side_effect = [None, None]

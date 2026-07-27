@@ -165,10 +165,10 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         except ProcessLookupError:
             pgid = proc.pid  # start_new_session=True guarantees pgid == pid
         if on_spawn is not None:
-            try:
-                on_spawn(pgid)
-            except Exception:
-                pass  # recording the pgid must never break the review
+            # Lifecycle ownership must be recorded before review proceeds.
+            # Any failure here is handled by the outer fail-closed path, which
+            # kills/reaps the just-spawned process group and writes CRASHED.
+            on_spawn(pgid)
         streams = _Streams(proc.stdout.fileno(), proc.stderr.fileno(),
                            raw_f, ev_f, err_f, monitor)
 
