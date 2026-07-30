@@ -18,6 +18,7 @@ import time
 import uuid
 
 META_NAME = "meta.json"
+DEFAULT_MAX_CONCURRENT = 10
 
 
 class LockHeld(Exception):
@@ -239,7 +240,7 @@ class LockPool:
         self,
         pool_dir,
         meta,
-        max_concurrent=3,
+        max_concurrent=DEFAULT_MAX_CONCURRENT,
         selection_timeout=5.0,
     ):
         if max_concurrent < 1:

@@ -87,13 +87,13 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         self.assertIn("must be >= 1", proc.stderr)
 
-    def test_default_concurrency_limit_is_three(self):
+    def test_default_concurrency_limit_is_ten(self):
         from claude_review_loop import cli
 
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CLAUDE_REVIEW_MAX_CONCURRENT", None)
             args = cli._build_parser().parse_args(["--run-dir", "unused"])
-        self.assertEqual(args.max_concurrent, 3)
+        self.assertEqual(args.max_concurrent, 10)
 
     def test_slot_selection_timeout_is_finite_and_bounded(self):
         from claude_review_loop import cli

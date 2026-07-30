@@ -16,7 +16,7 @@ a process or guess whether Claude is stuck. A hung or blocked spawned review is 
 killed, and recorded in a structured result. Pre-spawn non-empty-run-directory
 rejection and exhausted review-slot contention return only their documented
 exit code/message. Independent reviews may run concurrently; the per-user slot
-pool defaults to three active Claude reviews.
+pool defaults to ten active Claude reviews.
 
 The harness runs direct `claude -p` and supplies the review prompt from a prompt
 file on stdin. Claude runs with `--safe-mode`, an empty setting-source list, a
@@ -179,7 +179,7 @@ are not allowed. Separate harness invocations may run concurrently.
 - Direct review only: no Claude Code `Agent` tool, Task-style delegation,
   subagents, or parallel reviewer fanout. The harness rejects those tool events.
 - Bounded parallelism: independent harness invocations use a per-user slot pool
-  and may run concurrently. The default is three active Claude reviews. Live
+  and may run concurrently. The default is ten active Claude reviews. Live
   invocations honor the lowest limit requested by any current holder, so
   different callers cannot accidentally exceed a restrictive limit. Set
   `CLAUDE_REVIEW_MAX_CONCURRENT=1` or pass `--max-concurrent 1` only when
@@ -204,7 +204,7 @@ per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single file's diff
 is truncated past this), `--context-file <path>` (repeatable),
 `--max-context-file-size <n>` (default 256KB), `--lock-dir <dir>` (slot-pool
-directory), `--max-concurrent <n>` (default 3, or
+directory), `--max-concurrent <n>` (default 10, or
 `CLAUDE_REVIEW_MAX_CONCURRENT`), `--slot-selection-timeout <seconds>` (default
 5, range 0-60; `0` means immediate contention and a timeout has distinct
 `review slot selection busy` diagnostics).

@@ -9,7 +9,7 @@ import json
 
 from . import bundle as bundle_mod
 from . import model as model_mod
-from .lock import LockHeld, LockPool
+from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
 from .monitor import INSPECTION_TOOLS
@@ -143,7 +143,7 @@ def _build_parser():
                                 description="Run one isolated Claude review over a git diff.")
     env_limit = os.environ.get("CLAUDE_REVIEW_MAX_CONCURRENT")
     if env_limit is None:
-        default_max_concurrent = 3
+        default_max_concurrent = DEFAULT_MAX_CONCURRENT
     else:
         try:
             default_max_concurrent = _positive_int(env_limit)
