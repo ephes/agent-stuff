@@ -2681,3 +2681,42 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   model or provider.
 - Status: resolved; the fresh Pi review completed, one finding was fixed, and
   the second round was CLEAN.
+
+## 2026-07-30 - Review Bundles Do Not Include Earlier Commits
+
+- Repo: emerge Windows UAT launcher integration.
+- Implementer: Codex.
+- Reviewer: Claude Opus through `claude-review-loop`.
+- Expected: a review context naming the complete branch result would cause the
+  harness to include both the staged merge and the launcher commit at `HEAD`.
+- Actual: the bundle contained only the staged worktree diff, so the reviewer
+  correctly rejected the claimed launcher scope as unevidenced.
+- Impact: one review round verified only the newly merged main-side files and
+  could not close the launcher review gate.
+- Fix or follow-up: for already committed unpublished work, create a temporary
+  detached worktree at the comparison base, apply the commit with
+  `cherry-pick --no-commit`, and review that staged diff separately. Keep the
+  caller-authored context aligned with the exact diff the harness can bundle.
+- Status: resolved; the launcher received its own complete staged-diff review
+  and all findings were addressed.
+
+## 2026-07-30 - Strict Artifact Consumers Must Evolve With Producers
+
+- Repo: Emerge Windows publisher.
+- Implementer: Codex.
+- Reviewer: Claude Opus through `claude-review-loop`.
+- Expected: adding two validated files to the Windows workflow artifact would
+  flow through the existing publisher after the application change reached
+  GitHub main.
+- Actual: the publisher correctly rejected the six-entry artifact because its
+  preflight cap and exact-layout allowlist still described the prior four-file
+  artifact.
+- Impact: the build passed but publication remained safely pending, so the new
+  launcher was absent from the shared latest package.
+- Fix or follow-up: when a producer changes an integrity-checked artifact,
+  include every strict downstream consumer in the end-to-end change scope and
+  test the exact new layout through terminal publication. Derive preflight
+  bounds from named layout constants and retain end-to-end coverage for rollout
+  layouts.
+- Status: resolved in the reviewed publisher update; the original correlated
+  publication can resume without redispatch.
