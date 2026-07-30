@@ -1,13 +1,13 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating up to three fix/re-review cycles with Claude, Codex, or Pi. Claude reviews delegate to the supervised claude-review-loop harness.
+description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating value-driven fix/re-review cycles with Claude, Codex, or Pi. Claude reviews delegate to the supervised claude-review-loop harness.
 ---
 
 # Cross-Agent Review Cycle
 
 ## Purpose
 
-Run a bounded independent review loop before committing an implementation
+Run a value-driven independent review loop before committing an implementation
 slice. The reviewer must be a different model family from the implementer.
 
 ## Reviewer Selection
@@ -42,24 +42,109 @@ ad hoc permission/budget flags to Claude review commands. Subscription usage
 should not be represented as a per-run budget cap. Do not use write-capable
 permission bypass for review.
 
-## Cycle Limit
+## Cycle Continuation and Stopping Rule
 
-Run at most three review cycles for a single implementation slice.
+Do not use a fixed numeric cap. A valid review is one that completed with a
+parseable verdict from the intended different-family reviewer; harness,
+tooling, or lifecycle failures do not count. After every valid review,
+adjudicate the findings and decide whether another fix/re-review cycle has
+substantial expected value.
 
-- Cycle 1: first review of the completed slice.
-- Cycle 2: re-review after fixes or explicit decisions.
-- Cycle 3: final re-review if cycle 2 still found issues that were fixed or
-  need closure.
+Retry an invalid review with a fresh run when practical. If the required
+reviewer remains unavailable, stop and report the blocked review gate; absence
+of findings from a failed attempt is not a clean result.
+
+Continue when at least one of these applies:
+
+- a Critical or Warning finding remains and an in-scope, practical repair is
+  available;
+- the review found a concrete correctness, safety, operator-workflow,
+  requirements, regression, or documentation-sync risk;
+- a repair materially changed the affected path and independent re-review would
+  meaningfully reduce residual risk; or
+- an aligned Suggestion identifies a plausible defect or missing regression
+  whose repair value is material relative to its cost and churn.
+
+Stop when any of these applies:
+
+- the reviewer returns `CLEAN` and no accepted Critical or Warning from an
+  earlier round remains unresolved;
+- all remaining Suggestions are low-impact, speculative, stylistic, repetitive,
+  out of scope, or explicitly deferred/rejected with concrete rationale;
+- another cycle would mostly seek reviewer agreement rather than reduce a
+  demonstrated risk;
+- expected repair/review cost or churn exceeds the likely risk reduction; or
+- progress is blocked by unavailable tooling, evidence, authorization, or an
+  external dependency.
+
+Apply these rules in this order:
+
+1. An unresolved Critical or Warning never disappears because a narrower
+   re-review is `CLEAN`.
+2. When an in-scope practical repair exists and its expected risk reduction is
+   substantial relative to its cost and churn, continue.
+3. When a needed repair is blocked or no longer has substantial expected value,
+   stop the loop, report the residual risk, and do not commit unless the commit
+   gate below is satisfied. The agent cannot defer a blocked Critical on its own
+   authority; a remaining Warning requires explicit user acceptance before
+   commit.
+4. After repairing an accepted Critical or Warning, continue for one independent
+   re-review of that repair delta; the commit gate cannot be satisfied without
+   it.
+5. With no unresolved Critical or Warning, use all remaining continuation
+   conditions, the Suggestion conditions, and diminishing returns to decide
+   whether another cycle adds substantial value.
+
+Cycle count is a diminishing-returns signal, not a stopping rule. As rounds
+accumulate, require clearer evidence of incremental value. After each review,
+record briefly why another cycle is justified or why the loop is stopping.
+Do not continue merely because the verdict is not `CLEAN`, and do not stop
+merely because an arbitrary round count was reached.
+
+### Re-review scope containment
+
+The first valid review may inspect the complete implementation slice. After
+that review, freeze its accepted findings as the repair baseline.
+
+For every re-review:
+
+- ask the reviewer to verify the accepted prior findings and the repair delta,
+  not to restart an unrestricted whole-slice audit, unless the repair itself had
+  broad, cross-cutting impact and the driver recorded why reopening the whole
+  slice is necessary;
+- classify each new finding as caused by the repair, directly coupled to the
+  repaired path, or pre-existing/unrelated to that delta;
+- expand the current gate for every Critical, for every Critical or Warning
+  caused by or directly coupled to the repair, or when the finding directly
+  invalidates the original acceptance criteria, safety boundary, persisted
+  evidence, or claimed fix;
+- record other pre-existing or unrelated findings as follow-up work instead of
+  repairing them recursively in the current loop. A deferred Warning still
+  requires explicit user acceptance before commit, and a Critical cannot be
+  deferred this way; and
+- stop broad re-review if successive rounds keep discovering unrelated concerns
+  rather than regressions from the latest repair.
+
+A targeted loop has converged when every item in the current gate — the frozen
+baseline plus any permitted expansions — is resolved and the repair delta
+introduces no Critical or Warning regression. It does not need to eliminate
+every concern that a fresh whole-slice audit could discover.
+
+## Commit Gate
 
 Commit only when:
 
+- at least one valid different-family review completed and its findings were
+  adjudicated, and
 - no Critical or Warning findings remain, and
 - Suggestions are fixed, explicitly deferred with rationale, or rejected with
   rationale, and
 - required checks and docs are complete.
 
-If Critical or Warning findings remain after three cycles, do not commit
-without explicit user direction.
+If substantial review value is exhausted while Critical or Warning findings
+remain, stop, report the residual risk, and do not commit without explicit user
+direction. The agent may never defer or accept a Critical on its own authority;
+only an explicit user override can release that gate.
 
 ## Supervising A Noninteractive Implementer
 
@@ -326,8 +411,7 @@ The harness supplies repository evidence separately after the untrusted boundary
 For Codex/Pi tmux prompts, say this is review rather than implementation and
 include:
 
-- review round number and whether it is first review, re-review, or final
-  allowed review
+- review round number and whether it is a first review or re-review
 - implementation intent and scope
 - relevant project instructions, specs, docs, or backlog item paths
 - touched files and what changed, including untracked files from
@@ -335,6 +419,9 @@ include:
 - verification commands already run and results
 - known trade-offs or explicit non-goals
 - prior findings and how they were addressed for re-reviews
+- for a re-review, the explicit scope boundary: verify only the accepted prior
+  findings and the repair delta unless the repair had broad, cross-cutting
+  impact whose recorded rationale requires reopening the whole slice
 - when preparing Codex/Pi re-reviews, strip a quoted prior report's trailing
   `=== REVIEW COMPLETE ===` sentinel before adding them to the prompt
 - severity policy: Critical, Warning, Suggestion
@@ -362,8 +449,9 @@ accepted/fixed/rejected/deferred counts in the driving agent's cycle summary.
 - Warning: fix before commit, or ask the user before accepting the risk.
 - Suggestion: fix when low-cost and aligned; otherwise defer or reject with a
   concrete rationale.
-- For re-review, ask the reviewer to verify only prior findings plus changed
-  scope unless the fixes had broad impact.
+- For re-review, verify only the accepted prior findings plus the repair delta.
+  Reopen the whole slice only when the repair itself had broad, cross-cutting
+  impact, and record why that expansion is necessary.
 
 ## Learning Logs
 
