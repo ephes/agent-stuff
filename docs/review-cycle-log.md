@@ -2720,3 +2720,22 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   layouts.
 - Status: resolved in the reviewed publisher update; the original correlated
   publication can resume without redispatch.
+
+## 2026-07-30 - UI Import Reviews Need Theme and Row-Mutation Coverage
+
+- Repo: Emerge GitHub UI synchronization.
+- Implementer: Codex.
+- Reviewer: Claude Opus through `claude-review-loop`.
+- Expected: a conflict-free UI merge with a green full frontend check would be
+  ready once its imported visual tests passed.
+- Actual: the fresh review found legacy-theme alignment regressions, a progress
+  widget keyed to a stale numeric row after insertion, and a split-table spacer
+  test that could pass before the resize was processed.
+- Impact: the import could have changed legacy rendering and displayed progress
+  or selection chrome on the wrong row despite the broad suite remaining green.
+- Fix or follow-up: review UI imports across both themes, exercise row insertion
+  for index-bound widgets, and make asynchronous layout tests wait for the
+  triggering scrollbar/layout state before asserting the result.
+- Status: resolved with persistent model indexes, theme-gated alignment,
+  stable viewport-difference measurement, and focused regression coverage; the
+  targeted re-review returned no Critical or Warning findings.
