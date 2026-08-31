@@ -2739,3 +2739,21 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
 - Status: resolved with persistent model indexes, theme-gated alignment,
   stable viewport-difference measurement, and focused regression coverage; the
   targeted re-review returned no Critical or Warning findings.
+
+## 2026-08-12 - Keep Claude Review Directories Outside the Reviewed Repository
+
+- Repo: Daybook public weeknotes repository evidence.
+- Implementer: Pi using `openai-codex/gpt-5.6-sol`.
+- Reviewer: Claude Opus through `claude-review-loop`.
+- Expected: a relative fresh run directory would isolate the review bundle while
+  Opus inspected only its harness-owned copy.
+- Actual: placing the run directory at `daybook/fresh` made the raw repository
+  root a confusing parent of the review root; Opus attempted a Glob against that
+  parent and the harness correctly marked the review INVALID.
+- Impact: no code was accepted without review, but one review attempt and its
+  generated in-repository artifacts had to be discarded.
+- Fix or follow-up: create the fresh review directory under `/tmp` (or another
+  path outside the repository) and pass that absolute path to `--run-dir`; inspect
+  `result.json` and remove any generated worktree artifacts before retrying.
+- Status: resolved; the fresh external-directory reviews completed without
+  forbidden tool use, and all Critical/Warning findings were closed.
