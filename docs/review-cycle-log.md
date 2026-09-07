@@ -2757,3 +2757,153 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
   `result.json` and remove any generated worktree artifacts before retrying.
 - Status: resolved; the fresh external-directory reviews completed without
   forbidden tool use, and all Critical/Warning findings were closed.
+
+## 2026-09-02 - Honor Reviewer Session Limits Without Relabeling the Gate
+
+- Repos: ops-library, ops-control, and Nyxmon staging reboot hardening.
+- Implementer: Codex.
+- Reviewers: Claude Opus initially, then Codex `gpt-5.6-sol` at the operator's
+  explicit request.
+- Expected: complete every round with the default different-family Claude
+  reviewer.
+- Actual: the operator reported that the Claude session limit was nearly
+  exhausted while the Nyxmon review was running and requested GPT-5.6 for the
+  remaining reviews. The in-flight Claude review was interrupted and recorded
+  as invalid; fresh read-only GPT-5.6 reviews then completed the remaining
+  cycles.
+- Impact: ops-library and ops-control retained valid initial different-family
+  findings, while Nyxmon's completed review evidence is fresh-context but
+  same-family and therefore does not satisfy the stricter different-family
+  label.
+- Fix or follow-up: stop the costly reviewer promptly when the operator signals
+  a session constraint, use the explicitly requested reviewer, and state the
+  resulting gate distinction rather than silently treating same-family review
+  as equivalent. Preserve valid earlier different-family findings and continue
+  focused repair verification with the requested model.
+- Status: resolved; all Critical and Warning findings were repaired, focused
+  GPT-5.6 re-reviews closed cleanly, and the gate distinction was reported.
+
+## 2026-09-03 - Lifecycle Regressions Should Traverse Production Callbacks
+
+- Repo: Emerge frontend hydration request lifetime fix.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol` at the operator's explicit
+  request.
+- Expected: focused tests around the request-retirement helper would adequately
+  guard successful and cancelled targeted hydration attempts.
+- Actual: the first review found that the success case invoked the cleanup
+  helper directly, so it could pass even if production delivery stopped calling
+  that helper.
+- Impact: the resource-lifetime fix was correct, but its regression test did
+  not initially protect the most important integration seam.
+- Fix or follow-up: drive lifecycle regressions through real delivery and
+  settlement callbacks, then assert both retained-resource cleanup and the
+  associated progress state. Use private helpers only when the helper itself is
+  the behavior under test.
+- Status: resolved; the repaired success and cancellation tests traverse the
+  production callbacks, focused checks pass, and the scoped Pi re-review was
+  clean. This same-family review follows the operator's explicit selection and
+  is not relabeled as a different-family gate.
+
+## 2026-09-03 - Treat Reviewer Transport `Not Found` as an Invalid Review
+
+- Repo: Emerge Process timestamp-limit frontend validation.
+- Implementer: Codex; reviewer: Pi with `openai-codex/gpt-5.6-sol`.
+- Expected: a narrow third round would verify one fractional-step counting
+  repair and emit the completion sentinel.
+- Actual: two fresh Pi attempts passed the approved-model preflight, then
+  `pi -p` returned only `Not Found` with status 1 and no sentinel. Two fresh
+  Codex CLI attempts then received HTTP 404 from both the WebSocket endpoint
+  and its HTTPS fallback. The initial launch command also had to be rebuilt
+  without an unnecessary `rm -f` because the execution safety layer rejected
+  that cleanup form.
+- Impact: neither `Not Found` attempt counts as a review; the earlier two Pi
+  rounds remain valid, but Pi did not verify the last repair.
+- Fix or follow-up: stop and clean each invalid session, never infer CLEAN from
+  the prompt-echo sentinel or empty/short log, and preserve the frozen
+  outstanding finding until a requested reviewer produces a valid verdict.
+- Status: externally blocked after bounded fresh retries; implementation and
+  focused verification remain available, but no clean review is inferred.
+
+## 2026-09-05 - A Pi Report's Self-Reported Identity Is Not Model Evidence
+
+- Repo: Emerge frontend, UCTE Manual replacement filename/path typeahead.
+- Implementer: Claude Opus; reviewer: Pi with `openai-codex/gpt-5.6-sol`.
+- Expected: the review report would name the reviewing model, so the round
+  record could cite the report itself as evidence of the mandatory pairing.
+- Actual: the run was healthy — the approved-model preflight passed, the
+  sentinel appeared once after about seven minutes, no orphan process survived
+  the tmux kill — but the report's own identity section said only "OpenAI
+  ChatGPT; exact runtime model/version was not exposed".
+- Impact: none to the verdict, but a driver that records the model from the
+  report alone would either understate the pairing or overstate what it can
+  prove.
+- Fix or follow-up: treat the runner as the evidence — the branch rejects every
+  model but the approved one, preflights it, and passes it explicitly — and
+  record the model from the invocation rather than from the reviewer's prose.
+  Ask for the reviewer identity field anyway; a wrong answer there is a signal,
+  an absent one is not.
+- Status: resolved; round recorded with the model taken from the pinned
+  invocation.
+
+## 2026-09-05 - `pgrep -fl 'pi -p'` Does Not Find A Running Pi Reviewer On macOS
+
+- Repo: Emerge frontend, UCTE Manual replacement filename/path typeahead,
+  review round 2.
+- Expected: the prescribed orphan/liveness check `pgrep -fl 'pi -p'` would match
+  the reviewer process while it ran, and an empty result would mean the reviewer
+  had not started or had already exited.
+- Actual: the reviewer was running normally, but the pattern matched nothing.
+  On this host the process argument list is rendered as the bare command name
+  followed by the inherited environment, so the flags the pattern looks for are
+  not in the searched text at all. A driver polling for CPU activity with that
+  pattern would have declared a healthy run dead at the first check and retried
+  a review that was already in flight.
+- Impact: a false "no reviewer running" signal, in the exact spot where the
+  procedure tells a driver to kill orphans and retry - i.e. it can burn a review
+  cycle and, worse, mask a genuine orphan later because the same check also
+  returns empty when one exists.
+- Fix or follow-up: verify liveness by the wrapper instead of the flags. The
+  runner script's own path is unique per run and does appear in the argument
+  list, so match on that, or walk down from it to its child. Keep the tmux
+  session check as the primary liveness signal, since it is the thing that
+  actually ends when the run ends, and use the process check only to confirm
+  nothing survived the kill.
+- Status: resolved for this round - liveness was confirmed from the process
+  tree and the tmux session, and the post-kill orphan check was repeated with a
+  pattern that matches the wrapper.
+
+## 2026-09-06 - A Converging Plan Review Can Be Closed Into The Code Review
+
+- Repo: nyxmon, site connectivity detection (plan + implementation + code
+  review), reviewer GPT-6 Astra via `codex exec` read-only, implementers
+  Claude Opus 5 subagents, orchestrator Claude Fable 5.1.
+- Expected: the plan review would reach CLEAN within a few rounds.
+- Actual: findings went 15 → 7 → 3 → 1 → 1 → 1 → 1; the last four rounds
+  each narrowed the same recheck-completion argument to a smaller corner
+  (time bound → exact fence → read ordering → exhaustion path → transaction
+  placement), with the reviewer itself noting the last two would be Warnings
+  without the plan's own stated bound.
+- Impact: four rounds of roughly ten minutes each for one paragraph of the
+  design; a fixed "must be CLEAN" rule would have added more.
+- Fix or follow-up: stop when successive rounds only narrow one argument and
+  the final repair is mechanical; carry it as a mandatory verification item
+  into the code review, which can check the real transaction placement
+  instead of prose. The code review then confirmed it in round 1 and found
+  eight unrelated Criticals that no plan round could have seen.
+- Status: resolved; recorded in the project's `docs/workflow/` record.
+
+## 2026-09-06 - `pre-commit run --all-files` Skips Untracked Files
+
+- Repo: nyxmon, same cycle.
+- Expected: `uvx pre-commit run --all-files` covers every file an implementer
+  created.
+- Actual: it only inspects git-tracked files, so nine new Python modules and
+  tests were never linted by that command; a subagent noticed and ran ruff
+  directly, the orchestrator then added `pre-commit run --files <untracked>`
+  to every validation pass.
+- Impact: a "lint clean" claim on new files was unproven until the explicit
+  run; no actual lint defect surfaced.
+- Fix or follow-up: always run the hooks with `--files` over
+  `git ls-files --others --exclude-standard` when the slice adds files.
+- Status: resolved.
