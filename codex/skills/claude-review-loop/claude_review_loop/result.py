@@ -23,6 +23,9 @@ class ReviewResult:
     forbidden_tool_uses: list = field(default_factory=list)
     baseline_ref: str | None = None
     baseline_commit: str | None = None
+    slice_id: str | None = None
+    round: int | None = None
+    convergence: dict | None = None
     error: str | None = None
 
     @property

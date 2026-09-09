@@ -3272,3 +3272,27 @@ Sol runtimehelper patches actual __channelexec__ WorkerInteractor globals, not s
 - Status: resolved. The cheaper-delta-reviewer tier is a deliberate experiment;
   record which tier each round used, from the invocation rather than from the
   reviewer's own report, so it can be evaluated later.
+
+## 2026-09-10 - The Stop Conditions Needed Somewhere To Live
+
+- Repo: agent-stuff, `claude-review-loop`.
+- Expected: the mechanical stop conditions added on 2026-09-09 - a required
+  finding surviving two repairs, a Critical/Warning count that stops falling -
+  would end loops that judgment alone had been ending by hand.
+- Actual: both conditions are questions about the rounds *together*, and nothing
+  held the earlier rounds. A driver has to carry round N-1's counts in context;
+  after a compaction, a fresh session, or a handoff it no longer can, which is
+  exactly the state in which an agent runs one more round.
+- Impact: the rules were only as good as the driver's memory of the loop it was
+  in - so on the long, expensive slices they were least likely to apply.
+- Fix: `--slice-id` appends one summary-safe line per completed round to
+  `~/.cache/claude-review-loop/ledger/<slice>.jsonl` - severity counts, finding
+  fingerprints, model, effort, duration, baseline; no finding text, no
+  repository content. The harness reads the slice back, reports
+  `LOOP: <status> - <reason>`, records `convergence` in `result.json`, and exits
+  `4` when the loop is not converging, so a driver that only knows `0`/`1`
+  cannot mistake it for ordinary findings. Fingerprints ignore digits, so a
+  finding that only moved line numbers still counts as the same complaint.
+  Failed rounds are not recorded: they reviewed nothing.
+- Status: resolved. Exit `4` ends the loop; it is not a verdict that findings
+  are resolved, and the commit gate is unchanged.

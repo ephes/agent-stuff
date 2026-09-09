@@ -110,6 +110,33 @@ are not allowed. Separate harness invocations may run concurrently.
    unwelcome. `--baseline-ref` cannot be combined with `--staged-only`, and an
    unresolvable ref fails before any reviewer runs.
 
+   Add `--slice-id <id>`, the same id on every round of one slice, to record
+   the round in a cross-round ledger:
+
+   ```bash
+   python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
+     --repo "$PWD" --run-dir "$(mktemp -d)/claude-review" \
+     --slice-id "hydration-lifetime" --record-baseline
+   ```
+
+   Each completed round appends one summary-safe line - counts by severity,
+   finding fingerprints, model, effort, duration, baseline - to
+   `~/.cache/claude-review-loop/ledger/<slice>.jsonl` (`--ledger-dir` moves it).
+   No finding text and no repository content is stored. The harness then reads
+   the slice's rounds back and reports whether the loop is still converging, on
+   stdout as `LOOP: <status> - <reason>` and in `result.json` under
+   `convergence`.
+
+   This exists because the stop conditions are questions about the rounds
+   together - is the required-finding count going down, has the same finding now
+   survived two repairs - and a fresh context or a compacted session no longer
+   holds the earlier rounds. An agent that cannot see them runs one more.
+
+   `escalate` means stop the loop and hand the residual risk to the user; it is
+   not a verdict that the findings are resolved, and it exits `4` so a driver
+   that only knows `0`/`1` cannot mistake it for ordinary findings. A failed
+   round is not recorded: it reviewed nothing.
+
    To include the implementation goal, relevant instructions, or verification
    evidence, put that material in a file and repeat `--context-file <path>` as
    needed. Context is copied into `review-bundle.md` after secret redaction, so
@@ -149,6 +176,11 @@ are not allowed. Separate harness invocations may run concurrently.
      non-empty-run-directory rejection occurs
      before artifacts and has no new result. Fix the cause and re-run with a
      fresh `--run-dir`. Never treat a failed review as a pass.
+   - `4` -> the review completed, and the slice ledger says the loop is not
+     converging: the same required finding survived two repair rounds, or the
+     Critical/Warning count has not fallen across two consecutive rounds. Read
+     `convergence.reason`, stop the loop, and report the residual risk to the
+     user. Only `--slice-id` runs can return this.
    - `3` -> all bounded review slots are busy. No reviewer result is created.
      Retry later, inspect stale slot metadata, or deliberately adjust
      `--max-concurrent`. Any later attempt must use a fresh `--run-dir` because
@@ -170,8 +202,10 @@ are not allowed. Separate harness invocations may run concurrently.
 
    Round count is a diminishing-returns signal, not a stopping rule on its own:
    as rounds accumulate, require clearer evidence that the next one reduces
-   risk, and record after each round why the loop continued or stopped. Stop and
-   report the exact outstanding items when any of these applies:
+   risk, and record after each round why the loop continued or stopped. Pass
+   `--slice-id` and the harness computes the first two conditions below for you
+   and exits `4` when either fires. Stop and report the exact outstanding items
+   when any of these applies:
 
    - the same substantive required finding survives two consecutive attempted
      fix rounds without new evidence or a narrower failure;
@@ -244,6 +278,8 @@ generation reasons better per token, so asking for a stronger model must not
 silently raise effort as well), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 `--retry-grace <s>` (default 30), `--staged-only`,
+`--slice-id <id>` (record the round in the slice ledger and report convergence),
+`--ledger-dir <dir>` (default `~/.cache/claude-review-loop/ledger`),
 `--record-baseline` (snapshot the reviewed content and report `baseline_commit`),
 `--baseline-ref <commit-ish>` (review only what changed since that baseline;
 not combinable with `--staged-only`), `--max-bundle-bytes <n>`
@@ -265,7 +301,8 @@ bundle headings and context-redaction manifest entries.
 `result.json` (`state`, `items`, `model`, `effort`, `cost`, `started_at`,
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
 `forbidden_tool_uses`, `skipped_files`, `truncations`, `redactions`,
-`baseline_ref`, `baseline_commit`, `error`, and `scoped_clean`), `events.jsonl` (strict JSONL event
+`baseline_ref`, `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
+and `scoped_clean`), `events.jsonl` (strict JSONL event
 stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
 `review-bundle.md` (the exact redacted repository content Claude reviewed).
 

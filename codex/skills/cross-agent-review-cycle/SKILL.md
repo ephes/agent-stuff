@@ -132,6 +132,14 @@ Apply these rules in this order:
 Cycle count is a diminishing-returns signal, not a stopping rule. As rounds
 accumulate, require clearer evidence of incremental value. After each review,
 record briefly why another cycle is justified or why the loop is stopping.
+
+For Claude reviews, `--slice-id` computes two of these stopping conditions from
+the recorded rounds - a required finding that survived two repairs, and a
+Critical/Warning count that has not fallen across two consecutive rounds - and
+returns exit `4` when either fires. Treat that as the loop ending: adjudicate
+and report, rather than opening another round. Judgment still owns every other
+condition here; the ledger only removes the ones that depend on remembering
+earlier rounds.
 Do not continue merely because the verdict is not `CLEAN`, and do not stop
 merely because an arbitrary round count was reached.
 
@@ -237,13 +245,21 @@ correctly and it hung only at exit.
    ```bash
    reviewer_model="${REVIEWER_MODEL:-opus}"
    run_dir="$(mktemp -d -t claude-review.XXXXXX)"
+   slice_id="${SLICE_ID:-$(basename "$PWD")-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)}"
    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
      --repo "$PWD" \
      --run-dir "$run_dir" \
      --model "$reviewer_model" \
      --context-file "$prompt_file" \
+     --slice-id "$slice_id" \
      --record-baseline
    ```
+
+   `--slice-id` is any stable name for this slice, reused for every round - the
+   default above holds across rounds as long as the branch does. The
+   harness then keeps a cross-round ledger and reports whether the loop is
+   converging, so the stopping conditions below are computed from the actual
+   round history rather than from what this session still remembers of it.
 
    For a delta round you may drop one reviewer tier with
    `reviewer_model="${REVIEWER_MODEL_DELTA:-$reviewer_model}"` - see
@@ -258,7 +274,10 @@ correctly and it hung only at exit.
    keeps finding new unrelated concerns in code it already passed.
 
    Interpret exit `0` as clean, `1` as findings, `2` as a failed/invalid review,
-   and `3` as lock contention. Read `$run_dir/result.json` when it exists; a
+   `3` as lock contention, and `4` as findings plus a ledger verdict that the
+   loop is not converging - stop, report the residual risk, and do not start
+   another round on your own authority. Exit `4` never means the findings are
+   resolved. Read `$run_dir/result.json` when it exists; a
    scoped clean result still requires explicit judgment about skips, truncations,
    or redactions. A non-empty-run-directory rejection (exit `2`) and lock
    contention (exit `3`) happen before the reviewer runs and do not create a new

@@ -11,6 +11,7 @@ from . import bundle as bundle_mod
 from . import model as model_mod
 from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
+from . import ledger as ledger_mod
 from .runner import run_review
 from .monitor import INSPECTION_TOOLS
 from .redact import SECRET_PATH_PATTERNS
@@ -86,6 +87,8 @@ SECRET_READ_DENIES = [
 ]
 
 EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
+# 3 -> no free review slot; 4 -> the slice ledger says the loop is not
+# converging, so stop and hand the residual risk to the user.
 
 
 def _positive_int(value):
@@ -187,6 +190,15 @@ def _build_parser():
         help="review only what changed since this baseline (a commit-ish, "
              "normally the previous round's baseline_commit). Scopes a "
              "re-review to the repair delta instead of the whole slice.")
+    p.add_argument(
+        "--slice-id",
+        help="record this round in the slice's cross-round ledger and report "
+             "whether the loop is still converging. Use the same id for every "
+             "round of one implementation slice.")
+    p.add_argument(
+        "--ledger-dir",
+        default=os.path.expanduser("~/.cache/claude-review-loop/ledger"),
+        help="directory holding per-slice round ledgers")
     p.add_argument(
         "--record-baseline", action="store_true",
         help="snapshot the reviewed content as a dangling commit and report it "
@@ -431,6 +443,34 @@ def _main(argv=None):
     # reviewer ever saw. The snapshot object stays dangling and unreferenced.
     result.baseline_commit = (
         None if result.state in FAILED else b.baseline_commit)
+
+    convergence = None
+    if args.slice_id and result.state not in FAILED:
+        # A failed round reviewed nothing, so it is not part of the slice's
+        # history: recording it would make a repair look like it had a round.
+        ledger_path = ledger_mod.path_for(args.ledger_dir, args.slice_id)
+        record = ledger_mod.record_for(
+            result=result, model=model, effort=effort, run_dir=args.run_dir,
+            baseline_ref=result.baseline_ref,
+            baseline_commit=result.baseline_commit,
+        )
+        try:
+            ledger_mod.append_round(ledger_path, record)
+            rounds = ledger_mod.read_rounds(ledger_path)
+        except OSError as exc:
+            # The ledger informs the stop decision; it must never withhold a
+            # review that already happened.
+            print(f"claude-review-loop: cannot record slice round: {exc}",
+                  file=sys.stderr)
+            rounds = []
+        if rounds:
+            status, reason = ledger_mod.assess(rounds)
+            convergence = {"status": status, "reason": reason,
+                           "round": len(rounds), "ledger": ledger_path}
+            result.slice_id = args.slice_id
+            result.round = len(rounds)
+            result.convergence = convergence
+
     result.write(os.path.join(args.run_dir, "result.json"))
 
     scope = " (scoped)" if result.scoped_clean else ""
@@ -442,8 +482,13 @@ def _main(argv=None):
               "  (pass to --baseline-ref for the next round)")
     for it in result.items:
         print(f"  - [{it['severity']}] {it['path']}: {it['message']}")
+    if convergence:
+        print(f"  LOOP: {convergence['status']} (round {convergence['round']})"
+              f" - {convergence['reason']}")
     if result.error and result.state in FAILED:
         print(f"  error: {result.error.splitlines()[-1]}", file=sys.stderr)
+    if convergence and convergence["status"] == ledger_mod.ESCALATE:
+        return 4
     return EXIT_BY_STATE.get(result.state, 2)
 
 
