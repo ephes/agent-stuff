@@ -2783,6 +2783,88 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
 - Status: resolved; all Critical and Warning findings were repaired, focused
   GPT-5.6 re-reviews closed cleanly, and the gate distinction was reported.
 
+## 2026-09-02 - Treat Pi Worktree Progress as the Implementer Result
+
+- Repo: Emerge startup hydration time-block compaction.
+- Implementer: Pi using `openai-codex/gpt-5.6-sol` under a hard timeout.
+- Reviewer: Claude Opus through `claude-review-loop`.
+- Expected: Pi would write the implementation, run checks, emit a summary, and
+  exit within the supervised window.
+- Actual: Pi wrote the planner, tests, and synchronized feature documentation,
+  then remained alive with an empty buffered report and no further file
+  progress.
+- Impact: the implementation existed but its claimed verification and finish
+  state were unavailable; treating process liveness as progress would have
+  stranded the workflow.
+- Fix or follow-up: terminate the exact timed process group after file progress
+  stops, inspect the worktree as the source of truth, independently run focused
+  and full checks, and send that evidence through the different-family review
+  gate.
+- Status: resolved; the worktree was validated, two review rounds addressed all
+  findings, and no Pi process remained.
+
+## 2026-09-02 - Re-review When Main Changes The Coupled Endpoint
+
+- Repo: Emerge frontend health polling.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: a read-only review would verify that both active defaults, tests,
+  and documentation moved from five to ten seconds without changing runtime
+  behavior beyond cadence.
+- Actual: the first Pi review was clean, then `main` advanced with backend
+  supervisor-health changes before MR creation. A targeted post-rebase review
+  confirmed that `information=basic`, terse lifecycle payloads, overrides,
+  backoff, and response handling remained compatible.
+- Impact: the coupled upstream delta received meaningful independent scrutiny
+  without reopening an unrestricted repository audit.
+- Fix or follow-up: after a clean review, re-review only when a rebase changes a
+  directly coupled endpoint or assumption; otherwise stop at diminishing
+  returns. Keep prompts explicit about duplicated composition defaults and
+  statement-neutral coverage-gate failures.
+- Status: resolved; both reviews were clean and no reviewer process remained.
+
+## 2026-09-02 - Release Support Claims Need Documentation and Guard-Test Parity
+
+- Repo: django-indieweb 0.6.2 release preparation.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: version, changelog, CI, dependency, artifact, and SBOM preparation
+  would make the Django 6.1 compatibility release ready for final review.
+- Actual: the first review found that contributor/development support text
+  still stopped at Django 6.0 and that the dependency-floor regression test
+  still accepted the vulnerable cryptography 48 floor.
+- Impact: release metadata and tests could pass while the documented support
+  contract and security-floor guard contradicted the package metadata.
+- Fix or follow-up: update all support-matrix documentation together and raise
+  the guard-test expectation whenever a security floor is raised; narrowly
+  re-review those repairs before closing the gate.
+- Status: resolved; both warnings were fixed and the targeted second review
+  returned clean with no remaining findings.
+
+## 2026-09-02 - Bind Loading Feedback to Surface, Scope, and Attempt
+
+- Repo: Emerge Process data loading feedback.
+- Implementer: Codex.
+- Reviewer: Pi using `openai-codex/gpt-5.6-sol`.
+- Expected: an application-owned presentation model would give each Process
+  surface truthful freshness, retry, outcome, and accessibility feedback while
+  rejecting stale work.
+- Actual: the first review found that production projection bypassed part of
+  the per-surface composition, inactive surfaces could announce accessibility
+  changes, prior-data freshness was too coarse, and coarse liveness age began
+  at widget display rather than the current attempt. A narrow second review
+  found the headless accessibility fallback was not sufficiently isolated from
+  production inactive-window behavior.
+- Impact: passing component tests could still permit cross-surface outcome
+  leakage, stale freshness claims, reset liveness timing, or duplicate screen
+  reader announcements.
+- Fix or follow-up: carry immutable Process, surface, lifecycle, exact request
+  scope, attempt, generation, and start-time identity through controller truth;
+  compose each surface before projection; and announce only changed active-
+  surface presentations, with headless fallbacks explicitly platform-gated.
+- Status: resolved; accepted findings were repaired and the third, strictly
+  narrow review returned clean with no remaining findings.
+
 ## 2026-09-03 - Lifecycle Regressions Should Traverse Production Callbacks
 
 - Repo: Emerge frontend hydration request lifetime fix.
