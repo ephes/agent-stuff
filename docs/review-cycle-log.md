@@ -2907,3 +2907,231 @@ When records expose both an exact ISO timestamp and a lossy family-specific time
 - Fix or follow-up: always run the hooks with `--files` over
   `git ls-files --others --exclude-standard` when the slice adds files.
 - Status: resolved.
+
+## 2026-09-07 - Baseline consultation snapshots need a Git HEAD
+
+- Repo: django-cast editor API rich-text security fix.
+- Expected: a temporary Git repository containing selected baseline source as
+  untracked files would be immediately reviewable by claude-review-loop.
+- Actual: bundle collection uses HEAD for diffstat and rejected the empty repo
+  before any reviewer was spawned.
+- Impact: one invalid preflight; no review verdict was consumed.
+- Fix: create an empty initial commit in the temporary snapshot only, then
+  invoke the harness with a fresh run directory. Keep source evidence below
+  the repository-derived boundary and intent in the trusted context file.
+- Status: resolved; direct Opus 5 consultation completed successfully.
+
+## 2026-09-07 - Review exception handling through the caller chain
+
+- Repo: django-cast editor API rich-text sanitization.
+- Expected: moving configuration resolution outside a helper's invalid-input
+  guard would keep configuration failures visible as server failures.
+- Actual: an outer custom-block conversion envelope still caught TypeError
+  and downgraded it to a 400. A helper-only regression missed that interaction.
+- Impact: operational failures could look like invalid author input.
+- Fix: preserve the cause in ImproperlyConfigured and test the caller path
+  as well as the helper.
+- Review outcome: direct Claude Opus 5 consultation, then three implementation
+  reviews; warnings declined from four to one to zero. The last verdict was
+  Suggestion-only and accepted as advisory at diminishing returns, not CLEAN.
+  Optional preservation and nested-error UX improvements were tracked as
+  follow-ups; required checks and coverage passed.
+- Status: resolved; use call-chain regressions for error-boundary changes.
+
+## 2026-09-07 - Frontend isolation and review evidence must cover execution
+
+- Repo: emerge, frontend maintainability implementation (still in progress).
+- Expected: a domain/application path selection stayed Qt-free; clean unchanged
+  source implied the domain coverage floor was already met.
+- Actual: the Qt pytest plugin imported Qt before collection and shared fixtures
+  imported concrete adapters. An isolated original-HEAD run also reproduced the
+  same 26 uncovered domain lines as the first integrated batch.
+- Fix: disable the Qt plugin for the real lane and verify collection through
+  finalizers in a fresh full-lane subprocess. Keep fixture isolation inputs pure
+  and pin production constant/stub equivalence in the adapter lane. Add meaningful
+  edge tests rather than lower the coverage floor or assume a baseline pass.
+- Review evidence: supervised Opus 5 flagged three practical warnings; repairs
+  are awaiting bounded re-review. Two innocent local `token` assignments were
+  redacted from source evidence. Renaming those issuance locals removes the
+  false-positive without weakening credential redaction. No CLEAN claim yet.
+- Integration lesson: after executor admission changes, a task-ledger row is not
+  proof that the backend worker started. Tests should await the actual milestone.
+- Status: implementation and review continue; record the final disposition later.
+
+### Follow-up: profile concurrency limits need operator-path evidence
+
+- The bounded second Opus 5 review verified the initial three warnings and
+  returned one new Warning plus three Suggestions, with no hidden or truncated
+  evidence. Counting obsolete workers correctly exposed an untested operator
+  path: saturation silently fell back to set detail.
+- Preserve the scheduling bound while testing the actual selected detail pane
+  under saturation; accepted requests must either progress or report a truthful
+  state. This repair is ongoing alongside a canonical family-alias correction.
+- Test-helper organization is deferred as low-impact; no CLEAN claim or another
+  agreement-seeking pass follows merely from that suggestion.
+
+### Follow-up: close the broad review when only bounded suggestions remain
+
+- Third supervised Opus 5 review verified the saturated-profile repair and
+  application terminal ownership: zero Critical/Warning, four Suggestions, no
+  omissions/redactions/truncation. Verdict remains ISSUES, accepted advisory.
+- Stop the broad cycle at diminishing returns. Apply small guard/diagnostics/API
+  improvements without another pass merely for agreement. A concrete removed-
+  Process resolver discrepancy gets a regression and bounded scrutiny with the
+  next lifecycle integration; unrelated test organization remains deferred.
+- Integrated S6 snapshot passes its unchanged domain100% floor. Subsequent
+  residency implementation is separate and must earn its own evidence/review.
+
+### Django-cast dependency re-review attempted an out-of-scope glob
+
+- Expected: the supervised Opus 5 re-review would inspect only the harness-owned
+  bundle and return a structured verdict for the dependency-security repair.
+- Actual: Claude requested a Glob target at the parent of its canonical review
+  directory. The harness rejected the attempt and returned INVALID with no
+  usable findings.
+- Impact: the repair remained unverified; no clean result was claimed.
+- Fix: discard the invalid run and retry from a fresh directory with concise,
+  self-contained caller context that does not invite inspection of prior logs.
+- Follow-up: three nested-directory retries repeated the out-of-scope Glob and
+  were discarded. A generic temporary review directory restored valid reviews.
+- Status: the final valid Opus 5 review reported zero Critical/Warning findings
+  and three Suggestions. Two low-cost documentation/tool-pinning suggestions
+  were applied. A metadata/list synchronization helper was declined because a
+  full lowest-direct resolution selected unrelated, Python-incompatible legacy
+  packages; broad dependency-baseline work is separate from the audited floors.
+
+### Frontend residency: test enabled composition and restoration effects
+
+- An explicit eager embedding profile preserves supported tests and simulation,
+  but its broad suite cannot prove the deployed residency path. Real enabled
+  window tests found shared-cap accounting, sliced-apply pins and failed-read
+  revisit gaps that isolated policy tests could not expose.
+- Transaction rollback restored models yet changed the selected tab while
+  rebuilding a view. Tests must drain deferred Qt deletion, check selection and
+  readiness, and cover explicit reconstruction after rollback itself fails.
+- Retained-view counts must distinguish full views from lightweight placeholders.
+  Measure application models and raw task/Merge payloads as well as widgets;
+  successful reactivation counters prevent a falsely cheap failed-load replay.
+- A small resolver cleanup changed a diagnostic from nonblocking success context
+  into a session safety latch. Regression tests should use the real downstream
+  gate, not merely assert that a diagnostic callback was invoked. Required
+  repairs receive bounded independent re-review even after a prior advisory stop.
+
+2026-09-07 — Frontend maintainability S8 repair verification: keep cold registration separate from full-view installation success. A rollback test returning False can pass before its injected failure executes; assert the fault callback was reached and pair it with successful cold single/group transactions. Reuse canonical table-plan scopes in both hydration and eviction. For async operation pins, prove ownership through queued delivery and second worker submissions, and assert progress/cursor cleanup separately from pin settlement. Preserve an exact prior-review source snapshot so repair re-review can omit unrelated historical test moves without omitting the actual repair delta. A regression test that also passes old code is behavioral preservation evidence, not a reproduced defect.
+
+2026-09-07 — Final maintainability repair review: explicit claude-opus-5 returned ISSUES with zero Critical/Warning and three Suggestions after 658.317s. Accepted the required repairs and stopped advisory, not CLEAN. Restored two misplaced docstrings without another agreement pass; deferred timestamp memoization and 10 Hz catalog pin scanning to representative measurements. Inspected one false-positive redaction of an unchanged diagnostic key, with no omissions/truncations/forbidden tool use. The final source replay reconfirmed the measured ownership bounds. User review/native acceptance remain open; no commits or Jira writes.
+
+## 2026-09-07 — Traefik transaction review scope
+
+Expected: focused repair reviews stop after material findings close. Observed:
+reviewer repeatedly parsed a slash-containing Git branch as a repository path and
+raised documentation warnings despite the tracked path existing. Impact: avoidable
+wording churn. Resolution: verify refs/paths with Git and reject the false finding
+with evidence; also execute the claimed check-mode failure before accepting it.
+Status: loop stopped after three passes; no unconditional CLEAN claim.
+
+2026-09-07 — Manual replacement native freeze: a shown QTableWidget with ResizeToContents remeasured the table on each setItem. Native sample2420/2426 in that path; deterministic80row delegate calls315280 before/560 after. Freeze header geometry during complete result insertion and preserve sorting/redraw settings on failure. Do not convert inherited disabled redraw to an explicit table freeze: toggle updates only if initially enabled. Parent-reenable regression caught that Qt distinction. Focused Opus5 returned0Critical/Warning/1Suggestion271.578s, no redactions/omissions; tiny guard applied and final10242tests passed. Stop advisory without another agreement pass. Final native retry remains pending; no live app restart or code commit/deployment performed.
+
+
+### 2026-09-08 — Traefik prerequisite review
+
+A focused Claude Opus 5 preparation review added enforced shared-middleware
+preservation and explicit invalid-target refusal. The second review incorrectly
+inferred a host-guard bypass from an incremental diff; the unchanged target
+pre-task plus an actual limited-host refusal disproved it. Three rounds ended
+with diagnostic-wording Suggestions only, accepted as advisory at diminishing
+returns. Real systemd failure-path tests and live no-change refusals supported
+the disposition. Keep unchanged guard context visible when reviewing small repair
+deltas; do not reopen a broad audit for wording-only feedback. No delegated
+subagents were used.
+
+
+### 2026-09-08 — Finish proxy updates without unnecessary console gates
+
+The owner rejected an overbuilt rescue-console prerequisite for a proxy-only
+patch. Replaced it with truthful verified SSH recovery evidence while preserving
+checksums, backups, exact file scope, paired records and automatic rollback. All
+three live Ansible updates succeeded. Added a reusable Ansible health-probe task
+so inspection setup is reproducible too. Three focused Claude Opus 5 reviews
+improved transport, timeout/empty-baseline handling, interpreter consistency and
+cleanup tests. The final claim that the interpreter diagnostic misstates a missing
+binary was rejected: the text explicitly names the required absolute path and
+minimum version, without asserting which condition failed. Remaining suggestions
+were diagnostic/test-output wording; stopped at diminishing returns. This was an
+adjudicated review closure, not an unconditional CLEAN verdict. Do not let a plan
+invented by the agent become a user-authorization barrier for a routine patch.
+
+
+### 2026-09-08 — django-cast security repair review, first round
+
+Expected: the full implementation and planning record reach review in sync.
+Observed: Opus 5 reported one backlog-sync Warning and three Suggestions;
+implementation checks passed but the backlog still described fixed findings as
+future work. Narrowed the backlog to deferred hardening, added an allowed/denied
+admin-search regression, and made endpoint test assertions use route names.
+Verified the separate author self-edit access policy and tracked it without
+expanding the creation/preview repair. The search test found no production defect.
+Status: accepted repair delta awaits focused re-review; no clean claim yet.
+Lesson: update active backlog items as soon as implementation validation passes,
+then keep subsequent reviews tied to accepted findings and the repair delta.
+
+
+### 2026-09-08 — django-cast security repair review closure
+
+The focused second claude-opus-5 review resolved the backlog Warning and
+returned only two Suggestions. Added a permitted nonmatching search result so
+the regression distinguishes searched from unsearched paths, and completed
+the chronological post-repair evidence. No production code changed after round
+one. Stopped advisory at diminishing returns: no Critical/Warning remains, and
+another model pass would mostly revisit a small test assertion and bookkeeping.
+The author self-edit/delete access policy remains an explicit separate follow-up.
+Both reviews were direct and had no skipped/truncated/redacted evidence or
+forbidden tool use. Final validation follows the tiny test refinement; no commit.
+Lesson: security search tests need both permission controls and query selectivity
+controls; avoid waiting for review to point out missing contemporaneous evidence.
+
+Final django-cast gate after the search-test control: just check passed,
+2,616 passed / one PostgreSQL-only skip / 100% Python coverage; Ruff and mypy
+passed. Changes remain uncommitted.
+
+### 2026-09-08 — frontend refactoring plan: qualify reviewer-proposed invariants
+
+Two requested direct claude-opus-5 xhigh cycles completed. First-round acceptance
+repairs were useful, but adopted cardinality and epoch-accounting wording
+overgeneralized source behavior; the second round narrowed those statements.
+Trace the entire admission/retirement path before promoting a reviewer
+suggestion into a plan invariant: global keys can bypass a scoped counter,
+and shutdown can intentionally bypass ordinary outcome recording. Final
+factual corrections passed local source/probe/build/link checks. Stopped at
+the user's requested two cycles; the final Warning repair is not independently
+re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits.
+
+- 2026-09-08 frontend recovery metadata: small GPT-5.6 Sol slice + direct Opus 5 xhigh review converged advisory (0 Critical/Warning). A regression against a removed retention map remains identifier-specific; retarget it when the owner moves. Comment-only clarification verified by AST equality and lint; no repeated full pipeline or agreement-only review. Complete.
+
+- 2026-09-08 typed hydration forwarding: Opus 5 xhigh review advisory (0 required findings); protocol default drift and probe-count-coupled tests improved locally. Keep actual cache enabled in wiring tests. All-six pre/post-call checks and explicit fault-execution assertions pass. Production stayed byte-identical to full-check/review snapshot; test-only repairs verified in focused and guarded lanes without an agreement-only review. Separate cache client bypass reproduced on old/new proxy and selected as next slice.
+
+2026-09-08 frontend shared-cache authorization slice: direct claude-opus-5 xhigh via supervised harness, initial1Warning+5Suggestions, focusedrepair Suggestionsonly. Stale fallback-only docstrings were the required repair; marker-triggered warm lookup and observed read-lock barrier materially strengthened tests. Runtime AST comparison established doc/test-only repair after full pipeline; targeted+guarded lanes rerun. Stop advisory, not CLEAN; no third pass for wrap/consumer-doc nits. Callback documentation prompted checking actual live predicates, not speculative lock redesign. Faithful snapshots kept unrelated shared-doc dirt out of both reviews.
+
+2026-09-08 queued targeted demand: supervised claude-opus-5 xhigh initial ISSUES0CW4S. Completed queue ownership removal + exact existing test assertion migration. Coordinator caught whole-map emptiness weakening into single-key absence before review and requested count-preserving queries. Review useful docs rationale/lock wording/stale plan evidence fixed; API keyword-only style declined. Stop advisory, not CLEAN, no agreement-only pass. All runtime ASTs/tests/config identical to frozen full check after comment-only repair. Avoid carrying obsolete line-number evidence into remaining-work plan.
+
+### 2026-09-08 frontend R2d operation ownership
+
+Opus5 xhigh initial1W2S, focused2S; required stale remaining-work Warning fixed and reviewed, final tiny wording fixes applied, advisory NOT CLEAN. No scope omissions. Update all current-state status paragraphs before initial review; historical R2 status can remain dated. Preserve first-issue order separately from reservation order and directly test id-only vs full-record retirement; controlled mutations were detected. Full check10295 passed using private TMPDIR after shared macOS mktemp collision before coverage began; no shared file deletion or unrelated recipe fix. Repair552focused/3059guarded, runtime AST/config identical. Code ccb56f65/docs2924fd6.
+
+2026-09-08 backend-review frontend fixes: three GPT-5.6 Sol workers, two supervised direct Opus5 xhigh reviews. Initial1Warning7Suggestions; focused0Critical0Warning6Suggestions, final advisory NOT CLEAN. Cold refresh must clear non-visible observation references before dropping model allocation. Reconcile already rearms pending identity retries; review suggestion missed caller timer. Freeze all worker edits before full-check collection: concurrent test edits produced stale assertions. Verify saved signatures against worker reports; claimed required keyword remained optional until final correction. Fullcheck10264 domain100%, non-domain91.39%; final signature repair97focused+mypy. Stop after bounded requested review, defer instrumentation/diagnostic nits; no commits.
+
+### 2026-09-08 frontend R2e diagnostic ownership
+
+Opus5 xhigh initial ISSUES0CW3S349.769s, metadata clean. Applied doc clarity/wrap and diagnostic-only snapshot assertion; deferred speculative internal paired-field redesign because all writers encapsulated and invariants maintained (sort tuple unique Process key makes claimed context tie impossible). Advisory NOT CLEAN; no agreement-only pass. Fullcheck10301/155.86s, types430 domain100 non91.38,617focused,112E2E; controlledcorrelation/order mutations detected with executionmarkers. Repair557focused/3064guarded; runtimeASTidentical. Coordinator took over two tiny doc/test repairs after interrupted worker repairturn produced no edits. Code df1e0a21/docs8c8270e.
+
+### 2026-09-08 frontend R2f delayed ownership
+
+Initial integration caught reservation leak from id-only operation retire in combined cancellation and overstrong dual-id scheduler-failure cleanup. Both repaired before Opus; controlled mutations demonstrated tests detect them plus missing active-op guard. Opus5xhigh ISSUES0CW3S287.054s, no metadata omissions. Applied docwrap and successful stored-handle assertion/removed unused testhelper args; speculative displacedtimerbehavior deferred pendingrepro sincebaselineequivalent. Advisory NOT CLEAN. Fullcheck10307/159.84s types430 domain100 non91.39;623focused112E2E;repair563focused3070guarded, ASTidentical. Code43361016/docs8a6411b. Use actual prek scopedhooks before fullcheck to catch repositoryformat flags; always wrap docstrings before initialreview.
+
+### 2026-09-08 frontend R2g settlement ownership
+
+InitialOpus5xhigh0C1W3S296.053s; focused0CW4S270.308s, metadata clean. Coordinator first caught grouping/shadowmap and stale bind-rejection H2 consumption; initial review caught sibling None-return rejection. Fix coupled success/failure branches together when adding reentry checks. Moving independent maps into shared immutable entries changes synchronization risk: use existing lock for new settlement accesses, keep observation/callback effects outside, verify with injected lock assertions and mutation. Restore original recovery-ticket predicate, not only sentinel equality. Four material repair mutations executed and caught. Focused re-review resolved required Warning; useful ordinary intent-rejection test/comments applied, already-locked reactivation suggestion factually rejected. Advisory NOT CLEAN; no agreement-only third pass. Fullcheck10314/135.26s types430 domain100 non91.40;630focused112E2E; final571focused3075guarded runtimeASTidentical. Codef43f589e/docsca29e614. Preserved user macOS venv mitigation/note without stopping tests; durable test-infrastructure slice next.
+
+### 2026-09-08 frontend M1 macOS xdist titles
+
+Sol runtimehelper patches actual __channelexec__ WorkerInteractor globals, not separately imported xdist.remote. Real2worker identity probe passes4cases; disabledhookcontrol fails4 evenwithpreservedvendorpatch. Scopedhelper keeps applicationsetproctitle/defaultparallel unchanged. Opus5xhigh initial1W1S312.848s; focused1W1S140.367s after following suggestedslowmarker; final0CW2S81.107s after explicit90s timeout. Derive enclosing subprocess watchdog directly from sharedchildbudget; duration-classification slow marker can be removed by later reconciliation and should not own timeout policy. FinalS constant applied/tested; stopadvisory NOT CLEAN. Thirdreview evidence files had become tracked scratchbaseline, so bundle onlyshowedhunks: corrected private snapshot helper to stage code/docs only, remove evidence fromscratchindex and retain full current evidence untracked eachround; verified fullbytecopy/indexstate. Limitation disclosed; finalrequiredmarkerrepair independently checked againstactualcollection90s/not-slow;no4thagreementpass. Fullcheck10320/131.64s types430 domain100 non91.40;33focused112E2E3075guarded;final22focused2.97s docs/hooks/runtimeASTidentical. Codee72f5a17/docsfa88430c. No active tests stopped; vendorpatch/note preserved; desktopfreezecausation stillopen.
