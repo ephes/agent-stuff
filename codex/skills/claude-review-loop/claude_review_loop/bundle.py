@@ -8,18 +8,31 @@ from dataclasses import dataclass, field
 from .redact import is_secret_path, redact_diff, redact_text
 
 
+BASELINE_MESSAGE = "claude-review-loop review baseline"
+BASELINE_IDENTITY = {
+    "GIT_AUTHOR_NAME": "claude-review-loop",
+    "GIT_AUTHOR_EMAIL": "claude-review-loop@localhost",
+    "GIT_COMMITTER_NAME": "claude-review-loop",
+    "GIT_COMMITTER_EMAIL": "claude-review-loop@localhost",
+}
+
+
 @dataclass
 class BundleResult:
     path: str
     skipped_files: list = field(default_factory=list)
     truncations: list = field(default_factory=list)
     redactions: list = field(default_factory=list)
+    baseline_ref: str = None
+    baseline_commit: str = None
 
 
-def _git(repo, *args, replacement_log):
+def _git(repo, *args, replacement_log, env_extra=None, input_bytes=None):
     env = dict(os.environ, LC_ALL="C", LANG="C")
+    if env_extra:
+        env.update(env_extra)
     completed = subprocess.run(["git", "--no-optional-locks", *args],
-                               cwd=repo, check=True,
+                               cwd=repo, check=True, input=input_bytes,
                                capture_output=True, env=env)
     # Decode explicitly after byte capture: subprocess text mode performs
     # universal-newline conversion, which would turn repository-controlled lone
@@ -43,6 +56,59 @@ def _diff(repo, *args, replacement_log):
         "--no-ext-diff", "--no-textconv", *args,
         replacement_log=replacement_log,
     )
+
+
+def _resolve_tree(repo, ref, *, replacement_log):
+    """Resolve a caller-supplied baseline ref to the tree object it names."""
+    try:
+        out = _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}",
+                   replacement_log=replacement_log)
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(
+            f"baseline ref does not name a tree in this repository: {ref}"
+        ) from exc
+    tree = out.strip()
+    if not tree:
+        raise ValueError(
+            f"baseline ref does not name a tree in this repository: {ref}"
+        )
+    return tree
+
+
+def _snapshot_tree(repo, index_path, include_paths, *, replacement_log):
+    """Write a tree object for the reviewed content.
+
+    Uses a private index file so the caller's index, worktree, and refs are
+    never touched. Only `include_paths` - the tracked changes and the untracked
+    files the bundle accepted - enter the tree, so a skipped secret-looking,
+    oversized, or binary file is not written into the object store either.
+    """
+    env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
+    _git(repo, "read-tree", "HEAD",
+         replacement_log=replacement_log, env_extra=env_extra)
+    paths = sorted(set(include_paths))
+    if paths:
+        # `:(literal)` stops a filename containing pathspec magic (`*`, `:`,
+        # a leading `!`) from matching anything other than itself.
+        payload = b"".join(f":(literal){p}".encode() + b"\0" for p in paths)
+        _git(repo, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
+             replacement_log=replacement_log, env_extra=env_extra,
+             input_bytes=payload)
+    return _git(repo, "write-tree",
+                replacement_log=replacement_log, env_extra=env_extra).strip()
+
+
+def _commit_snapshot(repo, tree, *, replacement_log):
+    """Commit a snapshot tree as a dangling commit.
+
+    No ref points at it, so it stays out of the caller's history and is
+    collected by a later `git gc`. A fixed identity keeps it from failing in a
+    repository without a configured user and from being mistaken for the
+    caller's own work.
+    """
+    return _git(repo, "commit-tree", tree, "-p", "HEAD", "-m", BASELINE_MESSAGE,
+                replacement_log=replacement_log,
+                env_extra=BASELINE_IDENTITY).strip()
 
 
 def _diff_chunk_path(chunk):
@@ -82,30 +148,23 @@ def _truncate_diff_per_file(diff_text, limit, label, truncations):
 
 def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                  max_bundle_bytes, staged_only=False, context_files=None,
-                 max_context_file_size=262144):
+                 max_context_file_size=262144, baseline_ref=None,
+                 record_baseline=False, index_path=None):
+    """Assemble the review bundle from the worktree.
+
+    Without `baseline_ref` the bundle is the whole worktree delta against
+    `HEAD`. With one, it holds only what changed since that baseline snapshot -
+    the repair delta a re-review round is meant to inspect - so later rounds do
+    not re-read the whole slice and rediscover unrelated concerns in it.
+    """
+    if baseline_ref is not None and staged_only:
+        raise ValueError("staged_only cannot be combined with baseline_ref")
     skipped, truncations, redactions = [], [], []
     decoding_replacements = []
     sections = []  # (priority, title, body) - higher numbers are dropped first
     context_titles = set()
-
-    diffstat = _diff(repo, "--stat", "HEAD",
-                     replacement_log=decoding_replacements)
-    sections.append((0, "Diffstat", diffstat or "(no tracked changes)"))
-
-    staged = _diff(repo, "--cached", replacement_log=decoding_replacements)
-    if staged.strip():
-        staged, paths = redact_diff(staged)
-        redactions.extend({"path": p, "section": "staged diff"} for p in paths)
-        staged = _truncate_diff_per_file(staged, max_diff_bytes_per_file, "staged diff", truncations)
-        sections.append((1, "Staged diff", staged))
-
-    if not staged_only:
-        unstaged = _diff(repo, replacement_log=decoding_replacements)
-        if unstaged.strip():
-            unstaged, paths = redact_diff(unstaged)
-            redactions.extend({"path": p, "section": "unstaged diff"} for p in paths)
-            unstaged = _truncate_diff_per_file(unstaged, max_diff_bytes_per_file, "unstaged diff", truncations)
-            sections.append((1, "Unstaged diff", unstaged))
+    delta_mode = baseline_ref is not None
+    included_untracked = []
 
     # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
     # surrounding quotes git adds for names with spaces.
@@ -166,8 +225,77 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         content, changed = redact_text(decoded)
         if changed:
             redactions.append({"path": path, "section": "untracked file"})
+        included_untracked.append(path)
         untracked_bodies.append(f"### {path}\n```\n{content}\n```")
-    name_status = _diff(repo, "--name-status", "HEAD",
+    # Resolve the caller's baseline before writing any object, so a bad ref
+    # fails without leaving anything behind in the repository.
+    base_tree = _resolve_tree(repo, baseline_ref,
+                              replacement_log=decoding_replacements) if delta_mode else None
+
+    baseline_commit = None
+    snapshot = None
+    if delta_mode or record_baseline:
+        tracked_changed = [p for p in _diff(
+            repo, "--name-only", "-z", "HEAD",
+            replacement_log=decoding_replacements).split("\0") if p]
+        index_path = index_path or os.path.join(
+            os.path.dirname(os.path.abspath(out_path)), "baseline.index")
+        try:
+            snapshot = _snapshot_tree(
+                repo, index_path, tracked_changed + included_untracked,
+                replacement_log=decoding_replacements)
+        finally:
+            # Scratch state: the reviewer can read the run directory, and the
+            # index has no business being visible there after the tree exists.
+            try:
+                os.unlink(index_path)
+            except OSError:
+                pass
+        if record_baseline:
+            baseline_commit = _commit_snapshot(
+                repo, snapshot, replacement_log=decoding_replacements)
+
+    if delta_mode:
+        compare = (base_tree, snapshot)
+        diffstat = _diff(repo, "--stat", *compare,
+                         replacement_log=decoding_replacements)
+        sections.append((0, "Diffstat (since the previous review)",
+                         diffstat or "(nothing changed since the previous review)"))
+        delta = _diff(repo, *compare, replacement_log=decoding_replacements)
+        if delta.strip():
+            delta, paths = redact_diff(delta)
+            redactions.extend({"path": p, "section": "repair delta"} for p in paths)
+            delta = _truncate_diff_per_file(delta, max_diff_bytes_per_file,
+                                            "repair delta", truncations)
+            sections.append((1, "Changes since the previous review", delta))
+        # No separate untracked section: a file created since the baseline is
+        # already in the delta as an added file, and one that has not changed
+        # since then is deliberately out of this round's scope.
+    else:
+        compare = ("HEAD",)
+        diffstat = _diff(repo, "--stat", "HEAD",
+                         replacement_log=decoding_replacements)
+        sections.append((0, "Diffstat", diffstat or "(no tracked changes)"))
+
+        staged = _diff(repo, "--cached", replacement_log=decoding_replacements)
+        if staged.strip():
+            staged, paths = redact_diff(staged)
+            redactions.extend({"path": p, "section": "staged diff"} for p in paths)
+            staged = _truncate_diff_per_file(staged, max_diff_bytes_per_file, "staged diff", truncations)
+            sections.append((1, "Staged diff", staged))
+
+        if not staged_only:
+            unstaged = _diff(repo, replacement_log=decoding_replacements)
+            if unstaged.strip():
+                unstaged, paths = redact_diff(unstaged)
+                redactions.extend({"path": p, "section": "unstaged diff"} for p in paths)
+                unstaged = _truncate_diff_per_file(unstaged, max_diff_bytes_per_file, "unstaged diff", truncations)
+                sections.append((1, "Unstaged diff", unstaged))
+
+        if untracked_bodies:
+            sections.append((2, "Untracked files", "\n\n".join(untracked_bodies)))
+
+    name_status = _diff(repo, "--name-status", *compare,
                         replacement_log=decoding_replacements)
     for line in name_status.split("\n"):
         tag = line.split("\t", 1)[0]
@@ -175,14 +303,11 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
             notes.append(f"- {line} (renamed)")
         elif tag.startswith("D"):
             notes.append(f"- {line} (deleted)")
-    numstat = _diff(repo, "--numstat", "HEAD",
+    numstat = _diff(repo, "--numstat", *compare,
                     replacement_log=decoding_replacements)
     for line in numstat.split("\n"):
         if line.startswith("-\t-\t"):
             skipped.append({"path": line.split(chr(9))[-1], "reason": "binary-diff"})
-
-    if untracked_bodies:
-        sections.append((2, "Untracked files", "\n\n".join(untracked_bodies)))
     if notes:
         sections.append((3, "Renamed / deleted", "\n".join(notes)))
     if decoding_replacements:
@@ -286,4 +411,5 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
     with open(out_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
     return BundleResult(path=out_path, skipped_files=skipped,
-                        truncations=truncations, redactions=redactions)
+                        truncations=truncations, redactions=redactions,
+                        baseline_ref=base_tree, baseline_commit=baseline_commit)

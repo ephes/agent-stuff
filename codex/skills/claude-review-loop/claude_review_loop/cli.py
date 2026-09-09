@@ -182,6 +182,17 @@ def _build_parser():
     p.add_argument("--context-file", action="append", default=[],
                    help="copy a redacted context file into the review bundle; repeatable")
     p.add_argument("--staged-only", action="store_true")
+    p.add_argument(
+        "--baseline-ref",
+        help="review only what changed since this baseline (a commit-ish, "
+             "normally the previous round's baseline_commit). Scopes a "
+             "re-review to the repair delta instead of the whole slice.")
+    p.add_argument(
+        "--record-baseline", action="store_true",
+        help="snapshot the reviewed content as a dangling commit and report it "
+             "as baseline_commit, so the next round can pass it to "
+             "--baseline-ref. Writes objects to the repository; no ref is "
+             "created and the caller's index and worktree are untouched.")
     return p
 
 
@@ -239,13 +250,24 @@ def _claude_cmd(model, effort, review_root):
     ]
 
 
-def _write_prompt(bundle_path, prompt_path):
+DELTA_PROMPT = (
+    "This is a re-review. The bundle holds only what changed since the "
+    "previous review of this slice, not the whole change. Verify that the "
+    "findings from that review are actually fixed and that these changes "
+    "introduce no regression. Report every Critical you can see; keep lower "
+    "severities to this delta, since code outside it was already reviewed and "
+    "is a follow-up rather than a finding for this round.\n\n"
+)
+
+
+def _write_prompt(bundle_path, prompt_path, delta=False):
     with open(bundle_path, encoding="utf-8", newline="") as fh:
         bundle = fh.read()
     text = (
         "Review the following git diff bundle. This is a read-only review. "
         "Return only the schema-conforming structured verdict requested by your "
         "system instructions.\n\n"
+        f"{DELTA_PROMPT if delta else ''}"
         f"{bundle}"
     )
     with open(prompt_path, "w", encoding="utf-8", newline="") as fh:
@@ -312,8 +334,10 @@ def _main(argv=None):
             staged_only=args.staged_only,
             context_files=args.context_file,
             max_context_file_size=args.max_context_file_size,
+            baseline_ref=args.baseline_ref,
+            record_baseline=args.record_baseline,
         )
-        _write_prompt(bundle_path, prompt_path)
+        _write_prompt(bundle_path, prompt_path, delta=bool(args.baseline_ref))
     except (subprocess.CalledProcessError, OSError, ValueError) as e:
         err = getattr(e, "stderr", None)
         if err is None:
@@ -387,12 +411,21 @@ def _main(argv=None):
     result.skipped_files = b.skipped_files
     result.truncations = b.truncations
     result.redactions = b.redactions
+    result.baseline_ref = b.baseline_ref
+    # A failed round reviewed nothing, so its snapshot must not become the next
+    # round's baseline: that would scope the next review against content no
+    # reviewer ever saw. The snapshot object stays dangling and unreferenced.
+    result.baseline_commit = (
+        None if result.state in FAILED else b.baseline_commit)
     result.write(os.path.join(args.run_dir, "result.json"))
 
     scope = " (scoped)" if result.scoped_clean else ""
     print(f"REVIEW: {result.state}{scope}  items={len(result.items)}  "
           f"model={model}  effort={effort}  "
           f"result={os.path.join(args.run_dir, 'result.json')}")
+    if result.baseline_commit:
+        print(f"  baseline={result.baseline_commit}"
+              "  (pass to --baseline-ref for the next round)")
     for it in result.items:
         print(f"  - [{it['severity']}] {it['path']}: {it['message']}")
     if result.error and result.state in FAILED:

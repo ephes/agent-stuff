@@ -449,5 +449,153 @@ class TestBundle(unittest.TestCase):
         self.assertTrue(any(item["path"] == "a.py" for item in res.redactions))
 
 
+
+class TestBaselineDelta(unittest.TestCase):
+    """A re-review round should see the repair delta, not the whole slice again."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        self.out_dir = os.path.join(self.tmp.name, "run")
+        os.makedirs(self.repo)
+        os.makedirs(self.out_dir)
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        self._write("a.py", "print('one')\n")
+        git(self.repo, "add", "a.py")
+        git(self.repo, "commit", "-qm", "init")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+
+    def _build(self, name="review-bundle.md", **kw):
+        out = os.path.join(self.out_dir, name)
+        defaults = dict(max_file_size=262144, max_diff_bytes_per_file=262144,
+                        max_bundle_bytes=2097152)
+        defaults.update(kw)
+        return bundle.build_bundle(self.repo, out, **defaults)
+
+    def _text(self, res):
+        with open(res.path) as fh:
+            return fh.read()
+
+    def _round_one(self):
+        self._write("a.py", "print('slice change')\n")
+        self._write("added.py", "SLICE_CONSTANT = 1\n")
+        return self._build(record_baseline=True)
+
+    def test_recorded_baseline_leaves_index_worktree_and_refs_alone(self):
+        before = subprocess.run(["git", "status", "--porcelain", "-uall"],
+                                cwd=self.repo, capture_output=True, text=True).stdout
+        refs_before = subprocess.run(["git", "show-ref"], cwd=self.repo,
+                                     capture_output=True, text=True).stdout
+        res = self._round_one()
+        self.assertIsNotNone(res.baseline_commit)
+        after = subprocess.run(["git", "status", "--porcelain", "-uall"],
+                               cwd=self.repo, capture_output=True, text=True).stdout
+        refs_after = subprocess.run(["git", "show-ref"], cwd=self.repo,
+                                    capture_output=True, text=True).stdout
+        self.assertEqual(before, after.replace("?? added.py\n", "")
+                         .replace(" M a.py\n", ""))
+        self.assertEqual(refs_before, refs_after)
+        kind = subprocess.run(["git", "cat-file", "-t", res.baseline_commit],
+                              cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(kind.stdout.strip(), "commit")
+
+    def test_private_index_does_not_stay_in_the_run_directory(self):
+        self._round_one()
+        self.assertNotIn("baseline.index", os.listdir(self.out_dir))
+
+    def test_delta_bundle_holds_only_changes_since_the_baseline(self):
+        first = self._round_one()
+        self._write("a.py", "print('repair')\n")
+        second = self._build("round-2.md", baseline_ref=first.baseline_commit)
+        text = self._text(second)
+        self.assertIn("+print('repair')", text)
+        # Reviewed and unchanged since the baseline: out of this round's scope.
+        # The repaired line itself still shows as the diff's removed side.
+        self.assertNotIn("SLICE_CONSTANT", text)
+        self.assertNotIn("added.py", text)
+        self.assertEqual(text.count("diff --git"), 1)
+
+    def test_delta_bundle_shows_a_file_added_since_the_baseline(self):
+        first = self._round_one()
+        self._write("regression_test.py", "def test_repair(): pass\n")
+        second = self._build("round-2.md", baseline_ref=first.baseline_commit)
+        text = self._text(second)
+        self.assertIn("test_repair", text)
+        self.assertIn("regression_test.py", text)
+
+    def test_delta_bundle_shows_an_untracked_file_edited_since_the_baseline(self):
+        first = self._round_one()
+        self._write("added.py", "SLICE_CONSTANT = 2\n")
+        text = self._text(self._build("round-2.md",
+                                      baseline_ref=first.baseline_commit))
+        self.assertIn("SLICE_CONSTANT = 2", text)
+        self.assertIn("-SLICE_CONSTANT = 1", text)
+
+    def test_delta_bundle_is_empty_when_nothing_changed_since_the_baseline(self):
+        first = self._round_one()
+        text = self._text(self._build("round-2.md",
+                                      baseline_ref=first.baseline_commit))
+        self.assertIn("nothing changed since the previous review", text)
+        self.assertNotIn("slice change", text)
+
+    def test_delta_bundle_reports_a_file_deleted_since_the_baseline(self):
+        first = self._round_one()
+        os.unlink(os.path.join(self.repo, "added.py"))
+        text = self._text(self._build("round-2.md",
+                                      baseline_ref=first.baseline_commit))
+        self.assertIn("added.py", text)
+        self.assertIn("deleted", text)
+
+    def test_secret_looking_untracked_file_stays_out_of_the_snapshot(self):
+        self._write(".env", "AWS_SECRET_ACCESS_KEY=aaaabbbbccccddddeeeeffff\n")
+        res = self._round_one()
+        listing = subprocess.run(["git", "ls-tree", "-r", "--name-only",
+                                  res.baseline_commit],
+                                 cwd=self.repo, capture_output=True, text=True)
+        self.assertNotIn(".env", listing.stdout.split("\n"))
+        self.assertIn(".env", [item["path"] for item in res.redactions])
+
+    def test_oversized_untracked_file_stays_out_of_the_snapshot(self):
+        self._write("big.bin", "x" * 200)
+        res = self._build(record_baseline=True, max_file_size=100)
+        listing = subprocess.run(["git", "ls-tree", "-r", "--name-only",
+                                  res.baseline_commit],
+                                 cwd=self.repo, capture_output=True, text=True)
+        self.assertNotIn("big.bin", listing.stdout.split("\n"))
+
+    def test_filename_with_pathspec_magic_is_snapshotted_literally(self):
+        self._write("weird[*].py", "MAGIC = 1\n")
+        first = self._build(record_baseline=True)
+        self._write("weird[*].py", "MAGIC = 2\n")
+        text = self._text(self._build("round-2.md",
+                                      baseline_ref=first.baseline_commit))
+        self.assertIn("MAGIC = 2", text)
+
+    def test_unknown_baseline_ref_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._build(baseline_ref="does-not-exist")
+        self.assertIn("baseline ref", str(ctx.exception))
+
+    def test_baseline_ref_rejects_staged_only(self):
+        with self.assertRaises(ValueError):
+            self._build(baseline_ref="HEAD", staged_only=True)
+
+    def test_plain_bundle_records_no_baseline(self):
+        res = self._build()
+        self.assertIsNone(res.baseline_commit)
+        self.assertIsNone(res.baseline_ref)
+
+
+
 if __name__ == "__main__":
     unittest.main()

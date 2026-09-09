@@ -106,6 +106,10 @@ merely because an arbitrary round count was reached.
 The first valid review may inspect the complete implementation slice. After
 that review, freeze its accepted findings as the repair baseline.
 
+For a Claude re-review, scope the bundle itself with `--baseline-ref` (see the
+reviewer procedure above) rather than relying on the prompt alone. For Codex/Pi,
+say the scope in the prompt and quote only the accepted findings.
+
 For every re-review:
 
 - ask the reviewer to verify the accepted prior findings and the repair delta,
@@ -203,8 +207,16 @@ correctly and it hung only at exit.
      --repo "$PWD" \
      --run-dir "$run_dir" \
      --model "$reviewer_model" \
-     --context-file "$prompt_file"
+     --context-file "$prompt_file" \
+     --record-baseline
    ```
+
+   `--record-baseline` reports a `baseline_commit` in `result.json`. Pass it to
+   the next round as `--baseline-ref "$baseline_commit"` — with
+   `--record-baseline` again — so the re-review bundle holds only the repair
+   delta. This is how **Re-review scope containment** below is actually
+   enforced: without it every round re-sends the whole slice and the reviewer
+   keeps finding new unrelated concerns in code it already passed.
 
    Interpret exit `0` as clean, `1` as findings, `2` as a failed/invalid review,
    and `3` as lock contention. Read `$run_dir/result.json` when it exists; a

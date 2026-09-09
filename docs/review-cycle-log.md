@@ -3242,9 +3242,11 @@ Sol runtimehelper patches actual __channelexec__ WorkerInteractor globals, not s
   Suggestion-only verdict terminal by default; added mechanical stop conditions
   (two rounds without a Critical/Warning decrease; successive rounds narrowing
   the same argument, which the 2026-09-06 nyxmon 15-7-3-1-1-1-1 curve shows).
-- Follow-up: the harness still bundles the whole worktree delta every round
-  (`bundle.py` diffs `HEAD`), so a re-review re-reads the entire slice no matter
-  what the prose says. A `--baseline-ref` for delta-scoped re-review, and a
-  cross-round ledger that computes the convergence signal instead of leaving it
-  to judgment, are the remaining structural fixes.
+- Follow-up: `claude-review-loop` now takes `--record-baseline` (snapshot the
+  reviewed content as a dangling commit) and `--baseline-ref` (bundle only what
+  changed since it), so a re-review round is scoped in the bundle instead of
+  being asked for in the prompt. Still open: the same option in the Pi harness,
+  whose bundle is an older and much smaller implementation, and a cross-round
+  ledger that computes the convergence signal instead of leaving it to the
+  driver's judgment.
 - Status: resolved for the rule drift; promoted into the skills, not just logged.

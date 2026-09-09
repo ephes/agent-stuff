@@ -78,6 +78,38 @@ are not allowed. Separate harness invocations may run concurrently.
    the resolved value in every result. Preserve the default unless the user or
    calling workflow requests a different reviewer.
 
+   Add `--record-baseline` to any round you may re-review. The harness then
+   snapshots exactly the content it sent and reports a `baseline_commit`:
+
+   ```bash
+   python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
+     --repo "$PWD" --run-dir "$(mktemp -d)/claude-review" --record-baseline
+   ```
+
+   Pass that commit to the next round's `--baseline-ref` (with
+   `--record-baseline` again, to chain a third round):
+
+   ```bash
+   python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
+     --repo "$PWD" --run-dir "$(mktemp -d)/claude-review" \
+     --baseline-ref "$baseline_commit" --record-baseline
+   ```
+
+   The bundle then holds only what changed since that baseline, and the prompt
+   tells Claude this is a re-review of the repair delta. Without it every round
+   re-sends the whole slice - each time with the repairs on top - so the
+   reviewer keeps rediscovering unrelated concerns in code it already passed,
+   which is how a large diff turns into an endless loop. Round 1 stays a
+   whole-slice review; scope only the rounds after it.
+
+   The snapshot is a dangling commit: no ref points at it, your index and
+   worktree are untouched, and it holds only the content the bundle actually
+   sent - a skipped secret-looking, oversized, or binary file is not written
+   into the object store either. It does write objects into the repository,
+   which a later `git gc` collects; omit `--record-baseline` if that is
+   unwelcome. `--baseline-ref` cannot be combined with `--staged-only`, and an
+   unresolvable ref fails before any reviewer runs.
+
    To include the implementation goal, relevant instructions, or verification
    evidence, put that material in a file and repeat `--context-file <path>` as
    needed. Context is copied into `review-bundle.md` after secret redaction, so
@@ -131,9 +163,10 @@ are not allowed. Separate harness invocations may run concurrently.
    The short form, when that skill is not loaded: continue only while a round
    reduces a demonstrated risk; freeze the first review's accepted findings as
    the repair baseline; scope every later round to that baseline plus the repair
-   delta rather than re-auditing the whole slice. Re-run the caller's required
-   checks after every material fix, then start the next review from a fresh
-   `--run-dir`.
+   delta rather than re-auditing the whole slice - `--record-baseline` and
+   `--baseline-ref` enforce that scope in the bundle instead of asking the
+   reviewer to honor it. Re-run the caller's required checks after every
+   material fix, then start the next review from a fresh `--run-dir`.
 
    Round count is a diminishing-returns signal, not a stopping rule on its own:
    as rounds accumulate, require clearer evidence that the next one reduces
@@ -208,7 +241,10 @@ are not allowed. Separate harness invocations may run concurrently.
 `--model <id>` (default: `opus`), `--effort <level>` (Opus defaults to `xhigh`;
 other models default to `high`), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 300),
-`--retry-grace <s>` (default 30), `--staged-only`, `--max-bundle-bytes <n>`
+`--retry-grace <s>` (default 30), `--staged-only`,
+`--record-baseline` (snapshot the reviewed content and report `baseline_commit`),
+`--baseline-ref <commit-ish>` (review only what changed since that baseline;
+not combinable with `--staged-only`), `--max-bundle-bytes <n>`
 (default 2MB), `--max-file-size <n>` (default 256KB, untracked files larger are
 skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single file's diff
 is truncated past this), `--context-file <path>` (repeatable),
@@ -226,8 +262,8 @@ bundle headings and context-redaction manifest entries.
 `.claude-review-loop.claim/` (atomic run-directory ownership marker),
 `result.json` (`state`, `items`, `model`, `effort`, `cost`, `started_at`,
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
-`forbidden_tool_uses`, `skipped_files`, `truncations`, `redactions`, `error`, and
-`scoped_clean`), `events.jsonl` (strict JSONL event
+`forbidden_tool_uses`, `skipped_files`, `truncations`, `redactions`,
+`baseline_ref`, `baseline_commit`, `error`, and `scoped_clean`), `events.jsonl` (strict JSONL event
 stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
 `review-bundle.md` (the exact redacted repository content Claude reviewed).
 

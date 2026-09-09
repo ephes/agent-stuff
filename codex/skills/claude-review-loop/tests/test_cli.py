@@ -938,5 +938,117 @@ class TestClaudeCmd(unittest.TestCase):
                         self.assertIn(public_marker, json.dumps(tool_results))
 
 
+
+class TestBaselineCli(unittest.TestCase):
+    """The delta re-review flow, end to end through the CLI."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        for args in (["init", "-q"], ["config", "user.email", "t@t"],
+                     ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=self.repo, check=True,
+                           capture_output=True)
+        self._write("a.py", "print(1)\n")
+        subprocess.run(["git", "add", "a.py"], cwd=self.repo, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "i"], cwd=self.repo, check=True,
+                       capture_output=True)
+        self._write("a.py", "print('slice')\n")
+        self._write("slice_only.py", "SLICE = 1\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, rel, text):
+        with open(os.path.join(self.repo, rel), "w") as fh:
+            fh.write(text)
+
+    def _run(self, name, *extra):
+        run_dir = os.path.join(self.tmp.name, name)
+        env = dict(os.environ,
+                   CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock"),
+             "--model", "fake/model", *extra],
+            capture_output=True, text=True, env=env,
+        )
+        return proc, run_dir
+
+    def _result(self, run_dir):
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            return json.load(fh)
+
+    def _read(self, run_dir, name):
+        with open(os.path.join(run_dir, name)) as fh:
+            return fh.read()
+
+    def test_record_baseline_reports_a_reusable_commit(self):
+        proc, run_dir = self._run("round-1", "--record-baseline")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = self._result(run_dir)
+        self.assertRegex(result["baseline_commit"], r"^[0-9a-f]{40}$")
+        self.assertIsNone(result["baseline_ref"])
+        self.assertIn("baseline=" + result["baseline_commit"], proc.stdout)
+
+    def test_failed_round_reports_no_baseline_to_reuse(self):
+        run_dir = os.path.join(self.tmp.name, "round-crash")
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD="does-not-exist-command")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock"),
+             "--model", "fake/model", "--record-baseline"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        # A round that reviewed nothing must not hand the next round a baseline:
+        # the delta would skip content no reviewer ever saw.
+        self.assertIsNone(self._result(run_dir)["baseline_commit"])
+        self.assertNotIn("baseline=", proc.stdout)
+
+    def test_baseline_ref_scopes_the_next_round_to_the_delta(self):
+        first, first_dir = self._run("round-1", "--record-baseline")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        baseline = self._result(first_dir)["baseline_commit"]
+
+        self._write("a.py", "print('repair')\n")
+        second, second_dir = self._run("round-2", "--baseline-ref", baseline)
+        self.assertEqual(second.returncode, 0, second.stderr)
+
+        bundle_text = self._read(second_dir, "review-bundle.md")
+        self.assertIn("+print('repair')", bundle_text)
+        self.assertNotIn("SLICE = 1", bundle_text)
+        self.assertIn("This is a re-review",
+                      self._read(second_dir, "review-prompt.txt"))
+        self.assertEqual(self._result(second_dir)["baseline_ref"],
+                         subprocess.run(["git", "rev-parse", baseline + "^{tree}"],
+                                        cwd=self.repo, capture_output=True,
+                                        text=True).stdout.strip())
+
+    def test_a_plain_round_carries_no_delta_instruction(self):
+        _, run_dir = self._run("round-plain")
+        self.assertNotIn("This is a re-review",
+                         self._read(run_dir, "review-prompt.txt"))
+
+    def test_unknown_baseline_ref_fails_before_the_reviewer(self):
+        proc, _ = self._run("round-bad", "--baseline-ref", "no-such-ref")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("baseline ref", proc.stderr)
+        self.assertNotIn("CLEAN", proc.stdout)
+
+    def test_staged_only_with_baseline_ref_fails_before_the_reviewer(self):
+        first, first_dir = self._run("round-1", "--record-baseline")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        baseline = self._result(first_dir)["baseline_commit"]
+        proc, _ = self._run("round-2", "--baseline-ref", baseline, "--staged-only")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("staged_only", proc.stderr)
+        self.assertNotIn("CLEAN", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
