@@ -196,8 +196,22 @@ def _build_parser():
     return p
 
 
+# Reasoning effort tracks the model generation, not its price tier: a newer
+# generation reasons better per token, so `xhigh` belongs to the Opus 4.x
+# generation that needed it. Everything current - the `opus` alias (Opus 5),
+# Fable, Sonnet, and any model id this table does not recognize - defaults to
+# `high`. Asking for a stronger model must never silently change effort too;
+# `--effort` always wins when a run wants a different point on that axis.
+LEGACY_TOP_EFFORT_MODELS = ("claude-opus-4",)
+TOP_EFFORT = "xhigh"
+DEFAULT_EFFORT = "high"
+
+
 def _default_effort(model):
-    return "xhigh" if "opus" in model.lower() else "high"
+    name = model.lower()
+    if any(legacy in name for legacy in LEGACY_TOP_EFFORT_MODELS):
+        return TOP_EFFORT
+    return DEFAULT_EFFORT
 
 
 def _sandbox_settings(review_root):

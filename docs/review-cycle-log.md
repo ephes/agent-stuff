@@ -3250,3 +3250,25 @@ Sol runtimehelper patches actual __channelexec__ WorkerInteractor globals, not s
   ledger that computes the convergence signal instead of leaving it to the
   driver's judgment.
 - Status: resolved for the rule drift; promoted into the skills, not just logged.
+
+## 2026-09-09 - Model Choice And Reasoning Effort Are Separate Axes
+
+- Repo: agent-stuff skills.
+- Expected: asking the review harness for a stronger model changes one thing.
+- Actual: effort was inferred from the model name - `xhigh` if the id contained
+  "opus", `high` otherwise - so `--model fable` silently reviewed at lower
+  effort than the default `opus`, and no table said what any other model should
+  get. The inference also outlived its reason: `xhigh` was what the Opus 4.x
+  generation needed.
+- Impact: an unstated policy that moved two variables in opposite directions,
+  and no guidance at all for the newer models now in use.
+- Fix: effort now follows the model generation, not the price or the name -
+  `high` for Opus 5, Fable, Sonnet, GPT-5.6 and anything unrecognized, `medium`
+  for the Astra generation, `xhigh` only for Opus 4.x. Added a role/model table
+  to `cross-agent-review-cycle`: mid tier by default everywhere, top tier
+  (Fable, Astra) opt-in per run and recorded, and a cheaper reviewer allowed for
+  delta re-review rounds - but only rounds actually scoped with
+  `--baseline-ref`, and never for verifying a Critical repair.
+- Status: resolved. The cheaper-delta-reviewer tier is a deliberate experiment;
+  record which tier each round used, from the invocation rather than from the
+  reviewer's own report, so it can be evaluated later.

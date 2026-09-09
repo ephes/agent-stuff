@@ -238,8 +238,10 @@ are not allowed. Separate harness invocations may run concurrently.
 
 ## Useful flags
 
-`--model <id>` (default: `opus`), `--effort <level>` (Opus defaults to `xhigh`;
-other models default to `high`), `--review-deadline <s>` (hard
+`--model <id>` (default: `opus`), `--effort <level>` (default `high`; only the
+Opus 4.x generation defaults to `xhigh`, which is what it needed - a newer
+generation reasons better per token, so asking for a stronger model must not
+silently raise effort as well), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 `--retry-grace <s>` (default 30), `--staged-only`,
 `--record-baseline` (snapshot the reviewed content and report `baseline_commit`),

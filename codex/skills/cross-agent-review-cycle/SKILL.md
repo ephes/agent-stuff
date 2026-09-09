@@ -42,6 +42,40 @@ ad hoc permission/budget flags to Claude review commands. Subscription usage
 should not be represented as a per-run budget cap. Do not use write-capable
 permission bypass for review.
 
+## Model Roles And Cost
+
+Choose a model per role, not per session. Spend where a wrong answer compounds -
+the plan, and the first review verdict that gates the commit - and stay cheap
+where the work is mechanical.
+
+| Role | Default | Escalate a tier when |
+|------|---------|----------------------|
+| Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
+| Implementer | mid tier: `gpt-5.6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
+| Reviewer, first round of a slice | `opus` (Claude) / `gpt-5.6-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
+| Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
+
+`REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
+`IMPLEMENTER_MODEL`, and `REVIEWER_MODEL_DELTA` are conventions for the driving
+agent to apply when it builds those commands; nothing reads them automatically.
+
+Never default to the top tier. Claude Fable and GPT Astra are opt-in per run,
+chosen deliberately and recorded - not the resting default for any role.
+
+Reasoning effort is a separate axis from model choice, and it follows the model
+generation rather than the price. Opus 5 and GPT-5.6 review at `high`, the newer
+Astra generation at `medium`, and `xhigh` belongs to the Opus 4.x generation that
+needed it. Do not raise effort merely because a model is expensive, and do not
+let a request for a stronger model silently change effort as well.
+
+A cheaper delta re-review is only safe on a round that is actually scoped -
+`--baseline-ref` for Claude, an explicit delta prompt for Codex/Pi. Keep the
+primary reviewer for any unscoped whole-slice round.
+
+Record the model each role actually used, taken from the invocation. A
+reviewer's self-reported identity inside its own report is not evidence of which
+model ran.
+
 ## Cycle Continuation and Stopping Rule
 
 Do not use a fixed numeric cap. A valid review is one that completed with a
@@ -211,6 +245,11 @@ correctly and it hung only at exit.
      --record-baseline
    ```
 
+   For a delta round you may drop one reviewer tier with
+   `reviewer_model="${REVIEWER_MODEL_DELTA:-$reviewer_model}"` - see
+   **Model Roles And Cost**, and keep the primary reviewer when the round
+   verifies a Critical repair.
+
    `--record-baseline` reports a `baseline_commit` in `result.json`. Pass it to
    the next round as `--baseline-ref "$baseline_commit"` — with
    `--record-baseline` again — so the re-review bundle holds only the repair
@@ -249,8 +288,14 @@ correctly and it hung only at exit.
    switch "$reviewer_agent"
        case codex
            test -n "$reviewer_model"; or set reviewer_model gpt-5.6-sol
+           # Effort follows the model generation, not its price: GPT-5.6 reviews
+           # at high, the newer Astra generation at medium.
+           set reasoning_effort high
+           if string match -q '*astra*' -- "$reviewer_model"
+               set reasoning_effort medium
+           end
            codex -a never exec --sandbox read-only -m "$reviewer_model" \
-             -c 'model_reasoning_effort="high"' - < "$prompt_file" 2>&1 | tee "$log_file"
+             -c "model_reasoning_effort=\"$reasoning_effort\"" - < "$prompt_file" 2>&1 | tee "$log_file"
        case pi
            test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.6-sol
            set reviewer_model_lookup (string replace -r ':(off|minimal|low|medium|high|xhigh|max)$' '' -- "$reviewer_model")

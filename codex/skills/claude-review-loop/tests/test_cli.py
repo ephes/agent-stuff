@@ -183,7 +183,7 @@ class TestCli(unittest.TestCase):
         with open(os.path.join(run_dir, "result.json")) as fh:
             result = json.load(fh)
         self.assertEqual(result["model"], "opus")
-        self.assertEqual(result["effort"], "xhigh")
+        self.assertEqual(result["effort"], "high")
 
     def test_issues_exit_one(self):
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} issues")
@@ -755,11 +755,17 @@ class TestClaudeCmd(unittest.TestCase):
                 cli._claude_cmd("m", "high", "."), ["echo", "legacy", "seam"]
             )
 
-    def test_opus_defaults_to_xhigh_other_models_to_high(self):
+    def test_effort_default_follows_the_model_generation(self):
         from claude_review_loop import cli
-        self.assertEqual(cli._default_effort("opus"), "xhigh")
+        # xhigh belonged to the Opus 4.x generation.
         self.assertEqual(cli._default_effort("claude-opus-4-7"), "xhigh")
+        self.assertEqual(cli._default_effort("claude-opus-4-8"), "xhigh")
+        # Current models reason well at high, whatever they cost.
+        self.assertEqual(cli._default_effort("opus"), "high")
+        self.assertEqual(cli._default_effort("claude-opus-5"), "high")
         self.assertEqual(cli._default_effort("fable"), "high")
+        self.assertEqual(cli._default_effort("sonnet"), "high")
+        self.assertEqual(cli._default_effort("some-unknown-model"), "high")
 
     def test_sandbox_review_root_is_canonical_and_only_read_allowance(self):
         from claude_review_loop import cli
