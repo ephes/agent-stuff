@@ -31,6 +31,7 @@ chezmoi symlinks.
 agent-stuff/
   docs/
     review-cycle-log.md
+    archive/            # closed log history
     specs/
     plans/
   codex/
@@ -119,7 +120,14 @@ symlinks the single copy under `codex/skills/`.
 Reusable agent/process lessons live in `docs/review-cycle-log.md`. Use it for
 things that should improve future skills, goal prompts, tmux orchestration, or
 cross-agent review mechanics across projects. Project-specific execution
-lessons belong in that project's own docs.
+lessons belong in that project's own docs, and per-run metrics belong nowhere.
+
+Every entry ends with a `Promotion:` line naming the skill and section that now
+carries the rule, or `pending` with what is still missing. Promoting the lesson
+is part of closing the cycle, not a later cleanup pass:
+`grep '^- Promotion: pending' docs/review-cycle-log.md` is the backlog.
+
+Closed history lives in `docs/archive/`.
 
 ## Design decisions
 

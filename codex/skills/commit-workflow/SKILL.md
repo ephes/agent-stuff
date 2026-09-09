@@ -52,6 +52,10 @@ Use this skill when the user asks for things like:
 5. Run the right validation for the scope.
    Prefer targeted tests first.
    Use broader checks when the change warrants them.
+   When the change adds files, lint them explicitly: `pre-commit run
+   --all-files` inspects only git-tracked files, so new untracked modules are
+   silently unchecked. Pass them with `--files` over
+   `git ls-files --others --exclude-standard`, or stage them first.
 
 6. Reassess commit readiness.
    The change is only commit-ready when:

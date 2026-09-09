@@ -39,7 +39,11 @@ to `INVALID` if Claude emits any forbidden tool use or requests an inspection
 target outside the canonical review directory. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
-recorded and make a clean verdict scoped. Git itself runs with
+recorded and make a clean verdict scoped. Read the `redactions` manifest and
+confirm each entry is genuinely a secret: locals named `token` in issuance code
+have been redacted as credentials, leaving holes in unchanged code. Rename the
+innocent local rather than loosening the pattern - a redaction false positive is
+cheap, a credential that reaches a model because the pattern was relaxed is not. Git itself runs with
 `--no-optional-locks` so parallel read-only bundle collection does not contend
 on optional repository locks.
 Each review must remain one direct Claude context. Claude Code `Agent`
@@ -131,6 +135,11 @@ are not allowed. Separate harness invocations may run concurrently.
    together - is the required-finding count going down, has the same finding now
    survived two repairs - and a fresh context or a compacted session no longer
    holds the earlier rounds. An agent that cannot see them runs one more.
+
+   A delta round shows the reviewer less, so give it the context that keeps the
+   delta legible: state the unchanged invariants and guards around the repair in
+   a `--context-file`. A reviewer shown only an incremental diff has inferred a
+   host-guard bypass that the unchanged code directly above it prevents.
 
    `escalate` means stop the loop and hand the residual risk to the user; it is
    not a verdict that the findings are resolved, and it exits `4` so a driver

@@ -223,6 +223,17 @@ correctly and it hung only at exit.
   genuinely missing.
 - Independently re-run the implementer's claimed verification even when a report
   does arrive. Reports of green suites have proven wrong in practice.
+- Verify a claimed edit in the code, not in the report. A worker reported making
+  a parameter required while the saved signature still had it optional, and the
+  claim survived into the review prompt.
+- With several workers on one slice, stop them all and let their edits settle
+  before collecting the check you will quote as evidence. Edits landing during
+  collection produced stale assertions describing neither the old tree nor the
+  new one.
+- When a worker edits tests, compare what each assertion can still detect rather
+  than whether the suite still passes. A whole-map emptiness check replaced by a
+  single-key absence check is strictly weaker and reads as an ordinary refactor
+  in the diff.
 - Kill the orphan before starting anything else.
 
 ## Reviewer Procedure
@@ -529,6 +540,41 @@ accepted/fixed/rejected/deferred counts in the driving agent's cycle summary.
   Reopen the whole slice only when the repair itself had broad, cross-cutting
   impact, and record why that expansion is necessary.
 
+### Judging a finding
+
+A reviewer is a source of claims, not verdicts you owe agreement to.
+
+- Disprove a false finding with evidence rather than editing around it. Execute
+  the failure it claims before accepting it: reviewers have reported a check-mode
+  failure that does not occur, and read a slash-containing branch name as a
+  missing path. Record the evidence and reject the finding.
+- Give a small-delta review the unchanged context it needs. A reviewer shown
+  only an incremental diff has inferred a bypass that the unchanged guard
+  directly above it prevents. State those invariants in the review context
+  rather than letting the reviewer guess from the delta.
+- Qualify a reviewer-proposed invariant before promoting it into a plan or a
+  docstring. Trace the whole admission and retirement path first: adopted
+  cardinality and epoch wording has overgeneralized real behavior, because a
+  global key can bypass a scoped counter and shutdown can intentionally skip
+  ordinary outcome recording.
+- Do not let a prerequisite you invented become a user-authorization barrier. An
+  overbuilt rescue-console step for a proxy-only patch was rejected by the owner;
+  the routine patch needed truthful recovery evidence, not a new gate.
+
+### Judging the evidence a repair offers
+
+- Drive an error-boundary regression through the production caller chain. A
+  helper-only test passes even when production stops calling the helper, and an
+  outer envelope that catches `TypeError` can downgrade a configuration failure
+  to a 400 without any helper test noticing.
+- A new regression that also passes against the pre-repair code is
+  behavioral-preservation evidence, not a reproduction. Run it against the old
+  code and require it to fail; assert that an injected fault actually executed,
+  since a rollback test returning False can pass before its failure runs.
+- Update the backlog or work item as soon as implementation validation passes,
+  not after the review. A review round spent reporting that the backlog still
+  describes fixed findings as future work is a round bought for nothing.
+
 ## Learning Logs
 
 After each review cycle or unexpected workflow failure, record summary-safe
@@ -543,6 +589,15 @@ orchestration, or backlog shape did not work as expected.
 
 Use short entries with expected behavior, actual behavior, impact, fix or
 follow-up, and status. Do not include raw prompts, transcripts, secrets,
-credentials, or large tool output.
+credentials, large tool output, or per-run metrics: a line of test counts and
+durations records what one run measured, not what the next run should do
+differently.
+
+End every entry with a `Promotion:` line, and close the cycle by acting on it -
+either promote the lesson into the skill it affects and mark it
+`promoted - <skill>, <section>`, or decide it earns no rule and mark it
+`incident`. `pending` is for a lesson whose change you cannot make right now,
+not a default. A log of lessons nobody promoted is how the review skills drifted
+into contradicting each other for six weeks.
 
 Record the review outcome in the final commit-ready summary.
