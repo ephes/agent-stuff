@@ -8,16 +8,15 @@ chezmoi symlinks.
 | Agent | Skill | Purpose |
 |-------|-------|---------|
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
-| Codex | `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use the supervised local harness |
+| Codex, Claude | `cross-agent-review-cycle` | Canonical value-driven different-family review loop; owns the continuation, stopping, containment, and commit-gate rules. One shared copy under `codex/skills/`, symlinked for both agents |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
 | Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus default) |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
-| Claude | `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use the supervised local harness |
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
-| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-5.6-sol` until CLEAN |
+| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-5.6-sol` |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
@@ -47,7 +46,6 @@ agent-stuff/
   claude/
     README.md
     skills/
-      cross-agent-review-cycle/
       goal-handoff/
       handoff-impl/
       handoff-review/
@@ -111,7 +109,10 @@ elsewhere.
 4. Update the agent's README and the skill inventory table above
 
 Similar skills across agents are intentionally kept separate so each version
-can be tuned to its agent's model, tool names, and interaction patterns.
+can be tuned to its agent's model, tool names, and interaction patterns. The
+exception is `cross-agent-review-cycle`: it is agent-neutral policy, and keeping
+two copies let them drift into contradictory stopping rules, so every agent
+symlinks the single copy under `codex/skills/`.
 
 ## Workflow lessons
 
@@ -122,10 +123,13 @@ lessons belong in that project's own docs.
 
 ## Design decisions
 
-**Per-agent skills, not shared.** The 10-30% that differs between agents is
-prompt engineering tuned to each agent's model and tooling. A shared template
-system is not worth the complexity. Revisit if cross-agent duplication becomes
-a real maintenance problem.
+**Per-agent skills, not shared — except shared policy.** The 10-30% that
+differs between agents is prompt engineering tuned to each agent's model and
+tooling. A shared template system is not worth the complexity. But a skill that
+encodes gate policy rather than agent mechanics gets exactly one copy that every
+agent symlinks: duplicating `cross-agent-review-cycle` produced a Claude copy
+with a hard three-cycle cap and a Codex copy with value-driven stopping, and the
+review loop's behavior then depended on which file the session happened to load.
 
 **Not every agent needs every skill.** Skills exist only where they are useful.
 No gap-filling for symmetry.

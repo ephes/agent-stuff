@@ -1,6 +1,6 @@
 ---
 name: pipy-parity-loop
-description: Drive one pi-mono parity gap end to end in the pipy repo (select gap, plan, different-family review, implement, docs, review until CLEAN, commit). Applies only when the working directory is the pipy repo (~/projects/pipy).
+description: Drive one pi-mono parity gap end to end in the pipy repo (select gap, plan, different-family review, implement, docs, value-driven review cycle, commit). Applies only when the working directory is the pipy repo (~/projects/pipy).
 ---
 
 # Pipy Parity Loop (Codex)

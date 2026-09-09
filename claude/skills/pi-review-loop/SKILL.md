@@ -1,12 +1,15 @@
 ---
 name: pi-review-loop
-description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-5.6 Sol model at high reasoning over the current git diff in a bounded, observable loop, and only proceeds when Pi returns CLEAN. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review up to a round cap. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
+description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-5.6 Sol model at high reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
 # Pi Review Loop
 
 Run a bounded review cycle: hand the current diff to Pi as a fresh-context reviewer
-via the harness, read its structured verdict, and only continue when it is `CLEAN`.
+via the harness and read its structured verdict. `cross-agent-review-cycle` owns
+the continuation, stopping, scope-containment, and commit-gate rules for the loop
+around this harness; an unresolved Critical or Warning is fail-closed, and a
+Suggestion-only verdict is advisory, not `CLEAN`.
 The harness owns Pi's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Pi is stuck — a hung or blocked Pi is detected and killed,
 and you always get a structured result.
@@ -50,8 +53,15 @@ implement and fix; Pi reviews with fresh context.
      separate wait/retry wrapper. Either retry later, inspect stale slot metadata,
      or ask the user whether to raise/lower `--max-concurrent`.
 
-4. Stop after at most 3 rounds. If still not CLEAN after 3 rounds, report the
-   outstanding items to the user rather than looping forever.
+4. Drive fix/re-review rounds under the stopping rules in
+   `cross-agent-review-cycle`, not a fixed round cap and not a loop toward
+   `CLEAN`. Freeze the first review's accepted findings as the repair baseline
+   and scope every later round to that baseline plus the repair delta. Stop and
+   report the outstanding items when a required finding survives two attempted
+   fix rounds, when two consecutive rounds fail to reduce the Critical/Warning
+   count, when successive rounds only narrow the same argument, or when the
+   verdict is Suggestion-only. Record after each round why the loop continued or
+   stopped.
 
 ## Hard rules
 

@@ -7,7 +7,7 @@ Skills for the Codex coding agent.
 | Skill | Purpose |
 |-------|---------|
 | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
-| `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use `claude-review-loop` |
+| `cross-agent-review-cycle` | Canonical value-driven different-family review loop, shared by Codex and Claude; Claude reviews use `claude-review-loop` |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `implement-handoff` | Generate an implementation prompt for a second agent |
 | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus default) |

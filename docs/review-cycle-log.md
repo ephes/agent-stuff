@@ -3217,3 +3217,34 @@ InitialOpus5xhigh0C1W3S296.053s; focused0CW4S270.308s, metadata clean. Coordinat
 ### 2026-09-08 frontend M1 macOS xdist titles
 
 Sol runtimehelper patches actual __channelexec__ WorkerInteractor globals, not separately imported xdist.remote. Real2worker identity probe passes4cases; disabledhookcontrol fails4 evenwithpreservedvendorpatch. Scopedhelper keeps applicationsetproctitle/defaultparallel unchanged. Opus5xhigh initial1W1S312.848s; focused1W1S140.367s after following suggestedslowmarker; final0CW2S81.107s after explicit90s timeout. Derive enclosing subprocess watchdog directly from sharedchildbudget; duration-classification slow marker can be removed by later reconciliation and should not own timeout policy. FinalS constant applied/tested; stopadvisory NOT CLEAN. Thirdreview evidence files had become tracked scratchbaseline, so bundle onlyshowedhunks: corrected private snapshot helper to stage code/docs only, remove evidence fromscratchindex and retain full current evidence untracked eachround; verified fullbytecopy/indexstate. Limitation disclosed; finalrequiredmarkerrepair independently checked againstactualcollection90s/not-slow;no4thagreementpass. Fullcheck10320/131.64s types430 domain100 non91.40;33focused112E2E3075guarded;final22focused2.97s docs/hooks/runtimeASTidentical. Codee72f5a17/docsfa88430c. No active tests stopped; vendorpatch/note preserved; desktopfreezecausation stillopen.
+
+## 2026-09-09 - One Review Loop, Three Contradictory Stopping Rules
+
+- Repo: agent-stuff skills.
+- Expected: the review loop stops on the value-driven rule recorded in
+  `cross-agent-review-cycle` on 2026-07-30.
+- Actual: three files disagreed, and which one applied depended on what the
+  session happened to load. `claude/skills/cross-agent-review-cycle` was a
+  pre-2026-07-30 duplicate with a hard three-cycle cap; `claude-review-loop`
+  said the opposite - "do not impose a default or absolute round cap ... round
+  count alone is never a stopping reason"; `pi-review-loop` said "only proceeds
+  when Pi returns CLEAN" plus a fixed three-round cap. Worse, `~/.claude/skills`
+  had no `cross-agent-review-cycle` symlink at all, so outside the emerge
+  workspace a Claude session drove the harness with none of the containment
+  rules.
+- Impact: whole-slice re-review rounds that never converge on large diffs. The
+  September entries above show the pattern: every closure was adjudicated by
+  hand as "advisory, NOT CLEAN, stop at diminishing returns", because no skill
+  said the loop may end there.
+- Fix: deleted the drifted Claude copy and symlinked the single agent-neutral
+  copy under `codex/skills/` for every agent; made `claude-review-loop` and
+  `pi-review-loop` defer to it instead of restating the rules; made a
+  Suggestion-only verdict terminal by default; added mechanical stop conditions
+  (two rounds without a Critical/Warning decrease; successive rounds narrowing
+  the same argument, which the 2026-09-06 nyxmon 15-7-3-1-1-1-1 curve shows).
+- Follow-up: the harness still bundles the whole worktree delta every round
+  (`bundle.py` diffs `HEAD`), so a re-review re-reads the entire slice no matter
+  what the prose says. A `--baseline-ref` for delta-scoped re-review, and a
+  cross-round ledger that computes the convergence signal instead of leaving it
+  to judgment, are the remaining structural fixes.
+- Status: resolved for the rule drift; promoted into the skills, not just logged.

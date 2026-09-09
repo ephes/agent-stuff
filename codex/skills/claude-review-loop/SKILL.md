@@ -1,6 +1,6 @@
 ---
 name: claude-review-loop
-description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model and strict read-only isolation. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive valuable fix and re-review rounds until the configured reviewer returns CLEAN or further review no longer adds material value.
+description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model and strict read-only isolation. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive fix and re-review rounds under the value-driven stopping rules in cross-agent-review-cycle, never an unbounded loop toward CLEAN.
 ---
 
 # Claude Review Loop
@@ -9,7 +9,8 @@ Run a progress-driven review cycle: hand the current git worktree delta to the c
 Claude Code model as a fresh-context reviewer and read its structured verdict.
 Treat unresolved Critical/Warning findings as fail-closed; treat Suggestions
 proportionately and stop cycling when further review no longer adds material
-value. Default to `opus`; select another model with `--model` or the calling
+value. `cross-agent-review-cycle` owns the continuation, stopping, and
+containment rules for the loop around this harness. Default to `opus`; select another model with `--model` or the calling
 workflow's `REVIEWER_MODEL`.
 The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Claude is stuck. A hung or blocked spawned review is detected,
@@ -121,41 +122,49 @@ are not allowed. Separate harness invocations may run concurrently.
      `--max-concurrent`. Any later attempt must use a fresh `--run-dir` because
      bundle artifacts were already written before slot acquisition.
 
-4. Drive fix/re-review rounds while they add material value. Do not impose a
-   default or absolute round cap. If review 20 still produces useful new
-   evidence or materially improves the change, perform review 20. A real
-   caller-provided time or cost budget may constrain the loop, but absent such
-   a constraint, round count alone is never a stopping reason.
+4. Drive fix/re-review rounds under the stopping rules in
+   `cross-agent-review-cycle` — "Cycle Continuation and Stopping Rule" and
+   "Re-review scope containment". That skill owns continuation, stopping, scope
+   containment, and the commit gate. Do not restate or reinterpret those rules
+   here, and do not substitute a fixed round cap for them.
 
-   Do not stop merely because one attempted fix round made no progress. A new
-   Critical/Warning found in any round must be fixed and reviewed again when
-   time and authority remain. Re-run the caller's required checks after every
-   material fix before starting the next fresh review.
+   The short form, when that skill is not loaded: continue only while a round
+   reduces a demonstrated risk; freeze the first review's accepted findings as
+   the repair baseline; scope every later round to that baseline plus the repair
+   delta rather than re-auditing the whole slice. Re-run the caller's required
+   checks after every material fix, then start the next review from a fresh
+   `--run-dir`.
 
-   Treat a round as progress when the previous findings were addressed and the
-   remaining findings are new, narrower, or supported by new evidence. Stop and
-   report the exact outstanding items only when one of these value-based
-   conditions applies:
+   Round count is a diminishing-returns signal, not a stopping rule on its own:
+   as rounds accumulate, require clearer evidence that the next one reduces
+   risk, and record after each round why the loop continued or stopped. Stop and
+   report the exact outstanding items when any of these applies:
 
    - the same substantive required finding survives two consecutive attempted
      fix rounds without new evidence or a narrower failure;
+   - two consecutive rounds fail to reduce the Critical/Warning count;
+   - successive rounds only narrow the same argument and the remaining repair is
+     mechanical — carry it forward as a named verification item instead;
    - findings oscillate between incompatible requirements;
    - the fix needs scope or authority the caller did not grant;
-   - after one fresh review with the recorded disposition as context, the only
-     remaining items are the same already-declined Suggestions; or
-   - the remaining findings are Suggestions and an explicit proportionality
-     decision concludes that another fix/re-review cycle would not materially
-     improve confidence or the change; or
-   - a real caller-provided time or cost budget cannot fit another fix, checks,
-     and fresh review.
+   - the verdict is Suggestion-only (see below); or
+   - a caller-provided time or cost budget cannot fit another fix, checks, and
+     fresh review.
 
-   For Suggestion-only verdicts, make an explicit proportionality decision:
-   implement in-scope suggestions that materially improve the change, or record
-   a concise reason for declining them. A declined Suggestion is still not
-   `CLEAN`; include the disposition in the next review context when another
-   review would add value. A Suggestion-only verdict may be accepted as advisory
-   after recording the proportionality decision. Never relabel an advisory
-   verdict as `CLEAN`.
+   A new Critical/Warning found in any round is still fixed and re-reviewed
+   while time and authority remain. These conditions end the loop; they do not
+   release the commit gate. Stopping with an unresolved Critical or Warning
+   means reporting the residual risk to the user, not committing.
+
+   Treat a Suggestion-only verdict as terminal for this loop by default: make an
+   explicit proportionality decision, implement in-scope suggestions that
+   materially improve the change, record a concise reason for declining the
+   rest, and stop. Another round on a Suggestion-only verdict needs a concrete
+   recorded reason beyond seeking reviewer agreement. A declined Suggestion is
+   still not `CLEAN`; include the disposition in the next review context if a
+   further round is justified. A Suggestion-only verdict may be accepted as
+   advisory after recording the proportionality decision. Never relabel an
+   advisory verdict as `CLEAN`.
 
 ## Timing and Retry Policy
 

@@ -6,7 +6,7 @@ Skills and command prompts for Claude Code.
 
 | Skill | Purpose |
 |-------|---------|
-| `cross-agent-review-cycle` | Run a bounded different-family review loop; Claude reviews use `claude-review-loop` |
+| `cross-agent-review-cycle` (shared policy) | Canonical value-driven different-family review loop, loaded from `../codex/skills/cross-agent-review-cycle`; owns continuation, stopping, containment, and commit-gate rules |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |
@@ -23,15 +23,18 @@ Skills and command prompts for Claude Code.
 
 ## Shared review dependency
 
-`cross-agent-review-cycle` resolves Claude reviews through
-`~/projects/agent-stuff/codex/skills/claude-review-loop`. A Claude-only deployment
-must install that sibling harness at the same path; copying only `claude/skills`
-is not sufficient for Claude-family review gates.
+Claude has no own copy of `cross-agent-review-cycle`; `~/.claude/skills`
+symlinks the single agent-neutral copy under `codex/skills/`. That skill in turn
+resolves Claude reviews through
+`~/projects/agent-stuff/codex/skills/claude-review-loop`. A Claude-only
+deployment must install both sibling directories at the same paths; copying only
+`claude/skills` is not sufficient for Claude-family review gates.
 
 ```text
 repository root
-  claude/skills/cross-agent-review-cycle
-    -> codex/skills/claude-review-loop
+  ~/.claude/skills/cross-agent-review-cycle
+    -> codex/skills/cross-agent-review-cycle
+      -> codex/skills/claude-review-loop
 ```
 
 ## What stays private in chezmoi
