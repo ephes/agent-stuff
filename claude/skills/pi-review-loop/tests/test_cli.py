@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -169,3 +170,86 @@ class TestPiCmd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPiBaselineAndLedger(unittest.TestCase):
+    """Delta re-review and the shared slice ledger, through the Pi CLI."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        for args in (["init", "-q"], ["config", "user.email", "t@t"],
+                     ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=self.repo, check=True,
+                           capture_output=True)
+        self._write("a.py", "print(1)\n")
+        subprocess.run(["git", "add", "a.py"], cwd=self.repo, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "i"], cwd=self.repo, check=True,
+                       capture_output=True)
+        self._write("a.py", "print('slice')\n")
+        self._write("slice_only.py", "SLICE = 1\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, rel, text):
+        with open(os.path.join(self.repo, rel), "w") as fh:
+            fh.write(text)
+
+    def _run(self, name, mode="clean", *extra):
+        run_dir = os.path.join(self.tmp.name, name)
+        env = dict(os.environ,
+                   PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} {mode}")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock"),
+             "--ledger-dir", os.path.join(self.tmp.name, "ledger"),
+             "--model", "openai-codex/gpt-5.6-sol", *extra],
+            capture_output=True, text=True, env=env,
+        )
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            return proc, json.load(fh), run_dir
+
+    def test_record_baseline_reports_a_reusable_commit(self):
+        proc, result, _ = self._run("r1", "clean", "--record-baseline")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(result["baseline_commit"], r"^[0-9a-f]{40}$")
+        self.assertIn("baseline=" + result["baseline_commit"], proc.stdout)
+
+    def test_baseline_ref_scopes_the_next_round(self):
+        _, first, _ = self._run("r1", "clean", "--record-baseline")
+        self._write("a.py", "print('repair')\n")
+        proc, _, run_dir = self._run(
+            "r2", "clean", "--baseline-ref", first["baseline_commit"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(run_dir, "review-bundle.md")) as fh:
+            text = fh.read()
+        self.assertIn("+print('repair')", text)
+        self.assertNotIn("SLICE = 1", text)
+
+    def test_a_stuck_finding_escalates_with_its_own_exit_code(self):
+        self._run("r1", "issues", "--slice-id", "stuck")
+        proc, _, _ = self._run("r2", "issues", "--slice-id", "stuck")
+        self.assertEqual(proc.returncode, 1)
+        proc, third, _ = self._run("r3", "issues", "--slice-id", "stuck")
+        self.assertEqual(proc.returncode, 4, proc.stdout + proc.stderr)
+        self.assertEqual(third["convergence"]["status"], "escalate")
+
+    def test_the_ledger_is_shared_with_the_claude_harness(self):
+        # One slice keeps one history even when its rounds run on different
+        # reviewers, so a Pi round must land in the same file.
+        from claude_review_loop import ledger as shared
+        self._run("r1", "issues", "--slice-id", "mixed")
+        path = shared.path_for(os.path.join(self.tmp.name, "ledger"), "mixed")
+        self.assertEqual(len(shared.read_rounds(path)), 1)
+
+    def test_a_redacted_bundle_makes_a_clean_verdict_scoped(self):
+        self._write(".env", "AWS_SECRET_ACCESS_KEY=aaaabbbbccccddddeeeeffff\n")
+        proc, result, _ = self._run("r1", "clean")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(result["redactions"])
+        self.assertTrue(result["scoped_clean"])
+        self.assertIn("(scoped)", proc.stdout)

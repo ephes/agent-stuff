@@ -136,3 +136,70 @@ class TestBundle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSharedBundleCapabilities(unittest.TestCase):
+    """Pi's bundle is the shared one, so it carries protections the old Pi-local
+    copy never had. Pi runs with --no-tools and sends this file to an external
+    provider, so an unredacted bundle is an exfiltration path."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.email", "t@t")
+        git(self.repo, "config", "user.name", "t")
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("print('one')\n")
+        git(self.repo, "add", "a.py")
+        git(self.repo, "commit", "-qm", "init")
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("print('two')\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _build(self, out="review-bundle.md", **kw):
+        defaults = dict(max_file_size=262144, max_diff_bytes_per_file=262144,
+                        max_bundle_bytes=2097152)
+        defaults.update(kw)
+        return bundle.build_bundle(
+            self.repo, os.path.join(self.tmp.name, out), **defaults)
+
+    def _text(self, res):
+        with open(res.path) as fh:
+            return fh.read()
+
+    def test_pi_uses_the_shared_implementation_rather_than_a_copy(self):
+        # The property that matters: there is no second copy to fall behind.
+        from claude_review_loop import bundle as shared
+        self.assertIs(bundle.build_bundle, shared.build_bundle)
+        self.assertIs(bundle.BundleResult, shared.BundleResult)
+
+    def test_a_secret_looking_untracked_file_is_not_sent(self):
+        with open(os.path.join(self.repo, ".env"), "w") as fh:
+            fh.write("AWS_SECRET_ACCESS_KEY=aaaabbbbccccddddeeeeffff\n")
+        res = self._build()
+        self.assertNotIn("aaaabbbbccccddddeeeeffff", self._text(res))
+        self.assertIn(".env", [r["path"] for r in res.redactions])
+
+    def test_a_token_in_a_tracked_diff_is_redacted(self):
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write('KEY = "AKIAIOSFODNN7EXAMPLE"\n')
+        res = self._build()
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", self._text(res))
+        self.assertTrue(res.redactions)
+
+    def test_an_empty_worktree_reports_no_changes(self):
+        git(self.repo, "checkout", "--", "a.py")
+        self.assertFalse(self._build().has_changes)
+
+    def test_a_delta_round_holds_only_the_repair(self):
+        first = self._build(record_baseline=True)
+        with open(os.path.join(self.repo, "a.py"), "w") as fh:
+            fh.write("print('repaired')\n")
+        text = self._text(self._build("round-2.md",
+                                      baseline_ref=first.baseline_commit))
+        self.assertIn("+print('repaired')", text)
+        self.assertEqual(text.count("diff --git"), 1)

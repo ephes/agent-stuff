@@ -11,7 +11,7 @@ Skills and command prompts for Claude Code.
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |
 | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
-| `pi-review-loop` | Fail-closed Pi review gate using only `openai-codex/gpt-5.6-sol`; no provider or local-model fallback |
+| `pi-review-loop` | Fail-closed Pi review gate using only `openai-codex/gpt-5.6-sol`; no provider or local-model fallback. Builds its bundle and slice ledger with the shared modules from `claude-review-loop` |
 | `claude-review-loop` (shared dependency) | Supervised Claude gate loaded from `../codex/skills/claude-review-loop` |
 | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 
@@ -30,11 +30,18 @@ resolves Claude reviews through
 deployment must install both sibling directories at the same paths; copying only
 `claude/skills` is not sufficient for Claude-family review gates.
 
+`pi-review-loop` depends on the same sibling directory: its bundle and ledger
+are the shared modules from `claude-review-loop`, imported by relative path, so
+the two gates cannot drift apart on redaction, scoping, or round history. It
+fails loudly at import rather than falling back to an unredacted bundle.
+
 ```text
 repository root
   ~/.claude/skills/cross-agent-review-cycle
     -> codex/skills/cross-agent-review-cycle
       -> codex/skills/claude-review-loop
+  claude/skills/pi-review-loop
+    -> codex/skills/claude-review-loop  (bundle, ledger)
 ```
 
 ## What stays private in chezmoi

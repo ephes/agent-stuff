@@ -125,7 +125,9 @@ are not allowed. Separate harness invocations may run concurrently.
 
    Each completed round appends one summary-safe line - counts by severity,
    finding fingerprints, model, effort, duration, baseline - to
-   `~/.cache/claude-review-loop/ledger/<slice>.jsonl` (`--ledger-dir` moves it).
+   `~/.cache/review-loop/ledger/<slice>.jsonl` (`--ledger-dir` moves it). The
+   same directory is used by `pi-review-loop`, so one slice keeps one history
+   even when its rounds ran on different reviewers.
    No finding text and no repository content is stored. The harness then reads
    the slice's rounds back and reports whether the loop is still converging, on
    stdout as `LOOP: <status> - <reason>` and in `result.json` under
@@ -288,7 +290,8 @@ silently raise effort as well), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 `--retry-grace <s>` (default 30), `--staged-only`,
 `--slice-id <id>` (record the round in the slice ledger and report convergence),
-`--ledger-dir <dir>` (default `~/.cache/claude-review-loop/ledger`),
+`--ledger-dir <dir>` (default `~/.cache/review-loop/ledger`, shared with
+`pi-review-loop`),
 `--record-baseline` (snapshot the reviewed content and report `baseline_commit`),
 `--baseline-ref <commit-ish>` (review only what changed since that baseline;
 not combinable with `--staged-only`), `--max-bundle-bytes <n>`

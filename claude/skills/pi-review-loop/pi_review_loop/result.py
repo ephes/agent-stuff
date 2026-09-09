@@ -14,14 +14,22 @@ class ReviewResult:
     ended_at: float
     skipped_files: list = field(default_factory=list)
     truncations: list = field(default_factory=list)
+    redactions: list = field(default_factory=list)
+    baseline_ref: str | None = None
+    baseline_commit: str | None = None
+    slice_id: str | None = None
+    round: int | None = None
+    convergence: dict | None = None
     error: str | None = None
     raw_verdict_line: str | None = None
 
     @property
     def scoped_clean(self):
-        """A CLEAN verdict over a bundle that skipped or truncated content is only
-        'clean within provided scope', not absolute."""
-        return self.state == CLEAN and bool(self.skipped_files or self.truncations)
+        """A CLEAN verdict over a bundle that skipped, truncated, or redacted
+        content is only 'clean within provided scope', not absolute."""
+        return self.state == CLEAN and bool(
+            self.skipped_files or self.truncations or self.redactions
+        )
 
     def to_dict(self):
         d = asdict(self)

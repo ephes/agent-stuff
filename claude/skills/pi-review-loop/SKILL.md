@@ -32,6 +32,35 @@ implement and fix; Pi reviews with fresh context.
 
    It is foreground and returns a structured result — do NOT background it and poll.
 
+   The bundle is built by the shared implementation from `claude-review-loop`,
+   so it is redacted before it leaves the machine: secret-looking files,
+   private-key blocks and high-confidence token patterns are removed, and the
+   `redactions` manifest makes a clean verdict scoped. Pi runs with `--no-tools`
+   and this file is the whole review surface, so read `skipped_files`,
+   `truncations` and `redactions` in `result.json` before trusting a CLEAN. A
+   Pi-only deployment must install the sibling skill at the same relative path;
+   the harness fails loudly rather than building an unredacted bundle.
+
+   Add `--record-baseline` to any round you may re-review, then pass the
+   reported `baseline_commit` to the next round's `--baseline-ref`:
+
+   ```bash
+   python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
+     --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
+     --baseline-ref "$baseline_commit" --record-baseline
+   ```
+
+   The bundle then holds only what changed since that baseline, and the system
+   prompt tells Pi this is a re-review of the repair delta. Round 1 stays a
+   whole-slice review; scope only the rounds after it. Without this, every round
+   re-sends the whole slice with the repairs on top, and the reviewer keeps
+   rediscovering unrelated concerns in code it already passed.
+
+   Add `--slice-id <id>`, the same id on every round, to record the round in the
+   cross-round ledger at `~/.cache/review-loop/ledger/`. That ledger is shared
+   with `claude-review-loop`, so a slice reviewed by both keeps one history and
+   the stopping rules see all of it.
+
 3. Interpret by exit code (and read `result.json`):
    - `0` → CLEAN. If it printed `(scoped)`, the bundle skipped/truncated files
      (huge or binary) — treat as "clean within provided scope" and decide whether
@@ -48,6 +77,11 @@ implement and fix; Pi reviews with fresh context.
      shell that has provider auth; verify from the same environment with
      `PI_TELEMETRY=0 pi --list-models gpt` and rerun after auth/model listing
      is visible.
+   - `4` → the review completed, and the slice ledger says the loop is not
+     converging: the same required finding survived two repair rounds, or the
+     Critical/Warning count has not fallen across two consecutive rounds. Read
+     `convergence.reason`, stop the loop, and report the residual risk to the
+     user. Only `--slice-id` runs can return this.
    - `3` → all bounded review slots are busy. Do not report this as a CLEAN
      review and do not claim a review is queued unless you explicitly run a
      separate wait/retry wrapper. Either retry later, inspect stale slot metadata,
@@ -106,10 +140,17 @@ per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-on
 `--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
 files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single
 file's diff is truncated past this), `--lock-dir <dir>` (slot-pool directory),
-`--max-concurrent <n>` (default 3, or `PI_REVIEW_MAX_CONCURRENT`).
+`--max-concurrent <n>` (default 3, or `PI_REVIEW_MAX_CONCURRENT`),
+`--record-baseline` (snapshot the reviewed content and report `baseline_commit`),
+`--baseline-ref <commit-ish>` (review only what changed since that baseline; not
+combinable with `--staged-only`), `--slice-id <id>` (record the round in the
+slice ledger and report convergence), `--ledger-dir <dir>` (default
+`~/.cache/review-loop/ledger`, shared with `claude-review-loop`).
 
 ## Artifacts (in `--run-dir`)
 
-`result.json` (verdict, items, state, model, error, scoped_clean), `events.jsonl`
+`result.json` (verdict, items, state, model, error, scoped_clean,
+skipped_files, truncations, redactions, baseline_ref, baseline_commit, slice_id,
+round, convergence), `events.jsonl`
 (strict JSONL event stream), `stdout.raw.log`, `stderr.log`, and `review-bundle.md`
 (exactly what Pi reviewed).

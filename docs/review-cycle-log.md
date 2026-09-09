@@ -625,3 +625,29 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Status: resolved.
 - Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Learning Logs;
   and this file's own header
+
+## 2026-09-10 - The Pi Bundle Had Fallen Behind On Redaction, Not Just Features
+
+- Repo: agent-stuff, `pi-review-loop`.
+- Expected: porting `--baseline-ref` to the Pi harness would be a feature port.
+- Actual: `pi_review_loop/bundle.py` was a copy of an older `claude-review-loop`
+  bundle and had missed everything added since: no secret redaction at all, no
+  `--no-ext-diff`/`--no-textconv` guard against repository-configured diff
+  drivers, no symlink or non-regular-file checks before opening an untracked
+  path, and text-mode git output instead of byte-exact decoding.
+- Impact: Pi runs with `--no-tools`, so the bundle is the whole review surface -
+  and it went to an external provider unredacted. A secret-looking untracked
+  file was sent verbatim. Nothing indicated the copy had fallen behind, because
+  the older code still worked.
+- Fix or follow-up: `pi_review_loop.bundle` and `pi_review_loop.ledger` now
+  delegate to the shared modules by relative path and fail loudly at import
+  rather than falling back to a local copy, so both gates share redaction,
+  scoping, the delta bundle, and one slice history. Two gaps the merge closed in
+  the other direction: the Claude harness had no empty-worktree guard, which Pi
+  had, and Pi's `scoped_clean` did not account for redactions, which it now has
+  to.
+- Status: resolved; verified end to end on a scratch repository, including a
+  `.env` that no longer reaches the bundle and a slice whose rounds ran on both
+  harnesses appearing as one history.
+- Promotion: promoted 2026-09-10 - the fix is the shared module itself;
+  `pi-review-loop` SKILL.md now states the dependency and the redaction contract

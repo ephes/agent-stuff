@@ -51,6 +51,25 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("CLEAN", proc.stdout)
 
+    def test_an_empty_worktree_is_refused_before_the_reviewer(self):
+        subprocess.run(["git", "checkout", "--", "a.py"], cwd=self.repo,
+                       check=True, capture_output=True)
+        run_dir = os.path.join(self.tmp.name, "run-empty")
+        env = dict(os.environ,
+                   CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock-empty"),
+             "--model", "fake/model"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("no changes to review", proc.stderr)
+        self.assertNotIn("CLEAN", proc.stdout)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            self.assertEqual(json.load(fh)["state"], "INVALID")
+
     def test_invalid_environment_concurrency_limit_fails_loudly(self):
         env = dict(
             os.environ,

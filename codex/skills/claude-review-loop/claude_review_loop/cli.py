@@ -15,7 +15,7 @@ from . import ledger as ledger_mod
 from .runner import run_review
 from .monitor import INSPECTION_TOOLS
 from .redact import SECRET_PATH_PATTERNS
-from .states import CLEAN, ISSUES, FAILED, CRASHED
+from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
 
 REVIEW_INSTRUCTION = """\
 You are a code reviewer. Review ONLY the changes in the provided review bundle \
@@ -197,8 +197,9 @@ def _build_parser():
              "round of one implementation slice.")
     p.add_argument(
         "--ledger-dir",
-        default=os.path.expanduser("~/.cache/claude-review-loop/ledger"),
-        help="directory holding per-slice round ledgers")
+        default=os.path.expanduser("~/.cache/review-loop/ledger"),
+        help="directory holding per-slice round ledgers, shared with "
+             "pi-review-loop")
     p.add_argument(
         "--record-baseline", action="store_true",
         help="snapshot the reviewed content as a dangling commit and report it "
@@ -376,6 +377,21 @@ def _main(argv=None):
         try:
             ReviewResult(state=CRASHED, items=[], model=model, effort=effort, cost=None,
                          started_at=now, ended_at=now, error=msg).write(
+                             os.path.join(args.run_dir, "result.json"))
+        except OSError:
+            pass
+        return 2
+
+    if not b.has_changes:
+        # A verdict over an empty bundle is meaningless, and a CLEAN one would
+        # let a driver pass the gate having reviewed nothing.
+        msg = "no changes to review; refusing to treat an empty bundle as clean"
+        print(f"claude-review-loop: {msg}", file=sys.stderr)
+        now = time.monotonic()
+        try:
+            ReviewResult(state=INVALID, items=[], model=model, effort=effort,
+                         cost=None, started_at=now, ended_at=now,
+                         error=msg).write(
                              os.path.join(args.run_dir, "result.json"))
         except OSError:
             pass

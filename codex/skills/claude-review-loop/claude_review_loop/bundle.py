@@ -25,6 +25,7 @@ class BundleResult:
     redactions: list = field(default_factory=list)
     baseline_ref: str = None
     baseline_commit: str = None
+    has_changes: bool = False
 
 
 def _git(repo, *args, replacement_log, env_extra=None, input_bytes=None):
@@ -259,7 +260,8 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         compare = (base_tree, snapshot)
         diffstat = _diff(repo, "--stat", *compare,
                          replacement_log=decoding_replacements)
-        sections.append((0, "Diffstat (since the previous review)",
+        diffstat_title = "Diffstat (since the previous review)"
+        sections.append((0, diffstat_title,
                          diffstat or "(nothing changed since the previous review)"))
         delta = _diff(repo, *compare, replacement_log=decoding_replacements)
         if delta.strip():
@@ -275,7 +277,8 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         compare = ("HEAD",)
         diffstat = _diff(repo, "--stat", "HEAD",
                          replacement_log=decoding_replacements)
-        sections.append((0, "Diffstat", diffstat or "(no tracked changes)"))
+        diffstat_title = "Diffstat"
+        sections.append((0, diffstat_title, diffstat or "(no tracked changes)"))
 
         staged = _diff(repo, "--cached", replacement_log=decoding_replacements)
         if staged.strip():
@@ -408,8 +411,15 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         truncations.append({"section": dropped[1], "dropped": True})
         text = render(secs)
 
+    # Whether this bundle has anything to review at all. A verdict over an
+    # empty bundle says nothing, so the caller refuses rather than reporting a
+    # review of nothing as clean.
+    has_changes = any(title != diffstat_title and title not in context_titles
+                      for _, title, _ in secs)
+
     with open(out_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
     return BundleResult(path=out_path, skipped_files=skipped,
                         truncations=truncations, redactions=redactions,
-                        baseline_ref=base_tree, baseline_commit=baseline_commit)
+                        baseline_ref=base_tree, baseline_commit=baseline_commit,
+                        has_changes=has_changes)
