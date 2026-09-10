@@ -747,6 +747,65 @@ class TestBaselineDelta(unittest.TestCase):
                             and "cannot be represented" in t.get("reason", "")
                             for t in res.truncations))
 
+    def test_an_ordinary_directory_is_not_encoded_as_a_submodule(self):
+        # `git -C <dir> rev-parse HEAD` walks up to the superproject, so it
+        # answers for any directory. Encoding that as a gitlink would put a
+        # false 160000 entry in the baseline and hide the real contents.
+        os.makedirs(os.path.join(self.repo, "plaindir"))
+        self._write("plaindir/note.txt", "hello\n")
+        entry = bundle._worktree_entry(self.repo, "plaindir", replacement_log=[])
+        self.assertIs(entry, bundle.UNREPRESENTABLE)
+
+    def test_an_unreadable_path_is_unrepresentable_not_deleted(self):
+        original = bundle.os.lstat
+
+        def denied(path, *a, **kw):
+            if str(path).endswith("a.py"):
+                raise PermissionError(13, "denied")
+            return original(path, *a, **kw)
+
+        with mock.patch.object(bundle.os, "lstat", side_effect=denied):
+            entry = bundle._worktree_entry(self.repo, "a.py", replacement_log=[])
+        # It exists; recording a deletion would hide it from every later delta.
+        self.assertIs(entry, bundle.UNREPRESENTABLE)
+
+    def test_a_missing_path_is_still_a_deletion(self):
+        entry = bundle._worktree_entry(self.repo, "never-existed.py",
+                                       replacement_log=[])
+        self.assertIsNone(entry)
+
+    def test_staged_only_resolves_a_relative_alternate_index(self):
+        # Git resolves a relative GIT_INDEX_FILE against its own cwd, which is
+        # the repository, not this process.
+        env = dict(os.environ, GIT_INDEX_FILE="rel.index")
+        subprocess.run(["git", "read-tree", "HEAD"], cwd=self.repo, check=True,
+                       env=env, capture_output=True)
+        self._write("a.py", "print('relative-staged')\n")
+        subprocess.run(["git", "add", "a.py"], cwd=self.repo, check=True,
+                       env=env, capture_output=True)
+        self._write("a.py", "print('worktree only')\n")
+        os.environ["GIT_INDEX_FILE"] = "rel.index"
+        try:
+            res = self._build(staged_only=True, record_baseline=True)
+        finally:
+            del os.environ["GIT_INDEX_FILE"]
+        shown = subprocess.run(["git", "show", f"{res.baseline_commit}:a.py"],
+                               cwd=self.repo, capture_output=True, text=True)
+        self.assertIn("relative-staged", shown.stdout)
+
+    def test_a_set_but_missing_index_is_empty_not_head(self):
+        # Git treats a missing GIT_INDEX_FILE as an empty index, so the review
+        # saw no staged content at all. Substituting HEAD would invent some.
+        os.environ["GIT_INDEX_FILE"] = os.path.join(self.tmp.name, "absent.index")
+        try:
+            res = self._build(staged_only=True, record_baseline=True)
+        finally:
+            del os.environ["GIT_INDEX_FILE"]
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(listing.stdout.strip(), "")
+
     def test_unknown_baseline_ref_is_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             self._build(baseline_ref="does-not-exist")

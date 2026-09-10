@@ -98,6 +98,41 @@ def _hash_blob(repo, data, *, replacement_log):
                 replacement_log=replacement_log, input_bytes=data).strip()
 
 
+def _gitlink_entry(repo, path, full, *, replacement_log):
+    """Encode a submodule as the gitlink its superproject tree holds.
+
+    `git -C <dir> rev-parse HEAD` is not a submodule test: run in an ordinary
+    subdirectory it walks up and answers with the *superproject's* HEAD, which
+    would encode a plain directory as a false `160000` entry and hide whatever
+    is really there. The directory must be its own repository root, and the
+    index must actually call the path a gitlink.
+    """
+    try:
+        top = _git(repo, "-C", path, "rev-parse", "--show-toplevel",
+                   replacement_log=replacement_log).strip()
+    except subprocess.CalledProcessError:
+        return UNREPRESENTABLE
+    if not top or os.path.realpath(top) != os.path.realpath(full):
+        return UNREPRESENTABLE
+    staged = _git(repo, "ls-files", "--stage", "-z", "--", path,
+                  replacement_log=replacement_log)
+    if not staged.startswith("160000 "):
+        return UNREPRESENTABLE
+    try:
+        head = _git(repo, "-C", path, "rev-parse", "HEAD",
+                    replacement_log=replacement_log).strip()
+    except subprocess.CalledProcessError:
+        return UNREPRESENTABLE
+    if not head:
+        return UNREPRESENTABLE
+    # A gitlink records a commit, so uncommitted content inside the submodule is
+    # not in the baseline at all. Say so rather than implying it was captured.
+    dirty = _git(repo, "-C", path, "status", "--porcelain",
+                 replacement_log=replacement_log).strip()
+    return ("160000", head, "dirty submodule content is not part of the "
+            "recorded gitlink") if dirty else ("160000", head)
+
+
 def _file_mode(full):
     """The git mode for a regular file, preserving the executable bit."""
     try:
@@ -117,19 +152,20 @@ def _worktree_entry(repo, path, *, replacement_log):
     full = os.path.join(repo, path)
     try:
         st = os.lstat(full)
-    except OSError:
+    except FileNotFoundError:
         return None
+    except NotADirectoryError:
+        # A parent component is gone, so the path is too.
+        return None
+    except OSError:
+        # It exists as far as anyone knows - permissions, I/O - and cannot be
+        # read. Recording that as a deletion would hide it from every delta.
+        return UNREPRESENTABLE
     if stat.S_ISLNK(st.st_mode):
         target = os.readlink(full).encode("utf-8", errors="surrogateescape")
         return "120000", _hash_blob(repo, target, replacement_log=replacement_log)
     if stat.S_ISDIR(st.st_mode):
-        # A gitlink: the tree stores the submodule's own commit, mode 160000.
-        try:
-            head = _git(repo, "-C", path, "rev-parse", "HEAD",
-                        replacement_log=replacement_log).strip()
-        except subprocess.CalledProcessError:
-            return UNREPRESENTABLE
-        return ("160000", head) if head else UNREPRESENTABLE
+        return _gitlink_entry(repo, path, full, replacement_log=replacement_log)
     if not stat.S_ISREG(st.st_mode):
         return UNREPRESENTABLE
     with open(full, "rb") as fh:
@@ -152,6 +188,7 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
          replacement_log=replacement_log, env_extra=env_extra)
     lines = []
     unrepresentable = []
+    partial = []
     for path in sorted(entries):
         content = entries[path]
         if content is DELETED:
@@ -164,12 +201,15 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
         if entry is UNREPRESENTABLE:
             # Leave HEAD's entry alone and say so. Anything else would either
             # delete a path that exists or invent content for it.
-            unrepresentable.append(path)
+            unrepresentable.append((path, "path cannot be represented in a "
+                                          "tree; left at its HEAD state"))
         elif entry is None:
             # Gone from the worktree: record the deletion.
             lines.append(f"0 {NULL_BLOB}\t{path}")
         else:
             lines.append(f"{entry[0]} {entry[1]}\t{path}")
+            if len(entry) > 2:
+                partial.append((path, entry[2]))
     if lines:
         payload = "\0".join(lines).encode("utf-8") + b"\0"
         _git(repo, "update-index", "-z", "--index-info",
@@ -177,7 +217,7 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
              input_bytes=payload)
     tree = _git(repo, "write-tree",
                 replacement_log=replacement_log, env_extra=env_extra).strip()
-    return tree, unrepresentable
+    return tree, unrepresentable + partial
 
 
 def _staged_tree(repo, index_path, *, replacement_log):
@@ -191,18 +231,29 @@ def _staged_tree(repo, index_path, *, replacement_log):
     """
     # Collection inherits the caller's environment, so a `GIT_INDEX_FILE` they
     # set is the index the reviewer actually saw. Copying the default one would
-    # snapshot an index nobody reviewed.
-    source = os.environ.get("GIT_INDEX_FILE")
-    if not source:
+    # snapshot an index nobody reviewed. A relative value resolves against the
+    # directory git ran in - the repository - not against this process.
+    override = os.environ.get("GIT_INDEX_FILE")
+    env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
+    if override:
+        source = override if os.path.isabs(override) else os.path.join(
+            repo, override)
+        if os.path.exists(source):
+            shutil.copyfile(source, index_path)
+        else:
+            # Git reads a set-but-missing index as an empty one, so the review
+            # saw an empty index. Substituting HEAD would invent staged content.
+            _git(repo, "read-tree", "--empty",
+                 replacement_log=replacement_log, env_extra=env_extra)
+    else:
         git_dir = _git(repo, "rev-parse", "--absolute-git-dir",
                        replacement_log=replacement_log).strip()
         source = os.path.join(git_dir, "index")
-    env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
-    if os.path.exists(source):
-        shutil.copyfile(source, index_path)
-    else:
-        _git(repo, "read-tree", "HEAD",
-             replacement_log=replacement_log, env_extra=env_extra)
+        if os.path.exists(source):
+            shutil.copyfile(source, index_path)
+        else:
+            _git(repo, "read-tree", "HEAD",
+                 replacement_log=replacement_log, env_extra=env_extra)
     return _git(repo, "write-tree",
                 replacement_log=replacement_log, env_extra=env_extra).strip()
 
@@ -388,11 +439,10 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 snapshot, unrepresentable_paths = _snapshot_tree(
                     repo, index_path_used, entries,
                     replacement_log=decoding_replacements)
-                for path in unrepresentable_paths:
+                for path, reason in unrepresentable_paths:
                     truncations.append({
                         "section": "baseline snapshot", "path": path,
-                        "reason": "path cannot be represented in a tree; left "
-                                  "at its HEAD state",
+                        "reason": reason,
                     })
         finally:
             # Scratch state: the reviewer can read the run directory, and the

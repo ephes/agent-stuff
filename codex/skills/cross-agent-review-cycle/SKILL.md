@@ -238,14 +238,22 @@ correctly and it hung only at exit.
 
 ## Reviewer Procedure
 
-1. Resolve the reviewer branch first, then build the matching prompt described in
-   **Review Prompt Contents** below. For Claude, `$review_prompt` must contain
+1. Resolve the reviewer branch first. For Codex/Pi, generate the run's nonce
+   before anything else, because the prompt and the poll loop must both use this
+   one value:
+
+   ```bash
+   nonce="$(openssl rand -hex 8)"
+   ```
+
+   Then build the matching prompt described in
+   **Review Prompt Contents** below, asking for `=== REVIEW COMPLETE $nonce ===`
+   as its final line. For Claude, `$review_prompt` must contain
    only the narrow trusted-context subset. For Codex/Pi, it must contain the full
    review directives and output contract. Only then write that branch-specific
    body to a temp file:
 
    ```bash
-   nonce="$(openssl rand -hex 8)"   # Codex/Pi: the sentinel the prompt asks for
    prompt_file="$(mktemp -t review-prompt.XXXXXX)"
    printf '%s' "$review_prompt" > "$prompt_file"
    ```
@@ -440,12 +448,10 @@ correctly and it hung only at exit.
    pane open; wait on the reviewer process when in doubt.
 
    Substitute the branch's threshold for `2` below. The nonce makes the count
-   trustworthy; without it the threshold is guesswork, so generate the nonce
-   first and build both the prompt and this loop from it:
-
-   ```bash
-   nonce="$(openssl rand -hex 8)"
-   ```
+   trustworthy; without it the threshold is guesswork. Use the `$nonce` from
+   step 1 - the one already embedded in the prompt. Generating a fresh one here
+   would grep for a sentinel the reviewer was never asked to print, and the loop
+   would time out on a review that had finished.
 
    ```bash
    # $nonce is the value generated before the prompt was written, and the
