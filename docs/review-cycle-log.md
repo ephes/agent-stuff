@@ -731,3 +731,33 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Judging the
   evidence a repair offers: review the repair delta as its own change, since a
   repair is where the last review's blind spot lives
+
+## 2026-09-10 - Three Rounds In, The Defects Were All In One Hand-Rolled Encoder
+
+- Repo: agent-stuff, `claude-review-loop` baseline snapshot.
+- Reviewer: Codex `gpt-5.6-sol` at high, three bounded rounds.
+- Trajectory: 11 findings (4 Critical, 7 Warning), then 4 (all Critical), then 4
+  (3 Critical, 1 Warning). Required-finding count 11 -> 4 -> 4: falling, then
+  flat. Every Critical after round 1 was introduced by the previous round's
+  repair, and every one of them landed in the same place - the code that builds
+  a git tree from worktree state by hand.
+- What that code kept getting wrong: submodules encoded as deletions, then a
+  superproject HEAD encoded as a false gitlink; unreadable paths encoded as
+  deletions; an alternate index read from the wrong place, then read relatively
+  against the wrong directory; secret-looking paths excluded from an ambiguity
+  test that decided whether a credential entered the baseline.
+- Impact: three review rounds and roughly 330k reviewer tokens, most of it spent
+  rediscovering that git object semantics have more cases than an encoder
+  written in an afternoon models.
+- Fix or follow-up: `git add` into the private index handles every one of these
+  cases because git owns them. It was replaced in round 1 for two reasons -
+  configured clean filters run, and raw bytes enter local blobs - and both have
+  since been measured as weaker than they looked: filters already run during
+  ordinary diff collection, and the blob is a local dangling object holding
+  content that is already in the worktree. Reverting the encoder to `git add`
+  and documenting the two caveats removes the whole defect class.
+- Status: repairs for all three rounds are committed and green; the design
+  question is open and belongs to the operator, not to another review round.
+- Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Judging the
+  evidence a repair offers: when successive rounds keep finding new defects in
+  one component rather than narrowing, the design is the finding
