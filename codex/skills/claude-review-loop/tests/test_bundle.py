@@ -511,7 +511,10 @@ class TestBaselineDelta(unittest.TestCase):
 
     def test_private_index_does_not_stay_in_the_run_directory(self):
         self._round_one()
-        self.assertNotIn("baseline.index", os.listdir(self.out_dir))
+        self.assertFalse(any(
+            name.startswith(".baseline-index-")
+            for name in os.listdir(self.out_dir)
+        ))
 
     def test_delta_bundle_holds_only_changes_since_the_baseline(self):
         first = self._round_one()
@@ -606,36 +609,120 @@ class TestBaselineDelta(unittest.TestCase):
                             and t.get("section") == "baseline snapshot"
                             for t in res.truncations))
 
-    def test_the_snapshot_stores_redacted_untracked_content(self):
-        # What the reviewer was sent is what the baseline records; the raw
-        # secret must not be written into a git blob behind its back.
+    def test_the_snapshot_stores_raw_untracked_content_after_bundle_redaction(self):
+        # Egress remains redacted, while the local snapshot records the bytes
+        # Git reads from the worktree.
         self._write("config.py", 'TOKEN = "AKIAIOSFODNN7EXAMPLE"\n')
         res = self._build(record_baseline=True)
         blob = subprocess.run(
             ["git", "show", f"{res.baseline_commit}:config.py"],
             cwd=self.repo, capture_output=True, text=True)
-        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", blob.stdout)
+        self.assertIn("AKIAIOSFODNN7EXAMPLE", blob.stdout)
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", self._text(res))
 
-    def test_the_snapshot_never_runs_a_write_side_git_command(self):
-        # `git add` applies a configured clean/process filter - an arbitrary
-        # external program, which for git-lfs writes into .git/lfs. Blobs go in
-        # through hash-object instead, which no filter sees. Collection still
-        # runs `git diff`, and that applies the filter exactly as a local
-        # `git diff` does; that is git reading a dirty worktree, not this
-        # harness adding a write.
+    def test_the_snapshot_uses_git_add_with_literal_nul_pathspecs(self):
         calls = []
         original = bundle._git
 
         def recording(repo, *args, **kwargs):
-            calls.append(args)
+            calls.append((args, kwargs))
             return original(repo, *args, **kwargs)
 
         with mock.patch.object(bundle, "_git", side_effect=recording):
             self._round_one()
-        subcommands = [a[0] for a in calls if a and not a[0].startswith("-")]
-        self.assertNotIn("add", subcommands)
-        self.assertIn("hash-object", subcommands)
-        self.assertIn("update-index", subcommands)
+        add_args, add_kwargs = next(
+            (args, kwargs) for args, kwargs in calls if args[0] == "add"
+        )
+        self.assertIn("--pathspec-from-file=-", add_args)
+        self.assertIn("--pathspec-file-nul", add_args)
+        self.assertEqual(
+            set(add_kwargs["input_bytes"].rstrip(b"\0").split(b"\0")),
+            {b":(literal,top)a.py", b":(literal,top)added.py"},
+        )
+        self.assertIn("-f", add_args)
+
+    def test_snapshot_and_diff_collection_apply_a_configured_clean_filter(self):
+        self._write(".gitattributes", "filtered.txt filter=snapshot\n")
+        self._write("filtered.txt", "ORIGINAL\n")
+        git(self.repo, "config", "filter.snapshot.clean",
+            "sed s/WORKTREE/FILTERED/g")
+        git(self.repo, "add", ".gitattributes", "filtered.txt")
+        git(self.repo, "commit", "-qm", "filtered")
+        self._write("filtered.txt", "WORKTREE\n")
+
+        plain = self._build("without-baseline.md")
+        self.assertIn("+FILTERED", self._text(plain))
+        recorded = self._build("with-baseline.md", record_baseline=True)
+        blob = subprocess.run(
+            ["git", "show", f"{recorded.baseline_commit}:filtered.txt"],
+            cwd=self.repo, capture_output=True, text=True, check=True)
+        self.assertEqual(blob.stdout, "FILTERED\n")
+
+    def test_snapshot_pathspecs_are_rooted_when_repo_is_a_subdirectory(self):
+        os.mkdir(os.path.join(self.repo, "sub"))
+        self._write("sub/a.py", "subdirectory copy\n")
+        git(self.repo, "add", "sub/a.py")
+        git(self.repo, "commit", "-qm", "add same-named nested file")
+        self._write("a.py", "root worktree change\n")
+
+        subdir = os.path.join(self.repo, "sub")
+        out = os.path.join(self.out_dir, "subdir-review.md")
+        res = bundle.build_bundle(
+            subdir, out, max_file_size=262144,
+            max_diff_bytes_per_file=262144, max_bundle_bytes=2097152,
+            record_baseline=True,
+        )
+        root_copy = subprocess.run(
+            ["git", "show", f"{res.baseline_commit}:a.py"], cwd=self.repo,
+            capture_output=True, text=True, check=True)
+        nested_copy = subprocess.run(
+            ["git", "show", f"{res.baseline_commit}:sub/a.py"], cwd=self.repo,
+            capture_output=True, text=True, check=True)
+        self.assertEqual(root_copy.stdout, "root worktree change\n")
+        self.assertEqual(nested_copy.stdout, "subdirectory copy\n")
+
+    def test_gitlink_detection_is_rooted_when_repo_is_a_subdirectory(self):
+        child = os.path.join(self.tmp.name, "subdir-child")
+        os.makedirs(child)
+        git(child, "init", "-q")
+        git(child, "config", "user.email", "t@t")
+        git(child, "config", "user.name", "t")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("one\n")
+        git(child, "add", "f")
+        git(child, "commit", "-qm", "one")
+        self._write("nested/x.py", "nested\n")
+        subprocess.run([
+            "git", "-c", "protocol.file.allow=always", "submodule", "add",
+            "-q", child, "dep",
+        ], cwd=self.repo, check=True, capture_output=True)
+        git(self.repo, "add", "nested/x.py")
+        git(self.repo, "commit", "-qm", "add submodule and nested file")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("two\n")
+        git(child, "commit", "-qam", "two")
+        git(os.path.join(self.repo, "dep"), "fetch", "-q")
+        git(os.path.join(self.repo, "dep"), "checkout", "-q", "FETCH_HEAD")
+
+        subdir = os.path.join(self.repo, "nested")
+        out = os.path.join(self.out_dir, "subdir-gitlink-review.md")
+        res = bundle.build_bundle(
+            subdir, out, max_file_size=262144,
+            max_diff_bytes_per_file=262144, max_bundle_bytes=2097152,
+            record_baseline=True,
+        )
+        entry = subprocess.run(
+            ["git", "ls-tree", res.baseline_commit, "dep"], cwd=self.repo,
+            capture_output=True, text=True, check=True)
+        current = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=os.path.join(self.repo, "dep"),
+            capture_output=True, text=True, check=True)
+        self.assertIn(f"160000 commit {current.stdout.strip()}\tdep",
+                      entry.stdout)
+        self.assertFalse(any(
+            item.get("path") == "dep" and "not a gitlink" in item.get("reason", "")
+            for item in res.truncations
+        ))
 
     def test_an_executable_bit_survives_into_the_snapshot(self):
         self._write("run.sh", "#!/bin/sh\necho hi\n")
@@ -664,12 +751,85 @@ class TestBaselineDelta(unittest.TestCase):
         git(self.repo, "add", ".env")
         git(self.repo, "commit", "-qm", "add env")
         git(self.repo, "rm", "--cached", "-q", ".env")
-        res = self._build(record_baseline=True)
+        calls = []
+        original = bundle._git
+
+        def recording(repo, *args, **kwargs):
+            calls.append((args, kwargs))
+            return original(repo, *args, **kwargs)
+
+        with mock.patch.object(bundle, "_git", side_effect=recording):
+            res = self._build(record_baseline=True)
         listing = subprocess.run(
             ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
             cwd=self.repo, capture_output=True, text=True)
         self.assertNotIn(".env", listing.stdout.split("\n"))
         self.assertTrue(any(t.get("path") == ".env" for t in res.truncations))
+        rm_args, rm_kwargs = next(
+            (args, kwargs) for args, kwargs in calls if args[0] == "rm"
+        )
+        self.assertIn("--pathspec-from-file=-", rm_args)
+        self.assertIn("--pathspec-file-nul", rm_args)
+        self.assertEqual(rm_kwargs["input_bytes"], b":(literal,top).env\0")
+        self.assertFalse(any(args[0] == "add" for args, _ in calls))
+
+    def test_a_tracked_file_replaced_by_a_directory_is_not_added_recursively(self):
+        self._write("thing", "tracked file\n")
+        git(self.repo, "add", "thing")
+        git(self.repo, "commit", "-qm", "add thing")
+        os.unlink(os.path.join(self.repo, "thing"))
+        os.mkdir(os.path.join(self.repo, "thing"))
+        self._write("thing/.env", "AWS_SECRET_ACCESS_KEY=not-for-snapshot\n")
+
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True, check=True)
+        self.assertNotIn("thing/.env", listing.stdout.splitlines())
+        self.assertTrue(any(
+            item.get("path") == "thing"
+            and "directory" in item.get("reason", "")
+            and "gitlink" in item.get("reason", "")
+            for item in res.truncations
+        ))
+
+    def test_an_embedded_repository_cannot_become_an_unusable_gitlink(self):
+        self._write("thing", "tracked file\n")
+        git(self.repo, "add", "thing")
+        git(self.repo, "commit", "-qm", "add thing")
+        os.unlink(os.path.join(self.repo, "thing"))
+        os.mkdir(os.path.join(self.repo, "thing"))
+        git(os.path.join(self.repo, "thing"), "init", "-q")
+        git(os.path.join(self.repo, "thing"), "config", "user.email", "t@t")
+        git(os.path.join(self.repo, "thing"), "config", "user.name", "t")
+        self._write("thing/nested.txt", "nested repository\n")
+        git(os.path.join(self.repo, "thing"), "add", "nested.txt")
+        git(os.path.join(self.repo, "thing"), "commit", "-qm", "nested")
+
+        res = self._build(record_baseline=True)
+        entry = subprocess.run(
+            ["git", "ls-tree", res.baseline_commit, "thing"], cwd=self.repo,
+            capture_output=True, text=True, check=True)
+        self.assertIn("100644 blob", entry.stdout)
+        self.assertNotIn("160000 commit", entry.stdout)
+        self.assertTrue(any(
+            item.get("path") == "thing"
+            and "not a gitlink" in item.get("reason", "")
+            for item in res.truncations
+        ))
+
+    def test_a_force_added_ignored_path_enters_the_snapshot(self):
+        self._write(".gitignore", "build/\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore build")
+        self._write("build/out.js", "FORCE_ADDED = true;\n")
+        git(self.repo, "add", "-f", "build/out.js")
+
+        res = self._build(record_baseline=True)
+        shown = subprocess.run(
+            ["git", "show", f"{res.baseline_commit}:build/out.js"],
+            cwd=self.repo, capture_output=True, text=True, check=True)
+        self.assertEqual(shown.stdout, "FORCE_ADDED = true;\n")
 
     def test_a_submodule_is_recorded_as_a_gitlink_not_a_deletion(self):
         child = os.path.join(self.tmp.name, "child")
@@ -705,6 +865,77 @@ class TestBaselineDelta(unittest.TestCase):
         second = self._build("round-2.md", baseline_ref=first.baseline_commit)
         self.assertTrue(second.has_changes)
 
+    def test_dirty_submodule_content_is_reported_as_not_in_the_gitlink(self):
+        child = os.path.join(self.tmp.name, "dirty-child")
+        os.makedirs(child)
+        git(child, "init", "-q")
+        git(child, "config", "user.email", "t@t")
+        git(child, "config", "user.name", "t")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("one\n")
+        git(child, "add", "f")
+        git(child, "commit", "-qm", "one")
+        subprocess.run([
+            "git", "-c", "protocol.file.allow=always", "submodule", "add",
+            "-q", child, "dirty-dep",
+        ], cwd=self.repo, check=True, capture_output=True)
+        git(self.repo, "commit", "-qm", "add dirty submodule")
+        with open(os.path.join(self.repo, "dirty-dep", "f"), "w") as fh:
+            fh.write("dirty worktree content\n")
+
+        res = self._build(record_baseline=True)
+        self.assertTrue(any(
+            item.get("path") == "dirty-dep"
+            and "dirty submodule content" in item.get("reason", "")
+            for item in res.truncations
+        ))
+
+    def test_clean_submodule_probe_ignores_an_ambient_alternate_index(self):
+        child = os.path.join(self.tmp.name, "clean-child")
+        os.makedirs(child)
+        git(child, "init", "-q")
+        git(child, "config", "user.email", "t@t")
+        git(child, "config", "user.name", "t")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("one\n")
+        git(child, "add", "f")
+        git(child, "commit", "-qm", "one")
+        subprocess.run([
+            "git", "-c", "protocol.file.allow=always", "submodule", "add",
+            "-q", child, "clean-dep",
+        ], cwd=self.repo, check=True, capture_output=True)
+        git(self.repo, "commit", "-qm", "add clean submodule")
+        alt = os.path.join(self.tmp.name, "parent.index")
+        env = dict(os.environ, GIT_INDEX_FILE=alt)
+        subprocess.run(
+            ["git", "read-tree", "HEAD"], cwd=self.repo, check=True,
+            env=env, capture_output=True,
+        )
+        with open(alt, "rb") as fh:
+            index_before = fh.read()
+
+        truncations = []
+        with mock.patch.dict(os.environ, {"GIT_INDEX_FILE": alt}):
+            safe = bundle._safe_snapshot_paths(
+                self.repo, ["clean-dep"], truncations, replacement_log=[])
+
+        self.assertEqual(safe, ["clean-dep"])
+        self.assertEqual(truncations, [])
+        with open(alt, "rb") as fh:
+            self.assertEqual(fh.read(), index_before)
+
+    def test_snapshot_add_failure_names_only_whole_path_tokens(self):
+        exc = subprocess.CalledProcessError(
+            128, ["git", "add"],
+            stderr=b"fatal: pathspec 'missing.py' did not match any files\n",
+        )
+
+        error = bundle._snapshot_add_failure(["e", "src", "missing.py"], exc)
+
+        self.assertIn("'missing.py'", str(error))
+        self.assertNotIn("'e'", str(error))
+        self.assertNotIn("'src'", str(error))
+
     def test_staged_only_honours_an_alternate_index(self):
         # Collection inherits GIT_INDEX_FILE, so the reviewer saw that index.
         # Snapshotting the default one would record content nobody reviewed.
@@ -726,53 +957,40 @@ class TestBaselineDelta(unittest.TestCase):
         self.assertIn("staged-alt", shown.stdout)
         self.assertNotIn("worktree only", shown.stdout)
 
-    def test_an_existing_but_unrepresentable_path_is_never_recorded_deleted(self):
-        self._write("a.py", "print('changed')\n")
-        original = bundle._worktree_entry
-
-        def unrepresentable(repo, path, **kwargs):
-            if path == "a.py":
-                return bundle.UNREPRESENTABLE
-            return original(repo, path, **kwargs)
-
-        with mock.patch.object(bundle, "_worktree_entry",
-                               side_effect=unrepresentable):
-            res = self._build(record_baseline=True)
-        listing = subprocess.run(
-            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
-            cwd=self.repo, capture_output=True, text=True)
-        # Left at its HEAD state, not deleted, and reported.
-        self.assertIn("a.py", listing.stdout.split("\n"))
-        self.assertTrue(any(t.get("path") == "a.py"
-                            and "cannot be represented" in t.get("reason", "")
-                            for t in res.truncations))
-
     def test_an_ordinary_directory_is_not_encoded_as_a_submodule(self):
-        # `git -C <dir> rev-parse HEAD` walks up to the superproject, so it
-        # answers for any directory. Encoding that as a gitlink would put a
-        # false 160000 entry in the baseline and hide the real contents.
         os.makedirs(os.path.join(self.repo, "plaindir"))
         self._write("plaindir/note.txt", "hello\n")
-        entry = bundle._worktree_entry(self.repo, "plaindir", replacement_log=[])
-        self.assertIs(entry, bundle.UNREPRESENTABLE)
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", res.baseline_commit, "plaindir"],
+            cwd=self.repo, capture_output=True, text=True, check=True)
+        self.assertIn("100644 blob", listing.stdout)
+        self.assertIn("plaindir/note.txt", listing.stdout)
+        self.assertNotIn("160000 commit", listing.stdout)
 
-    def test_an_unreadable_path_is_unrepresentable_not_deleted(self):
-        original = bundle.os.lstat
+    @unittest.skipIf(os.geteuid() == 0, "chmod 0 does not deny root")
+    def test_an_unreadable_path_makes_the_snapshot_fail_closed(self):
+        path = os.path.join(self.repo, "a.py")
+        self._write("a.py", "print('changed')\n")
+        os.chmod(path, 0)
+        try:
+            with self.assertRaisesRegex(
+                    OSError, r"baseline snapshot.*a\.py.*[Pp]ermission denied"):
+                self._build(record_baseline=True)
+        finally:
+            os.chmod(path, 0o600)
+        self.assertFalse(any(
+            name.startswith(".baseline-index-")
+            for name in os.listdir(self.out_dir)
+        ))
 
-        def denied(path, *a, **kw):
-            if str(path).endswith("a.py"):
-                raise PermissionError(13, "denied")
-            return original(path, *a, **kw)
-
-        with mock.patch.object(bundle.os, "lstat", side_effect=denied):
-            entry = bundle._worktree_entry(self.repo, "a.py", replacement_log=[])
-        # It exists; recording a deletion would hide it from every later delta.
-        self.assertIs(entry, bundle.UNREPRESENTABLE)
-
-    def test_a_missing_path_is_still_a_deletion(self):
-        entry = bundle._worktree_entry(self.repo, "never-existed.py",
-                                       replacement_log=[])
-        self.assertIsNone(entry)
+    def test_a_missing_tracked_path_is_recorded_as_a_deletion(self):
+        os.unlink(os.path.join(self.repo, "a.py"))
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True, check=True)
+        self.assertNotIn("a.py", listing.stdout.split("\n"))
 
     def test_staged_only_resolves_a_relative_alternate_index(self):
         # Git resolves a relative GIT_INDEX_FILE against its own cwd, which is
@@ -805,6 +1023,23 @@ class TestBaselineDelta(unittest.TestCase):
             ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
             cwd=self.repo, capture_output=True, text=True)
         self.assertEqual(listing.stdout.strip(), "")
+
+    def test_a_directory_failure_names_only_that_directory(self):
+        # Git reports the offending file, so a directory include path appears as
+        # a prefix of it. Missing that made the harness name every include path.
+        from claude_review_loop import bundle as b
+        detail = "error: unable to index file 'dep/big.bin'\nfatal: adding files failed"
+        self.assertTrue(b._git_error_mentions_path(detail, "dep"))
+        self.assertFalse(b._git_error_mentions_path(detail, "src"))
+        # And a short path must not match inside an unrelated word.
+        self.assertFalse(b._git_error_mentions_path("fatal: error: nope", "e"))
+
+    def test_the_submodule_probe_clears_every_repository_pointer(self):
+        from claude_review_loop import bundle as b
+        for name in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE",
+                     "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE"):
+            self.assertIn(name, b.SUBMODULE_PROBE_ENV)
+            self.assertIsNone(b.SUBMODULE_PROBE_ENV[name])
 
     def test_unknown_baseline_ref_is_rejected(self):
         with self.assertRaises(ValueError) as ctx:

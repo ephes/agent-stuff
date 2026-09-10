@@ -761,3 +761,65 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Judging the
   evidence a repair offers: when successive rounds keep finding new defects in
   one component rather than narrowing, the design is the finding
+
+## 2026-09-10 - Cheap Implementer, Expensive Reviewer, Delta Rounds: It Converged
+
+- Repo: agent-stuff, replacing the hand-rolled snapshot encoder with `git add`.
+- Implementer: Codex `gpt-5.6-sol` at high, driven noninteractively under a 2400s
+  cap. Reviewer: fresh-context Claude Opus 5 through `claude-review-loop`, one
+  round per repair, each scoped with `--baseline-ref` and recorded under one
+  `--slice-id`.
+- Expected: after three rounds where the driver both implemented and repaired,
+  splitting the roles would at least not be worse.
+- Actual: 3 Warnings, then 1 Critical + 1 Warning, then 2 Suggestions and the
+  ledger's own `converged` verdict - the first time that signal fired on real
+  work rather than stubs. The implementer also ran each new regression test
+  against the unfixed code first and reported the failures, so the tests are
+  reproductions rather than preservation evidence.
+- Impact: the same component that produced seven Criticals in three
+  self-implemented rounds converged in three delegated ones, and the two
+  reviewers disagreed usefully rather than agreeing: GPT-5.6 found the encoder's
+  git-object gaps, Opus found that `:(literal)` does not restrict a pathspec to
+  one entry and that `git ls-files` is cwd-scoped while `status --porcelain` is
+  root-relative.
+- Fix or follow-up: keep the split for work of this shape - the reviewer being a
+  different family from the implementer matters more than either being the
+  strongest available model, and every finding still has to be reproduced by the
+  driver before it is accepted or rejected. Two findings were rejected this way:
+  a claim that `import stat` had become dead, and an alternate-index write that
+  traced to collection's own `git diff` rather than to the repair.
+- Status: converged; both Suggestions applied afterwards as diagnostics-only
+  changes without another agreement pass. Uncommitted, awaiting the operator.
+- Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Model Roles And
+  Cost already carries the role split; this entry is its first real evidence
+
+## 2026-09-10 - Reviewing the plan before the code paid for itself; heredoc backticks bit again
+
+- Expected: a small Qt sizing bugfix would need one or two code-review rounds.
+- Actual: four plan rounds (11 Warnings -> 5 -> 3 -> ready) then three code
+  rounds (2 Warnings -> 1 -> clean). The plan rounds were where the value was:
+  three of round 1's findings corrected outright factual errors in my written
+  diagnosis - the wrong commit blamed for the regression, a risk-table claim
+  about tests that already set their own minimum, and a claim that existing
+  tests covered a shortcut they call directly. Had those gone into the
+  implementation they would have been repaired as code instead of as prose.
+- Impact: the implementation needed no rework of its shape. Both code-round
+  Warnings were in the periphery (a dev tool sharing the sizing knob, and a
+  touchpad gesture), not in the fix itself.
+- Fix or follow-up: for a change whose difficulty is arithmetic and environment
+  facts rather than structure, review the plan first and put every constant in
+  it with the measurement that produced it. Two of the reviewer's own
+  recommendations were then disprovable by measurement - a layout size
+  constraint it wanted unconditionally turned out to change nothing, and a
+  "treat zero frame margins as undecorated" rule was wrong because the offscreen
+  platform reports QMargins(2,2,2,2). Measuring beat arguing in both directions.
+- Second lesson, a repeat: I built a review prompt with an unquoted heredoc
+  whose body contained a backticked identifier, and the shell executed it as a
+  command substitution, silently corrupting the prompt and launching a review
+  against it. The skill already warns about this for code fences; the body only
+  needs one backtick, and an identifier in backticks is the likelier form in a
+  review prompt. Killed the run and relaunched from a quoted heredoc.
+- Status: converged clean; uncommitted, awaiting the operator.
+- Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Wrapper Shell
+  Hazards, to say the quoted delimiter is required whenever the body contains a
+  backtick at all, not only a code fence.

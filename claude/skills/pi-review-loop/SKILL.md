@@ -13,6 +13,8 @@ Suggestion-only verdict is advisory, not `CLEAN`.
 The harness owns Pi's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Pi is stuck — a hung or blocked Pi is detected and killed,
 and you always get a structured result.
+Baseline snapshots require Git 2.25 or newer because the shared bundle uses
+Git's NUL-delimited `--pathspec-from-file` interface.
 
 ## When to use
 
@@ -55,6 +57,12 @@ implement and fix; Pi reviews with fresh context.
    whole-slice review; scope only the rounds after it. Without this, every round
    re-sends the whole slice with the repairs on top, and the reviewer keeps
    rediscovering unrelated concerns in code it already passed.
+
+   Baseline recording fails before Pi runs if Git cannot read or index an
+   included path, and the error names the path and reason. Included worktree
+   directories that are not index gitlinks are excluded and reported in
+   `truncations`; dirty content inside an included submodule is likewise
+   reported because a gitlink records only its checked-out commit.
 
    Add `--slice-id <id>`, the same id on every round, to record the round in the
    cross-round ledger at `~/.cache/review-loop/ledger/`. That ledger is shared

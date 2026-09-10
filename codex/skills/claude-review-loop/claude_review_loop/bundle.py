@@ -33,7 +33,11 @@ class BundleResult:
 def _git(repo, *args, replacement_log, env_extra=None, input_bytes=None):
     env = dict(os.environ, LC_ALL="C", LANG="C")
     if env_extra:
-        env.update(env_extra)
+        for key, value in env_extra.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
     completed = subprocess.run(["git", "--no-optional-locks", *args],
                                cwd=repo, check=True, input=input_bytes,
                                capture_output=True, env=env)
@@ -78,146 +82,164 @@ def _resolve_tree(repo, ref, *, replacement_log):
     return tree
 
 
-NULL_BLOB = "0" * 40
-# Sentinel for a path the snapshot must record as absent.
-DELETED = object()
-# A path that exists but this encoder cannot describe. It is left at whatever
-# HEAD holds and reported, never recorded as deleted.
-UNREPRESENTABLE = object()
+def _literal_pathspecs(paths):
+    """Encode exact paths for Git's NUL-delimited pathspec-file interface."""
+    return b"".join(
+        f":(literal,top){path}".encode("utf-8", errors="surrogateescape") + b"\0"
+        for path in sorted(set(paths))
+    )
 
 
-def _hash_blob(repo, data, *, replacement_log):
-    """Write one blob, deliberately without running clean filters.
+def _index_gitlinks(repo, paths, *, replacement_log):
+    """Return included paths whose exact stage-zero index entry is a gitlink."""
+    wanted = set(paths)
+    if not wanted:
+        return set()
+    entries = _git(repo, "ls-files", "--full-name", "--stage", "-z", "--",
+                   ":(top)",
+                   replacement_log=replacement_log)
+    gitlinks = set()
+    for record in entries.split("\0"):
+        if not record or "\t" not in record:
+            continue
+        metadata, path = record.split("\t", 1)
+        fields = metadata.split()
+        if (path in wanted and len(fields) == 3
+                and fields[0] == "160000" and fields[2] == "0"):
+            gitlinks.add(path)
+    return gitlinks
 
-    `git add` would apply a configured clean/process filter, which is an
-    arbitrary external program - git-lfs writes into `.git/lfs` from it. The
-    snapshot must not run anything the repository configures, so content goes
-    in through `hash-object --stdin`, which no filter sees.
+
+def _safe_snapshot_paths(repo, include_paths, truncations, *, replacement_log):
+    """Exclude directory pathspecs that `git add` would expand recursively."""
+    gitlinks = _index_gitlinks(repo, include_paths,
+                               replacement_log=replacement_log)
+    worktree_root = _git(repo, "rev-parse", "--show-toplevel",
+                         replacement_log=replacement_log).strip()
+    safe = []
+    for path in sorted(set(include_paths)):
+        full = os.path.join(worktree_root, path)
+        try:
+            mode = os.lstat(full).st_mode
+        except OSError:
+            # Missing paths are deletions, while unreadable paths must reach
+            # `git add` so its failure is handled below rather than guessed at.
+            safe.append(path)
+            continue
+        if stat.S_ISDIR(mode) and path not in gitlinks:
+            truncations.append({
+                "section": "baseline snapshot", "path": path,
+                "reason": "worktree path is a directory but its exact index "
+                          "entry is not a gitlink; excluded to prevent "
+                          "recursive snapshot inclusion",
+            })
+            continue
+        if stat.S_ISDIR(mode) and path in gitlinks:
+            try:
+                dirty = _git(repo, "-C", full, "status", "--porcelain",
+                             replacement_log=replacement_log,
+                             env_extra=SUBMODULE_PROBE_ENV).strip()
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or b"").decode(
+                    "utf-8", errors="replace").strip()
+                truncations.append({
+                    "section": "baseline snapshot", "path": path,
+                    "reason": "submodule worktree status could not be "
+                              f"inspected: {detail or 'git status failed'}",
+                })
+            else:
+                if dirty:
+                    truncations.append({
+                        "section": "baseline snapshot", "path": path,
+                        "reason": "dirty submodule content is not part of the "
+                                  "recorded gitlink",
+                    })
+        safe.append(path)
+    return safe
+
+
+def _snapshot_add_failure(paths, exc):
+    """Turn Git's low-level indexing failure into a path-scoped harness error."""
+    detail = (exc.stderr or b"").decode("utf-8", errors="replace").strip()
+    matched = [path for path in paths if _git_error_mentions_path(detail, path)]
+    named = matched or list(paths)
+    path_label = ", ".join(repr(path) for path in named)
+    reason = " ".join(detail.splitlines()) or f"git add exited {exc.returncode}"
+    return OSError(
+        f"cannot record baseline snapshot; git could not index included path "
+        f"{path_label}: {reason}"
+    )
+
+
+# Every ambient variable that can point git at another repository's location.
+# The submodule probe must describe the submodule and nothing else - inheriting
+# any of these makes it inspect the submodule worktree through the parent's
+# refs, objects, or index.
+SUBMODULE_PROBE_ENV = {
+    "GIT_INDEX_FILE": None,
+    "GIT_DIR": None,
+    "GIT_WORK_TREE": None,
+    "GIT_COMMON_DIR": None,
+    "GIT_OBJECT_DIRECTORY": None,
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES": None,
+    "GIT_NAMESPACE": None,
+    "GIT_CEILING_DIRECTORIES": None,
+}
+
+
+def _git_error_mentions_path(detail, path):
+    """Match a complete quoted or bare path token in Git's diagnostic text.
+
+    Git reports an indexing failure against the offending file, so a directory
+    include path is named as a prefix of it - `error: unable to index file
+    'dep/big.bin'` for the include path `dep`. Without the prefix form nothing
+    matches and the caller falls back to naming every include path for one
+    directory's failure.
     """
-    return _git(repo, "hash-object", "-w", "--stdin",
-                replacement_log=replacement_log, input_bytes=data).strip()
+    candidates = (path, path.rstrip("/") + "/")
+    for candidate in candidates:
+        if any(f"{quote}{candidate}" in detail for quote in ("'", '"', "`")):
+            return True
+    if re.search(
+        r"(?<![\w./\\'\"-])" + re.escape(path)
+        + r"(?![\w./\\'\"-])",
+        detail,
+    ) is not None:
+        return True
+    # A bare directory token followed by its separator.
+    return re.search(
+        r"(?<![\w./\\'\"-])" + re.escape(path.rstrip("/")) + r"/",
+        detail,
+    ) is not None
 
 
-def _gitlink_entry(repo, path, full, *, replacement_log):
-    """Encode a submodule as the gitlink its superproject tree holds.
-
-    `git -C <dir> rev-parse HEAD` is not a submodule test: run in an ordinary
-    subdirectory it walks up and answers with the *superproject's* HEAD, which
-    would encode a plain directory as a false `160000` entry and hide whatever
-    is really there. The directory must be its own repository root, and the
-    index must actually call the path a gitlink.
-    """
-    try:
-        top = _git(repo, "-C", path, "rev-parse", "--show-toplevel",
-                   replacement_log=replacement_log).strip()
-    except subprocess.CalledProcessError:
-        return UNREPRESENTABLE
-    if not top or os.path.realpath(top) != os.path.realpath(full):
-        return UNREPRESENTABLE
-    staged = _git(repo, "ls-files", "--stage", "-z", "--", path,
-                  replacement_log=replacement_log)
-    if not staged.startswith("160000 "):
-        return UNREPRESENTABLE
-    try:
-        head = _git(repo, "-C", path, "rev-parse", "HEAD",
-                    replacement_log=replacement_log).strip()
-    except subprocess.CalledProcessError:
-        return UNREPRESENTABLE
-    if not head:
-        return UNREPRESENTABLE
-    # A gitlink records a commit, so uncommitted content inside the submodule is
-    # not in the baseline at all. Say so rather than implying it was captured.
-    dirty = _git(repo, "-C", path, "status", "--porcelain",
-                 replacement_log=replacement_log).strip()
-    return ("160000", head, "dirty submodule content is not part of the "
-            "recorded gitlink") if dirty else ("160000", head)
-
-
-def _file_mode(full):
-    """The git mode for a regular file, preserving the executable bit."""
-    try:
-        return "100755" if os.lstat(full).st_mode & stat.S_IXUSR else "100644"
-    except OSError:
-        return "100644"
-
-
-def _worktree_entry(repo, path, *, replacement_log):
-    """The index-info entry for one path as it exists in the worktree.
-
-    Returns None when the path is genuinely gone - which `update-index` records
-    as a deletion - and UNREPRESENTABLE when it exists but this encoder cannot
-    describe it. Those must not be confused: recording an existing path as
-    deleted hides it from every later delta.
-    """
-    full = os.path.join(repo, path)
-    try:
-        st = os.lstat(full)
-    except FileNotFoundError:
-        return None
-    except NotADirectoryError:
-        # A parent component is gone, so the path is too.
-        return None
-    except OSError:
-        # It exists as far as anyone knows - permissions, I/O - and cannot be
-        # read. Recording that as a deletion would hide it from every delta.
-        return UNREPRESENTABLE
-    if stat.S_ISLNK(st.st_mode):
-        target = os.readlink(full).encode("utf-8", errors="surrogateescape")
-        return "120000", _hash_blob(repo, target, replacement_log=replacement_log)
-    if stat.S_ISDIR(st.st_mode):
-        return _gitlink_entry(repo, path, full, replacement_log=replacement_log)
-    if not stat.S_ISREG(st.st_mode):
-        return UNREPRESENTABLE
-    with open(full, "rb") as fh:
-        data = fh.read()
-    mode = "100755" if st.st_mode & stat.S_IXUSR else "100644"
-    return mode, _hash_blob(repo, data, replacement_log=replacement_log)
-
-
-def _snapshot_tree(repo, index_path, entries, *, replacement_log):
+def _snapshot_tree(repo, index_path, include_paths, excluded_paths, *,
+                   replacement_log):
     """Write a tree object for the reviewed content.
 
-    Uses a private index file, so the caller's index, worktree, and refs are
-    never touched, and writes every blob through `hash-object` so no configured
-    filter runs. `entries` maps each included path either to explicit content
-    (untracked files enter as the redacted bytes the reviewer was actually sent)
-    or to `None`, meaning "take it from the worktree as git would store it".
+    Git populates a private index from the worktree, so it owns file modes,
+    symlinks, submodules, deletions, filters, and read failures. Only exact
+    `include_paths` enter from the worktree. `excluded_paths` are removed from
+    the HEAD-seeded index without reading their worktree content.
     """
     env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
     _git(repo, "read-tree", "HEAD",
          replacement_log=replacement_log, env_extra=env_extra)
-    lines = []
-    unrepresentable = []
-    partial = []
-    for path in sorted(entries):
-        content = entries[path]
-        if content is DELETED:
-            entry = None
-        elif content is None:
-            entry = _worktree_entry(repo, path, replacement_log=replacement_log)
-        else:
-            entry = (_file_mode(os.path.join(repo, path)),
-                     _hash_blob(repo, content, replacement_log=replacement_log))
-        if entry is UNREPRESENTABLE:
-            # Leave HEAD's entry alone and say so. Anything else would either
-            # delete a path that exists or invent content for it.
-            unrepresentable.append((path, "path cannot be represented in a "
-                                          "tree; left at its HEAD state"))
-        elif entry is None:
-            # Gone from the worktree: record the deletion.
-            lines.append(f"0 {NULL_BLOB}\t{path}")
-        else:
-            lines.append(f"{entry[0]} {entry[1]}\t{path}")
-            if len(entry) > 2:
-                partial.append((path, entry[2]))
-    if lines:
-        payload = "\0".join(lines).encode("utf-8") + b"\0"
-        _git(repo, "update-index", "-z", "--index-info",
+    if excluded_paths:
+        _git(repo, "rm", "-q", "--cached", "-f", "--ignore-unmatch",
+             "--pathspec-from-file=-", "--pathspec-file-nul",
              replacement_log=replacement_log, env_extra=env_extra,
-             input_bytes=payload)
-    tree = _git(repo, "write-tree",
+             input_bytes=_literal_pathspecs(excluded_paths))
+    if include_paths:
+        try:
+            _git(repo, "add", "-A", "-f", "--pathspec-from-file=-",
+                 "--pathspec-file-nul", replacement_log=replacement_log,
+                 env_extra=env_extra,
+                 input_bytes=_literal_pathspecs(include_paths))
+        except subprocess.CalledProcessError as exc:
+            raise _snapshot_add_failure(include_paths, exc) from exc
+    return _git(repo, "write-tree",
                 replacement_log=replacement_log, env_extra=env_extra).strip()
-    return tree, unrepresentable + partial
 
 
 def _staged_tree(repo, index_path, *, replacement_log):
@@ -324,7 +346,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
     sections = []  # (priority, title, body) - higher numbers are dropped first
     context_titles = set()
     delta_mode = baseline_ref is not None
-    included_untracked = {}
+    included_untracked = []
 
     # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
     # surrounding quotes git adds for names with spaces.
@@ -392,7 +414,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         content, changed = redact_text(decoded)
         if changed:
             redactions.append({"path": path, "section": "untracked file"})
-        included_untracked[path] = content.encode("utf-8", errors="surrogateescape")
+        included_untracked.append(path)
         body = f"### {path}\n```\n{content}\n```"
         untracked_body_by_path[path] = body
         untracked_bodies.append(body)
@@ -418,13 +440,13 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 "reason": "staged deletion and untracked content cannot both "
                           "enter one baseline; excluded",
             })
-        entries = {p: None for p in tracked_changed if p not in included_untracked}
-        entries.update({p: c for p, c in included_untracked.items()
-                        if p not in ambiguous})
-        # Record the ambiguous path as absent rather than leaving HEAD's copy in
-        # the baseline: absent is the state that cannot make later content look
-        # already reviewed. The delta bundle re-sends its body every round.
-        entries.update({p: DELETED for p in ambiguous})
+        include_paths = [p for p in tracked_changed + included_untracked
+                         if p not in ambiguous]
+        if not staged_only:
+            include_paths = _safe_snapshot_paths(
+                repo, include_paths, truncations,
+                replacement_log=decoding_replacements,
+            )
         # A private, uniquely named index: a fixed name under a caller-chosen
         # run directory would delete a same-named file that was already there.
         index_fd, index_path_used = tempfile.mkstemp(
@@ -436,14 +458,9 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 snapshot = _staged_tree(repo, index_path_used,
                                         replacement_log=decoding_replacements)
             else:
-                snapshot, unrepresentable_paths = _snapshot_tree(
-                    repo, index_path_used, entries,
+                snapshot = _snapshot_tree(
+                    repo, index_path_used, include_paths, ambiguous,
                     replacement_log=decoding_replacements)
-                for path, reason in unrepresentable_paths:
-                    truncations.append({
-                        "section": "baseline snapshot", "path": path,
-                        "reason": reason,
-                    })
         finally:
             # Scratch state: the reviewer can read the run directory, and the
             # index has no business being visible there after the tree exists.

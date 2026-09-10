@@ -17,7 +17,8 @@ a process or guess whether Claude is stuck. A hung or blocked spawned review is 
 killed, and recorded in a structured result. Pre-spawn non-empty-run-directory
 rejection and exhausted review-slot contention return only their documented
 exit code/message. Independent reviews may run concurrently; the per-user slot
-pool defaults to ten active Claude reviews.
+pool defaults to ten active Claude reviews. Baseline snapshots require Git 2.25
+or newer because they use the NUL-delimited `--pathspec-from-file` interface.
 
 The harness runs direct `claude -p` and supplies the review prompt from a prompt
 file on stdin. Claude runs with `--safe-mode`, an empty setting-source list, a
@@ -83,7 +84,8 @@ are not allowed. Separate harness invocations may run concurrently.
    calling workflow requests a different reviewer.
 
    Add `--record-baseline` to any round you may re-review. The harness then
-   snapshots exactly the content it sent and reports a `baseline_commit`:
+   snapshots the reviewed worktree state, subject to the explicit omissions
+   reported below, and reports a `baseline_commit`:
 
    ```bash
    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
@@ -107,16 +109,23 @@ are not allowed. Separate harness invocations may run concurrently.
    whole-slice review; scope only the rounds after it.
 
    The snapshot is a dangling commit: no ref points at it, and your index,
-   worktree and refs are untouched. Untracked files enter it as the redacted
-   bytes the reviewer was sent, so a secret removed from the bundle is not
-   written into a git blob behind your back; a skipped secret-looking,
-   oversized, or binary file does not enter at all. Changed tracked files enter
-   as their worktree bytes - the same content a commit would store, and already
-   in your worktree. Blobs are written with `hash-object`, so a configured
-   clean/process filter never runs from the snapshot; note that collecting the
-   diff at all runs one, exactly as your own `git diff` does. It does write
-   objects into the repository, which a later `git gc` collects; omit
-   `--record-baseline` if that is unwelcome.
+   worktree and refs are untouched. It holds included worktree content as Git
+   would store it. Secret-looking untracked paths and every other refused
+   untracked path still do not enter at all. When a file's contents were
+   redacted in the bundle, however, its raw, unredacted worktree content is
+   passed to Git for the local snapshot (subject to any clean filter). `git add`
+   may run a configured clean/process filter, just as diff collection already
+   does. The dangling snapshot objects stay local and a later `git gc` collects
+   them; omit `--record-baseline` if writing those temporary objects is
+   unwelcome.
+
+   Baseline recording fails closed before the reviewer runs when Git cannot
+   read or index an included path; the harness error names the affected path
+   and Git's reason. A worktree directory at an included path is excluded and
+   recorded in `truncations` unless that exact path is already a gitlink in the
+   index, preventing recursive inclusion or an accidental embedded-repository
+   gitlink. A gitlink records only the submodule commit, so dirty content inside
+   an included submodule is not captured and is reported in `truncations`.
 
    With `--staged-only` the baseline is the index, not the worktree, because
    that is what a staged-only reviewer saw - otherwise unstaged content nobody
