@@ -502,7 +502,13 @@ rather than trivia.
   command substitution — this started a full iOS test suite twice during
   closeout checks and destroyed an in-progress result bundle both times. The
   same applies to heredocs used to build prompts: quote the delimiter
-  (`<<'EOF'`) whenever the body contains code fences.
+  (`<<'EOF'`) whenever the body contains a backtick **at all**, not merely a
+  code fence. One backticked identifier is enough, and that is the likeliest
+  form in a review prompt — naming the function under review. An unquoted
+  delimiter runs it, silently corrupting the prompt, and the review then starts
+  against text you did not write. When the body must also interpolate a path,
+  write the file from a quoted heredoc using a placeholder and substitute it
+  afterwards rather than reaching for an unquoted delimiter.
 
 Build prompts and runners as files with arguments passed positionally. Nested
 quoting inside a single `tmux new-session` string has repeatedly expanded in the
