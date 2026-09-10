@@ -245,6 +245,7 @@ correctly and it hung only at exit.
    body to a temp file:
 
    ```bash
+   nonce="$(openssl rand -hex 8)"   # Codex/Pi: the sentinel the prompt asks for
    prompt_file="$(mktemp -t review-prompt.XXXXXX)"
    printf '%s' "$review_prompt" > "$prompt_file"
    ```
@@ -438,12 +439,20 @@ correctly and it hung only at exit.
    session ending does not help either when the runner deliberately holds the
    pane open; wait on the reviewer process when in doubt.
 
-   Substitute the branch's threshold for `2` below.
+   Substitute the branch's threshold for `2` below. The nonce makes the count
+   trustworthy; without it the threshold is guesswork, so generate the nonce
+   first and build both the prompt and this loop from it:
 
    ```bash
+   nonce="$(openssl rand -hex 8)"
+   ```
+
+   ```bash
+   # $nonce is the value generated before the prompt was written, and the
+   # prompt asked for `=== REVIEW COMPLETE $nonce ===` as its final line.
    completed=0
    for _ in $(seq 1 180); do
-       if [ -f "$log_file" ] && [ "$(grep -Fc '=== REVIEW COMPLETE ===' "$log_file")" -ge 2 ]; then
+       if [ -f "$log_file" ] && [ "$(grep -Fc "=== REVIEW COMPLETE $nonce ===" "$log_file")" -ge 2 ]; then
            tail -200 "$log_file"
            completed=1
            break
@@ -524,13 +533,16 @@ include:
   findings and the repair delta unless the repair had broad, cross-cutting
   impact whose recorded rationale requires reopening the whole slice
 - when preparing Codex/Pi re-reviews, strip a quoted prior report's trailing
-  `=== REVIEW COMPLETE ===` sentinel before adding them to the prompt
+  completion sentinel before adding it to the prompt
 - severity policy: Critical, Warning, Suggestion
 - instruction to verify docs/release notes when behavior or workflow changed
 - explicit instruction that this is read-only review: the reviewer must not
   edit files, stage changes, commit, or otherwise mutate the worktree
 - output contract with findings first and summary-safe metrics; the final line
-  must be exactly `=== REVIEW COMPLETE ===`.
+  must be exactly `=== REVIEW COMPLETE <nonce> ===`, using the per-run nonce
+  from the reviewer procedure. A fixed sentinel is unreliable: the reviewer
+  echoes the files it reads, so any repository that documents the sentinel puts
+  extra copies in the log and ends the poll mid-review.
 
 For Codex/Pi, ask the reviewer to report:
 
@@ -585,6 +597,12 @@ A reviewer is a source of claims, not verdicts you owe agreement to.
   behavioral-preservation evidence, not a reproduction. Run it against the old
   code and require it to fail; assert that an injected fault actually executed,
   since a rollback test returning False can pass before its failure runs.
+- Review a repair delta as its own change, not as a smaller version of a
+  reviewed one. In one observed cycle every Critical in round 2 was introduced
+  by round 1's repairs: the fix for a secret-exposure warning wrote a raw
+  credential into a snapshot, and the fix for one silent omission created
+  another. A repair is written under time pressure against a narrowed view,
+  which is exactly where the last review's blind spot lives.
 - Update the backlog or work item as soon as implementation validation passes,
   not after the review. A review round spent reporting that the backlog still
   describes fixed findings as future work is a round bought for nothing.

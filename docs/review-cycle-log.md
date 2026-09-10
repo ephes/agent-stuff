@@ -702,3 +702,32 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Status: repaired; awaiting a delta re-review of the repair.
 - Promotion: incident - the durable rule (a stub-verified harness is unverified)
   is already carried by the run-notes lesson on reproduction evidence
+
+## 2026-09-10 - Round 2: Every Critical Was Caused By The Round-1 Repair
+
+- Repo: agent-stuff, repair delta `9d1793e..b92f511`.
+- Implementer: Claude Opus 5. Reviewer: Codex `gpt-5.6-sol` at high, read-only.
+- Expected: a bounded delta re-review confirming eleven repairs.
+- Actual: 4 Critical, 0 Warning, 0 Suggestion - all four introduced by the
+  repair, each with a reproduction the reviewer ran itself. Ambiguity detection
+  compared tracked changes against the *accepted* untracked files, so a refused
+  secret-looking path was missed and `git rm --cached .env` wrote the raw
+  credential into the baseline. The new worktree encoder treated every
+  non-regular, non-symlink path as deleted, so a submodule vanished from the
+  baseline and a later advance reported no changes. `_staged_tree` copied
+  `$GIT_DIR/index` while collection honors an inherited `GIT_INDEX_FILE`. And
+  the skill's copyable poll command still grepped the fixed sentinel that the
+  prose two paragraphs above had just declared unsafe.
+- Impact: the round-1 repair for a secret-exposure warning introduced a
+  secret-exposure Critical, and the fix for one silent-omission bug introduced
+  another. A repair delta is not a safer diff than the original.
+- Fix or follow-up: ambiguity is judged against every untracked path including
+  refused ones; a path that exists but cannot be encoded is left at its HEAD
+  state and reported, never recorded as deleted, and submodules are encoded as
+  `160000` gitlinks; `_staged_tree` honors `GIT_INDEX_FILE`; the poll snippet
+  builds on the nonce. All three code findings were reproduced against the
+  reviewer's own scenarios before and after the fix.
+- Status: repaired; a third bounded re-review of this delta follows.
+- Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Judging the
+  evidence a repair offers: review the repair delta as its own change, since a
+  repair is where the last review's blind spot lives

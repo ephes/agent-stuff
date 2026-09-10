@@ -656,6 +656,97 @@ class TestBaselineDelta(unittest.TestCase):
         with open(victim) as fh:
             self.assertEqual(fh.read(), "someone else's file\n")
 
+    def test_a_refused_untracked_path_still_counts_as_ambiguous(self):
+        # A secret-looking file is never sent, so it is not in the accepted set.
+        # If ambiguity is judged from the accepted set alone, `git rm --cached`
+        # leaves HEAD's copy - the raw credential - in the baseline.
+        self._write(".env", "AWS_SECRET_ACCESS_KEY=aaaabbbbccccddddeeeeffff\n")
+        git(self.repo, "add", ".env")
+        git(self.repo, "commit", "-qm", "add env")
+        git(self.repo, "rm", "--cached", "-q", ".env")
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True)
+        self.assertNotIn(".env", listing.stdout.split("\n"))
+        self.assertTrue(any(t.get("path") == ".env" for t in res.truncations))
+
+    def test_a_submodule_is_recorded_as_a_gitlink_not_a_deletion(self):
+        child = os.path.join(self.tmp.name, "child")
+        os.makedirs(child)
+        git(child, "init", "-q")
+        git(child, "config", "user.email", "t@t")
+        git(child, "config", "user.name", "t")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("one\n")
+        git(child, "add", "f")
+        git(child, "commit", "-qm", "one")
+        subprocess.run(["git", "-c", "protocol.file.allow=always", "submodule",
+                        "add", "-q", child, "dep"],
+                       cwd=self.repo, check=True, capture_output=True)
+        git(self.repo, "commit", "-qm", "sub")
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("two\n")
+        git(child, "commit", "-qam", "two")
+        git(os.path.join(self.repo, "dep"), "fetch", "-q")
+        git(os.path.join(self.repo, "dep"), "checkout", "-q", "FETCH_HEAD")
+
+        first = self._build(record_baseline=True)
+        entry = subprocess.run(["git", "ls-tree", first.baseline_commit, "dep"],
+                               cwd=self.repo, capture_output=True, text=True)
+        self.assertIn("160000", entry.stdout)
+
+        # An advance after the review must still be visible to the next round.
+        with open(os.path.join(child, "f"), "w") as fh:
+            fh.write("three\n")
+        git(child, "commit", "-qam", "three")
+        git(os.path.join(self.repo, "dep"), "fetch", "-q")
+        git(os.path.join(self.repo, "dep"), "checkout", "-q", "FETCH_HEAD")
+        second = self._build("round-2.md", baseline_ref=first.baseline_commit)
+        self.assertTrue(second.has_changes)
+
+    def test_staged_only_honours_an_alternate_index(self):
+        # Collection inherits GIT_INDEX_FILE, so the reviewer saw that index.
+        # Snapshotting the default one would record content nobody reviewed.
+        alt = os.path.join(self.tmp.name, "alt.index")
+        env = dict(os.environ, GIT_INDEX_FILE=alt)
+        subprocess.run(["git", "read-tree", "HEAD"], cwd=self.repo, check=True,
+                       env=env, capture_output=True)
+        self._write("a.py", "print('staged-alt')\n")
+        subprocess.run(["git", "add", "a.py"], cwd=self.repo, check=True,
+                       env=env, capture_output=True)
+        self._write("a.py", "print('worktree only')\n")
+        os.environ["GIT_INDEX_FILE"] = alt
+        try:
+            res = self._build(staged_only=True, record_baseline=True)
+        finally:
+            del os.environ["GIT_INDEX_FILE"]
+        shown = subprocess.run(["git", "show", f"{res.baseline_commit}:a.py"],
+                               cwd=self.repo, capture_output=True, text=True)
+        self.assertIn("staged-alt", shown.stdout)
+        self.assertNotIn("worktree only", shown.stdout)
+
+    def test_an_existing_but_unrepresentable_path_is_never_recorded_deleted(self):
+        self._write("a.py", "print('changed')\n")
+        original = bundle._worktree_entry
+
+        def unrepresentable(repo, path, **kwargs):
+            if path == "a.py":
+                return bundle.UNREPRESENTABLE
+            return original(repo, path, **kwargs)
+
+        with mock.patch.object(bundle, "_worktree_entry",
+                               side_effect=unrepresentable):
+            res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True)
+        # Left at its HEAD state, not deleted, and reported.
+        self.assertIn("a.py", listing.stdout.split("\n"))
+        self.assertTrue(any(t.get("path") == "a.py"
+                            and "cannot be represented" in t.get("reason", "")
+                            for t in res.truncations))
+
     def test_unknown_baseline_ref_is_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             self._build(baseline_ref="does-not-exist")

@@ -81,6 +81,9 @@ def _resolve_tree(repo, ref, *, replacement_log):
 NULL_BLOB = "0" * 40
 # Sentinel for a path the snapshot must record as absent.
 DELETED = object()
+# A path that exists but this encoder cannot describe. It is left at whatever
+# HEAD holds and reported, never recorded as deleted.
+UNREPRESENTABLE = object()
 
 
 def _hash_blob(repo, data, *, replacement_log):
@@ -106,8 +109,10 @@ def _file_mode(full):
 def _worktree_entry(repo, path, *, replacement_log):
     """The index-info entry for one path as it exists in the worktree.
 
-    Returns None when the path is gone, which `update-index` records as a
-    deletion.
+    Returns None when the path is genuinely gone - which `update-index` records
+    as a deletion - and UNREPRESENTABLE when it exists but this encoder cannot
+    describe it. Those must not be confused: recording an existing path as
+    deleted hides it from every later delta.
     """
     full = os.path.join(repo, path)
     try:
@@ -117,8 +122,16 @@ def _worktree_entry(repo, path, *, replacement_log):
     if stat.S_ISLNK(st.st_mode):
         target = os.readlink(full).encode("utf-8", errors="surrogateescape")
         return "120000", _hash_blob(repo, target, replacement_log=replacement_log)
+    if stat.S_ISDIR(st.st_mode):
+        # A gitlink: the tree stores the submodule's own commit, mode 160000.
+        try:
+            head = _git(repo, "-C", path, "rev-parse", "HEAD",
+                        replacement_log=replacement_log).strip()
+        except subprocess.CalledProcessError:
+            return UNREPRESENTABLE
+        return ("160000", head) if head else UNREPRESENTABLE
     if not stat.S_ISREG(st.st_mode):
-        return None
+        return UNREPRESENTABLE
     with open(full, "rb") as fh:
         data = fh.read()
     mode = "100755" if st.st_mode & stat.S_IXUSR else "100644"
@@ -138,6 +151,7 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
     _git(repo, "read-tree", "HEAD",
          replacement_log=replacement_log, env_extra=env_extra)
     lines = []
+    unrepresentable = []
     for path in sorted(entries):
         content = entries[path]
         if content is DELETED:
@@ -147,7 +161,11 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
         else:
             entry = (_file_mode(os.path.join(repo, path)),
                      _hash_blob(repo, content, replacement_log=replacement_log))
-        if entry is None:
+        if entry is UNREPRESENTABLE:
+            # Leave HEAD's entry alone and say so. Anything else would either
+            # delete a path that exists or invent content for it.
+            unrepresentable.append(path)
+        elif entry is None:
             # Gone from the worktree: record the deletion.
             lines.append(f"0 {NULL_BLOB}\t{path}")
         else:
@@ -157,8 +175,9 @@ def _snapshot_tree(repo, index_path, entries, *, replacement_log):
         _git(repo, "update-index", "-z", "--index-info",
              replacement_log=replacement_log, env_extra=env_extra,
              input_bytes=payload)
-    return _git(repo, "write-tree",
+    tree = _git(repo, "write-tree",
                 replacement_log=replacement_log, env_extra=env_extra).strip()
+    return tree, unrepresentable
 
 
 def _staged_tree(repo, index_path, *, replacement_log):
@@ -170,9 +189,14 @@ def _staged_tree(repo, index_path, *, replacement_log):
     first because `write-tree` can refresh the index it runs against, and the
     caller's must not change.
     """
-    git_dir = _git(repo, "rev-parse", "--absolute-git-dir",
-                   replacement_log=replacement_log).strip()
-    source = os.path.join(git_dir, "index")
+    # Collection inherits the caller's environment, so a `GIT_INDEX_FILE` they
+    # set is the index the reviewer actually saw. Copying the default one would
+    # snapshot an index nobody reviewed.
+    source = os.environ.get("GIT_INDEX_FILE")
+    if not source:
+        git_dir = _git(repo, "rev-parse", "--absolute-git-dir",
+                       replacement_log=replacement_log).strip()
+        source = os.path.join(git_dir, "index")
     env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
     if os.path.exists(source):
         shutil.copyfile(source, index_path)
@@ -260,11 +284,17 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
     )
     untracked_bodies, notes = [], []
     untracked_body_by_path = {}
+    untracked_all = []
     for line in porcelain.split("\n"):
         code, raw_path = line[:2], line[3:]
         if code != "??":
             continue
         path = raw_path[1:-1] if raw_path.startswith('"') and raw_path.endswith('"') else raw_path
+        # Every untracked path, including the ones refused below: a path that is
+        # also staged-deleted is ambiguous whether or not its content was sent,
+        # and a refused one is exactly the case where getting this wrong writes
+        # a secret into the baseline.
+        untracked_all.append(path)
         if is_secret_path(path):
             redactions.append({"path": path, "section": "untracked file"})
             untracked_bodies.append(
@@ -330,7 +360,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         # `git rm --cached`) is two states at once, and a tree holds one. Keep
         # it out of the snapshot and say so: the next delta then shows it again,
         # which over-reports rather than hiding a change nobody reviewed.
-        ambiguous = sorted(set(tracked_changed) & set(included_untracked))
+        ambiguous = sorted(set(tracked_changed) & set(untracked_all))
         for path in ambiguous:
             truncations.append({
                 "section": "baseline snapshot", "path": path,
@@ -355,9 +385,15 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 snapshot = _staged_tree(repo, index_path_used,
                                         replacement_log=decoding_replacements)
             else:
-                snapshot = _snapshot_tree(
+                snapshot, unrepresentable_paths = _snapshot_tree(
                     repo, index_path_used, entries,
                     replacement_log=decoding_replacements)
+                for path in unrepresentable_paths:
+                    truncations.append({
+                        "section": "baseline snapshot", "path": path,
+                        "reason": "path cannot be represented in a tree; left "
+                                  "at its HEAD state",
+                    })
         finally:
             # Scratch state: the reviewer can read the run directory, and the
             # index has no business being visible there after the tree exists.
