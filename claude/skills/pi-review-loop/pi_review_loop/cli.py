@@ -128,6 +128,14 @@ def _pi_cmd(model, bundle_path, delta=False):
 def main(argv=None):
     args = _build_parser().parse_args(argv)
     os.makedirs(args.run_dir, exist_ok=True)
+    existing = [name for name in os.listdir(args.run_dir)]
+    if existing:
+        # The run directory is harness-owned scratch: the bundler writes a
+        # private index into it, and reusing a directory that already holds
+        # files would both leak them into the review and risk destroying them.
+        print("pi-review-loop: run directory must be new or empty",
+              file=sys.stderr)
+        return 2
     os.makedirs(os.path.dirname(args.lock_dir) or ".", exist_ok=True)
 
     model = args.model or "unresolved"
@@ -224,8 +232,9 @@ def main(argv=None):
             baseline_commit=result.baseline_commit,
         )
         try:
-            ledger_mod.append_round(ledger_path, record)
-            rounds = ledger_mod.read_rounds(ledger_path)
+            # One lock across the append and the read: a concurrent review of
+            # the same slice must not renumber this round or lend it its status.
+            rounds = ledger_mod.append_and_read(ledger_path, record)
         except OSError as exc:
             # The ledger informs the stop decision; it must never withhold a
             # review that already happened.

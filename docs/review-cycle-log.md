@@ -506,7 +506,7 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Impact: the rules were only as good as the driver's memory of the loop it was
   in - so on the long, expensive slices they were least likely to apply.
 - Fix: `--slice-id` appends one summary-safe line per completed round to
-  `~/.cache/claude-review-loop/ledger/<slice>.jsonl` - severity counts, finding
+  `~/.cache/review-loop/ledger/<slice>.jsonl` - severity counts, finding
   fingerprints, model, effort, duration, baseline; no finding text, no
   repository content. The harness reads the slice back, reports
   `LOOP: <status> - <reason>`, records `convergence` in `result.json`, and exits
@@ -651,3 +651,54 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
   harnesses appearing as one history.
 - Promotion: promoted 2026-09-10 - the fix is the shared module itself;
   `pi-review-loop` SKILL.md now states the dependency and the redaction contract
+
+## 2026-09-10 - A Fixed Completion Sentinel Fails When The Reviewed Repo Documents It
+
+- Repo: agent-stuff, reviewing the review skills with `codex exec`.
+- Expected: polling for two `=== REVIEW COMPLETE ===` matches ends on the report,
+  since `codex exec` echoes the prompt exactly once.
+- Actual: the poll returned mid-review with three matches. The repository under
+  review documents its own output contract, so the reviewer's file reads echoed
+  the sentinel into the log. Re-arming on `[review pipeline statuses:` failed the
+  same way - the runner script is quoted in the skill too. The reviewer was still
+  working both times.
+- Impact: a driver that trusted either signal would have reported a partial log
+  as the verdict, or killed a live reviewer.
+- Fix or follow-up: use a per-run nonce (`openssl rand -hex 8`) in the sentinel
+  and poll for that; nothing already in the repository can contain it. Waiting on
+  the reviewer process is the fallback when the runner holds the pane open. Any
+  fixed marker is only safe while the reviewed material cannot quote it - which
+  is exactly what a repo of review skills does.
+- Status: resolved; the third attempt waited on the process and captured the
+  full report.
+- Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, reviewer procedure
+  step 4
+
+## 2026-09-10 - GPT-5.6 Review Of The Review-Loop Changes
+
+- Repo: agent-stuff, commits `0112b1c..9d1793e`.
+- Implementer: Claude Opus 5. Reviewer: Codex `gpt-5.6-sol` at high reasoning,
+  read-only, model taken from the invocation rather than the report, which named
+  only "GPT-5".
+- Expected: a first review of six commits that had passed 349 stub-driven tests.
+- Actual: 4 Critical, 7 Warning. The gate-relevant one: `--staged-only`
+  `--record-baseline` snapshotted worktree content the reviewer never saw, so a
+  later delta would treat unreviewed lines as reviewed. Reproduced directly
+  before accepting it.
+- Impact: the delta feature could have passed content nobody reviewed - the exact
+  failure it was built to prevent. Found on code that a full test suite called
+  green, because every end-to-end check used stub reviewers.
+- Fix or follow-up: staged-only baselines now snapshot the index; blobs are
+  written with `hash-object` so no configured clean filter runs from the
+  snapshot, and untracked files enter as the redacted bytes that were actually
+  sent; a path that is both staged-deleted and untracked is recorded absent and
+  re-sent in full every round; the private index has a unique name so it cannot
+  delete a caller's file; ledger append and read share one lock; `read_rounds`
+  survives malformed counts and undecodable bytes; the default slice id keys on
+  the commit rather than the branch. One Critical was qualified rather than
+  accepted: clean filters do run, but from `git diff` during collection - as they
+  would for any local `git diff` - not from the snapshot path, which no longer
+  calls `git add`. The documentation now says so.
+- Status: repaired; awaiting a delta re-review of the repair.
+- Promotion: incident - the durable rule (a stub-verified harness is unverified)
+  is already carried by the run-notes lesson on reproduction evidence

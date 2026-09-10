@@ -471,8 +471,9 @@ def _main(argv=None):
             baseline_commit=result.baseline_commit,
         )
         try:
-            ledger_mod.append_round(ledger_path, record)
-            rounds = ledger_mod.read_rounds(ledger_path)
+            # One lock across the append and the read: a concurrent review of
+            # the same slice must not renumber this round or lend it its status.
+            rounds = ledger_mod.append_and_read(ledger_path, record)
         except OSError as exc:
             # The ledger informs the stop decision; it must never withhold a
             # review that already happened.

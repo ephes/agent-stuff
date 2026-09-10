@@ -10,10 +10,12 @@ CONVERGED = _shared.CONVERGED
 PROGRESS = _shared.PROGRESS
 ESCALATE = _shared.ESCALATE
 append_round = _shared.append_round
+append_and_read = _shared.append_and_read
 assess = _shared.assess
 path_for = _shared.path_for
 read_rounds = _shared.read_rounds
 record_for = _shared.record_for
 
-__all__ = ["CONVERGED", "PROGRESS", "ESCALATE", "append_round", "assess",
+__all__ = ["CONVERGED", "PROGRESS", "ESCALATE", "append_round",
+           "append_and_read", "assess",
            "path_for", "read_rounds", "record_for"]

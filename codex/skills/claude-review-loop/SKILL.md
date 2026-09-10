@@ -106,13 +106,28 @@ are not allowed. Separate harness invocations may run concurrently.
    which is how a large diff turns into an endless loop. Round 1 stays a
    whole-slice review; scope only the rounds after it.
 
-   The snapshot is a dangling commit: no ref points at it, your index and
-   worktree are untouched, and it holds only the content the bundle actually
-   sent - a skipped secret-looking, oversized, or binary file is not written
-   into the object store either. It does write objects into the repository,
-   which a later `git gc` collects; omit `--record-baseline` if that is
-   unwelcome. `--baseline-ref` cannot be combined with `--staged-only`, and an
-   unresolvable ref fails before any reviewer runs.
+   The snapshot is a dangling commit: no ref points at it, and your index,
+   worktree and refs are untouched. Untracked files enter it as the redacted
+   bytes the reviewer was sent, so a secret removed from the bundle is not
+   written into a git blob behind your back; a skipped secret-looking,
+   oversized, or binary file does not enter at all. Changed tracked files enter
+   as their worktree bytes - the same content a commit would store, and already
+   in your worktree. Blobs are written with `hash-object`, so a configured
+   clean/process filter never runs from the snapshot; note that collecting the
+   diff at all runs one, exactly as your own `git diff` does. It does write
+   objects into the repository, which a later `git gc` collects; omit
+   `--record-baseline` if that is unwelcome.
+
+   With `--staged-only` the baseline is the index, not the worktree, because
+   that is what a staged-only reviewer saw - otherwise unstaged content nobody
+   reviewed would enter the baseline and vanish from every later delta.
+
+   A path that is two states at once - staged-deleted and present untracked,
+   after `git rm --cached` - cannot be represented by one tree. It is recorded
+   as absent and listed in `truncations`, and every delta round re-sends its
+   body in full, because no delta can show it. `--baseline-ref` cannot be
+   combined with `--staged-only`, and an unresolvable ref fails before any
+   reviewer runs.
 
    Add `--slice-id <id>`, the same id on every round of one slice, to record
    the round in a cross-round ledger:

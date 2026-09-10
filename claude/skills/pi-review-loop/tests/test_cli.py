@@ -213,6 +213,27 @@ class TestPiBaselineAndLedger(unittest.TestCase):
         with open(os.path.join(run_dir, "result.json")) as fh:
             return proc, json.load(fh), run_dir
 
+    def test_a_nonempty_run_directory_is_refused(self):
+        run_dir = os.path.join(self.tmp.name, "occupied")
+        os.makedirs(run_dir)
+        victim = os.path.join(run_dir, "baseline.index")
+        with open(victim, "w") as fh:
+            fh.write("someone else's file\n")
+        env = dict(os.environ,
+                   PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock"),
+             "--model", "openai-codex/gpt-5.6-sol", "--record-baseline"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("must be new or empty", proc.stderr)
+        # And the file that was already there is still there.
+        with open(victim) as fh:
+            self.assertEqual(fh.read(), "someone else's file\n")
+
     def test_record_baseline_reports_a_reusable_commit(self):
         proc, result, _ = self._run("r1", "clean", "--record-baseline")
         self.assertEqual(proc.returncode, 0, proc.stderr)

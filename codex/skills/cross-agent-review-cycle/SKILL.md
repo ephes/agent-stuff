@@ -256,7 +256,7 @@ correctly and it hung only at exit.
    ```bash
    reviewer_model="${REVIEWER_MODEL:-opus}"
    run_dir="$(mktemp -d -t claude-review.XXXXXX)"
-   slice_id="${SLICE_ID:-$(basename "$PWD")-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo detached)}"
+   slice_id="${SLICE_ID:-$(basename "$PWD")-$(git rev-parse --short HEAD 2>/dev/null || echo no-head)}"
    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
      --repo "$PWD" \
      --run-dir "$run_dir" \
@@ -266,8 +266,13 @@ correctly and it hung only at exit.
      --record-baseline
    ```
 
-   `--slice-id` is any stable name for this slice, reused for every round - the
-   default above holds across rounds as long as the branch does. The
+   `--slice-id` is any stable name for this slice, reused for every round. The
+   default keys on the current commit rather than the branch: review rounds do
+   not commit, so it holds across a slice, and it changes once you commit and
+   start the next one. A branch name would not - every slice on a long-lived
+   branch would inherit the previous slice's rounds and could hit exit `4` on
+   its first round. Name the slice explicitly with `SLICE_ID` when a slice does
+   span commits. The
    harness then keeps a cross-round ledger and reports whether the loop is
    converging, so the stopping conditions below are computed from the actual
    round history rather than from what this session still remembers of it.
@@ -423,6 +428,15 @@ correctly and it hung only at exit.
    - `codex exec` **does** echo the full prompt into the log before running, so
      the sentinel appears once as prompt text within seconds. Require at least
      two matches, and treat a match inside the first few seconds as the echo.
+
+   Counting a fixed sentinel is only safe while the reviewed code cannot contain
+   it. Reviewing these skills breaks that: their own docs quote the sentinel and
+   the runner, the reviewer echoes the files it reads, and the count reaches the
+   threshold mid-review. Generate a per-run nonce instead - `nonce=$(openssl
+   rand -hex 8)`, ask for `=== REVIEW COMPLETE $nonce ===`, and poll for that;
+   nothing already in the repository can contain it. Falling back on the tmux
+   session ending does not help either when the runner deliberately holds the
+   pane open; wait on the reviewer process when in doubt.
 
    Substitute the branch's threshold for `2` below.
 

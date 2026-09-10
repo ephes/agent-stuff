@@ -112,8 +112,11 @@ This skill is for goal tracking and continuation, not full implementation contex
      configured Claude reviewer through `claude-review-loop`; for Claude-authored
      work, use the fixed `openai-codex/gpt-5.6-sol` reviewer through
      `pi-review-loop` when available. Do not substitute another Pi model or
-     provider. No commit may be made until the applicable loop returns CLEAN.
-     Treat nonzero exits, failed/stalled reviews, unresolved findings, or
+     provider. No commit may be made until the applicable loop's commit gate in
+     `cross-agent-review-cycle` is satisfied - which a fully adjudicated
+     Suggestion-only result can satisfy; do not demand a literal `CLEAN`, since
+     that is what drives agreement-seeking rounds. Treat nonzero exits,
+     failed/stalled reviews, unresolved Critical or Warning findings, and
      scoped-clean reviews with relevant skipped/truncated files as not complete.
    - an explicit verification matrix when the goal names multiple modes,
      product surfaces, policy branches, runtimes, providers, storage paths, or

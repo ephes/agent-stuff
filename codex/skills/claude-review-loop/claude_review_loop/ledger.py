@@ -49,11 +49,14 @@ def path_for(ledger_dir, slice_id):
 def fingerprint(item):
     """Identify a finding across rounds.
 
-    Line numbers move as repairs land and reviewers rarely repeat a message
-    word for word, so the fingerprint keeps the severity and path and reduces
-    the message to its letters. Two roughly-restated findings about the same
-    place therefore collide on purpose: the point is to notice a complaint that
-    will not go away, not to catalogue exact wording.
+    Line numbers move as repairs land, so the fingerprint keeps the severity and
+    path and reduces the message to its letters: the same complaint after the
+    code shifted still matches.
+
+    It does not survive a genuine rewording - a reviewer that restates the same
+    objection in new words produces a new fingerprint, and the survivor rule
+    misses it. The count-stall rule is the backstop for that case, which is why
+    both exist.
     """
     message = _NOISE.sub(" ", (item.get("message") or "").lower()).strip()
     basis = "|".join((
@@ -85,15 +88,40 @@ def required_count(round_record):
     return int(counts.get("Critical", 0)) + int(counts.get("Warning", 0))
 
 
-def read_rounds(path):
-    """Every parseable round for a slice, oldest first.
+def _clean_counts(record):
+    """Coerce a record's counts to integers, dropping anything unusable.
 
-    A damaged or foreign line is skipped rather than fatal: a ledger is an aid
-    to the decision, and losing it must never block a review.
+    The ledger is written by this harness, but it is a plain file on disk that
+    anything can corrupt. A count of `"many"` must not reach `assess` and turn a
+    review that already completed into a crash.
+    """
+    counts = record.get("counts")
+    cleaned = {}
+    if isinstance(counts, dict):
+        for key in ("Critical", "Warning", "Suggestion"):
+            value = counts.get(key, 0)
+            cleaned[key] = value if isinstance(value, int) and not isinstance(
+                value, bool) else 0
+    else:
+        cleaned = {"Critical": 0, "Warning": 0, "Suggestion": 0}
+    record["counts"] = cleaned
+    findings = record.get("findings")
+    record["findings"] = [f for f in findings if isinstance(f, dict)] \
+        if isinstance(findings, list) else []
+    return record
+
+
+def read_rounds(path):
+    """Every usable round for a slice, oldest first.
+
+    A damaged, foreign, or undecodable line is skipped rather than fatal: a
+    ledger is an aid to the decision, and losing it must never block or crash a
+    review that already ran. Undecodable bytes are replaced rather than raised,
+    so one bad byte cannot hide the rounds after it.
     """
     rounds = []
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -103,7 +131,7 @@ def read_rounds(path):
                 except ValueError:
                     continue
                 if isinstance(record, dict):
-                    rounds.append(record)
+                    rounds.append(_clean_counts(record))
     except OSError:
         return []
     return rounds
@@ -125,6 +153,43 @@ def append_round(path, record):
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def append_and_read(path, record):
+    """Append this round and read the slice back under one exclusive lock.
+
+    Reading after releasing the lock lets a concurrent review of the same slice
+    append in between, which would number this round wrongly and attach the
+    other run's convergence status to this result.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    line = json.dumps(record, sort_keys=True) + "\n"
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, line.encode("utf-8"))
+        os.lseek(fd, 0, os.SEEK_SET)
+        raw = b""
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    rounds = []
+    for line in raw.decode("utf-8", errors="replace").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            rounds.append(_clean_counts(parsed))
+    return rounds
 
 
 def record_for(*, result, model, effort, run_dir, baseline_ref=None,

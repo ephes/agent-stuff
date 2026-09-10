@@ -165,6 +165,46 @@ class TestLedgerFile(unittest.TestCase):
         self.assertEqual(len(rounds), 64)
         self.assertEqual(sorted(r["n"] for r in rounds), list(range(64)))
 
+    def test_a_nonnumeric_count_does_not_crash_assess(self):
+        path = ledger.path_for(self.dir, "damaged")
+        ledger.append_round(path, {"state": "ISSUES",
+                                   "counts": {"Critical": "many"},
+                                   "findings": [{"severity": "Critical"}]})
+        rounds = ledger.read_rounds(path)
+        # A file on disk can be corrupted by anything; a completed review must
+        # not turn into a crash because of it.
+        status, _ = ledger.assess(rounds)
+        self.assertIn(status, (ledger.PROGRESS, ledger.CONVERGED))
+
+    def test_undecodable_bytes_do_not_hide_the_rounds_after_them(self):
+        path = ledger.path_for(self.dir, "binary")
+        ledger.append_round(path, {"state": "ISSUES", "counts": {"Warning": 1}})
+        with open(path, "ab") as fh:
+            fh.write(b"\xff\xfe not json\n")
+        ledger.append_round(path, {"state": "CLEAN", "counts": {}})
+        self.assertEqual([r["state"] for r in ledger.read_rounds(path)],
+                         ["ISSUES", "CLEAN"])
+
+    def test_append_and_read_returns_the_slice_including_this_round(self):
+        path = ledger.path_for(self.dir, "combined")
+        ledger.append_round(path, {"state": "ISSUES", "counts": {"Warning": 2}})
+        rounds = ledger.append_and_read(
+            path, {"state": "ISSUES", "counts": {"Warning": 1}})
+        self.assertEqual(len(rounds), 2)
+        self.assertEqual(ledger.required_count(rounds[-1]), 1)
+
+    def test_concurrent_append_and_read_never_loses_a_round(self):
+        path = ledger.path_for(self.dir, "racing")
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda n: ledger.append_and_read(
+                    path, {"state": "ISSUES", "n": n,
+                           "counts": {"Warning": 1}}),
+                range(32)))
+        # Every caller sees its own round, and the last sees all of them.
+        self.assertEqual(max(len(r) for r in results), 32)
+        self.assertEqual(len(ledger.read_rounds(path)), 32)
+
 
 SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(SKILL_ROOT, "tests", "fake_claude.py")

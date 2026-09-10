@@ -1,8 +1,10 @@
 """Assemble a bounded, redacted review bundle from the working tree."""
 import os
 import re
+import shutil
 import stat
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 
 from .redact import is_secret_path, redact_diff, redact_text
@@ -76,25 +78,107 @@ def _resolve_tree(repo, ref, *, replacement_log):
     return tree
 
 
-def _snapshot_tree(repo, index_path, include_paths, *, replacement_log):
+NULL_BLOB = "0" * 40
+# Sentinel for a path the snapshot must record as absent.
+DELETED = object()
+
+
+def _hash_blob(repo, data, *, replacement_log):
+    """Write one blob, deliberately without running clean filters.
+
+    `git add` would apply a configured clean/process filter, which is an
+    arbitrary external program - git-lfs writes into `.git/lfs` from it. The
+    snapshot must not run anything the repository configures, so content goes
+    in through `hash-object --stdin`, which no filter sees.
+    """
+    return _git(repo, "hash-object", "-w", "--stdin",
+                replacement_log=replacement_log, input_bytes=data).strip()
+
+
+def _file_mode(full):
+    """The git mode for a regular file, preserving the executable bit."""
+    try:
+        return "100755" if os.lstat(full).st_mode & stat.S_IXUSR else "100644"
+    except OSError:
+        return "100644"
+
+
+def _worktree_entry(repo, path, *, replacement_log):
+    """The index-info entry for one path as it exists in the worktree.
+
+    Returns None when the path is gone, which `update-index` records as a
+    deletion.
+    """
+    full = os.path.join(repo, path)
+    try:
+        st = os.lstat(full)
+    except OSError:
+        return None
+    if stat.S_ISLNK(st.st_mode):
+        target = os.readlink(full).encode("utf-8", errors="surrogateescape")
+        return "120000", _hash_blob(repo, target, replacement_log=replacement_log)
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    with open(full, "rb") as fh:
+        data = fh.read()
+    mode = "100755" if st.st_mode & stat.S_IXUSR else "100644"
+    return mode, _hash_blob(repo, data, replacement_log=replacement_log)
+
+
+def _snapshot_tree(repo, index_path, entries, *, replacement_log):
     """Write a tree object for the reviewed content.
 
-    Uses a private index file so the caller's index, worktree, and refs are
-    never touched. Only `include_paths` - the tracked changes and the untracked
-    files the bundle accepted - enter the tree, so a skipped secret-looking,
-    oversized, or binary file is not written into the object store either.
+    Uses a private index file, so the caller's index, worktree, and refs are
+    never touched, and writes every blob through `hash-object` so no configured
+    filter runs. `entries` maps each included path either to explicit content
+    (untracked files enter as the redacted bytes the reviewer was actually sent)
+    or to `None`, meaning "take it from the worktree as git would store it".
     """
     env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
     _git(repo, "read-tree", "HEAD",
          replacement_log=replacement_log, env_extra=env_extra)
-    paths = sorted(set(include_paths))
-    if paths:
-        # `:(literal)` stops a filename containing pathspec magic (`*`, `:`,
-        # a leading `!`) from matching anything other than itself.
-        payload = b"".join(f":(literal){p}".encode() + b"\0" for p in paths)
-        _git(repo, "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
+    lines = []
+    for path in sorted(entries):
+        content = entries[path]
+        if content is DELETED:
+            entry = None
+        elif content is None:
+            entry = _worktree_entry(repo, path, replacement_log=replacement_log)
+        else:
+            entry = (_file_mode(os.path.join(repo, path)),
+                     _hash_blob(repo, content, replacement_log=replacement_log))
+        if entry is None:
+            # Gone from the worktree: record the deletion.
+            lines.append(f"0 {NULL_BLOB}\t{path}")
+        else:
+            lines.append(f"{entry[0]} {entry[1]}\t{path}")
+    if lines:
+        payload = "\0".join(lines).encode("utf-8") + b"\0"
+        _git(repo, "update-index", "-z", "--index-info",
              replacement_log=replacement_log, env_extra=env_extra,
              input_bytes=payload)
+    return _git(repo, "write-tree",
+                replacement_log=replacement_log, env_extra=env_extra).strip()
+
+
+def _staged_tree(repo, index_path, *, replacement_log):
+    """The tree of the caller's index, for a `--staged-only` review.
+
+    A staged-only reviewer sees the index, not the worktree, so the baseline has
+    to be the index too - otherwise unstaged content the reviewer never saw
+    enters the baseline and vanishes from every later delta. The index is copied
+    first because `write-tree` can refresh the index it runs against, and the
+    caller's must not change.
+    """
+    git_dir = _git(repo, "rev-parse", "--absolute-git-dir",
+                   replacement_log=replacement_log).strip()
+    source = os.path.join(git_dir, "index")
+    env_extra = {"GIT_INDEX_FILE": os.path.abspath(index_path)}
+    if os.path.exists(source):
+        shutil.copyfile(source, index_path)
+    else:
+        _git(repo, "read-tree", "HEAD",
+             replacement_log=replacement_log, env_extra=env_extra)
     return _git(repo, "write-tree",
                 replacement_log=replacement_log, env_extra=env_extra).strip()
 
@@ -150,7 +234,7 @@ def _truncate_diff_per_file(diff_text, limit, label, truncations):
 def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                  max_bundle_bytes, staged_only=False, context_files=None,
                  max_context_file_size=262144, baseline_ref=None,
-                 record_baseline=False, index_path=None):
+                 record_baseline=False, index_dir=None):
     """Assemble the review bundle from the worktree.
 
     Without `baseline_ref` the bundle is the whole worktree delta against
@@ -165,7 +249,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
     sections = []  # (priority, title, body) - higher numbers are dropped first
     context_titles = set()
     delta_mode = baseline_ref is not None
-    included_untracked = []
+    included_untracked = {}
 
     # core.quotePath=false stops octal-escaping of non-ASCII; we still strip the
     # surrounding quotes git adds for names with spaces.
@@ -175,6 +259,7 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         replacement_log=decoding_replacements,
     )
     untracked_bodies, notes = [], []
+    untracked_body_by_path = {}
     for line in porcelain.split("\n"):
         code, raw_path = line[:2], line[3:]
         if code != "??":
@@ -226,8 +311,10 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         content, changed = redact_text(decoded)
         if changed:
             redactions.append({"path": path, "section": "untracked file"})
-        included_untracked.append(path)
-        untracked_bodies.append(f"### {path}\n```\n{content}\n```")
+        included_untracked[path] = content.encode("utf-8", errors="surrogateescape")
+        body = f"### {path}\n```\n{content}\n```"
+        untracked_body_by_path[path] = body
+        untracked_bodies.append(body)
     # Resolve the caller's baseline before writing any object, so a bad ref
     # fails without leaving anything behind in the repository.
     base_tree = _resolve_tree(repo, baseline_ref,
@@ -239,17 +326,43 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
         tracked_changed = [p for p in _diff(
             repo, "--name-only", "-z", "HEAD",
             replacement_log=decoding_replacements).split("\0") if p]
-        index_path = index_path or os.path.join(
-            os.path.dirname(os.path.abspath(out_path)), "baseline.index")
+        # A path that is both staged-deleted and present untracked (after
+        # `git rm --cached`) is two states at once, and a tree holds one. Keep
+        # it out of the snapshot and say so: the next delta then shows it again,
+        # which over-reports rather than hiding a change nobody reviewed.
+        ambiguous = sorted(set(tracked_changed) & set(included_untracked))
+        for path in ambiguous:
+            truncations.append({
+                "section": "baseline snapshot", "path": path,
+                "reason": "staged deletion and untracked content cannot both "
+                          "enter one baseline; excluded",
+            })
+        entries = {p: None for p in tracked_changed if p not in included_untracked}
+        entries.update({p: c for p, c in included_untracked.items()
+                        if p not in ambiguous})
+        # Record the ambiguous path as absent rather than leaving HEAD's copy in
+        # the baseline: absent is the state that cannot make later content look
+        # already reviewed. The delta bundle re-sends its body every round.
+        entries.update({p: DELETED for p in ambiguous})
+        # A private, uniquely named index: a fixed name under a caller-chosen
+        # run directory would delete a same-named file that was already there.
+        index_fd, index_path_used = tempfile.mkstemp(
+            prefix=".baseline-index-",
+            dir=index_dir or os.path.dirname(os.path.abspath(out_path)))
+        os.close(index_fd)
         try:
-            snapshot = _snapshot_tree(
-                repo, index_path, tracked_changed + included_untracked,
-                replacement_log=decoding_replacements)
+            if staged_only:
+                snapshot = _staged_tree(repo, index_path_used,
+                                        replacement_log=decoding_replacements)
+            else:
+                snapshot = _snapshot_tree(
+                    repo, index_path_used, entries,
+                    replacement_log=decoding_replacements)
         finally:
             # Scratch state: the reviewer can read the run directory, and the
             # index has no business being visible there after the tree exists.
             try:
-                os.unlink(index_path)
+                os.unlink(index_path_used)
             except OSError:
                 pass
         if record_baseline:
@@ -272,7 +385,15 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
             sections.append((1, "Changes since the previous review", delta))
         # No separate untracked section: a file created since the baseline is
         # already in the delta as an added file, and one that has not changed
-        # since then is deliberately out of this round's scope.
+        # since then is deliberately out of this round's scope. The exception is
+        # a path whose state the baseline cannot represent - it is re-sent in
+        # full every round, because no delta can show it.
+        unrepresentable = [untracked_body_by_path[p] for p in ambiguous
+                           if p in untracked_body_by_path]
+        if unrepresentable:
+            sections.append((2, "Untracked files (state not representable in "
+                                "the baseline; re-sent each round)",
+                             "\n\n".join(unrepresentable)))
     else:
         compare = ("HEAD",)
         diffstat = _diff(repo, "--stat", "HEAD",

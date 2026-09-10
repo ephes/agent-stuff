@@ -581,6 +581,81 @@ class TestBaselineDelta(unittest.TestCase):
                                       baseline_ref=first.baseline_commit))
         self.assertIn("MAGIC = 2", text)
 
+    def test_staged_only_baseline_holds_the_index_not_the_worktree(self):
+        # A staged-only reviewer sees the index. If the baseline recorded the
+        # worktree, unstaged content nobody reviewed would be treated as
+        # reviewed by every later delta round.
+        self._write("a.py", "print('staged')\n")
+        git(self.repo, "add", "a.py")
+        self._write("a.py", "print('staged')\nprint('never reviewed')\n")
+        res = self._build(staged_only=True, record_baseline=True)
+        shown = subprocess.run(["git", "show", f"{res.baseline_commit}:a.py"],
+                               cwd=self.repo, capture_output=True, text=True)
+        self.assertIn("staged", shown.stdout)
+        self.assertNotIn("never reviewed", shown.stdout)
+
+    def test_a_path_that_is_both_staged_deleted_and_untracked_is_excluded(self):
+        # `git rm --cached` leaves one path in two states, and a tree holds one.
+        git(self.repo, "rm", "--cached", "-q", "a.py")
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", res.baseline_commit],
+            cwd=self.repo, capture_output=True, text=True)
+        self.assertNotIn("a.py", listing.stdout.split("\n"))
+        self.assertTrue(any(t.get("path") == "a.py"
+                            and t.get("section") == "baseline snapshot"
+                            for t in res.truncations))
+
+    def test_the_snapshot_stores_redacted_untracked_content(self):
+        # What the reviewer was sent is what the baseline records; the raw
+        # secret must not be written into a git blob behind its back.
+        self._write("config.py", 'TOKEN = "AKIAIOSFODNN7EXAMPLE"\n')
+        res = self._build(record_baseline=True)
+        blob = subprocess.run(
+            ["git", "show", f"{res.baseline_commit}:config.py"],
+            cwd=self.repo, capture_output=True, text=True)
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", blob.stdout)
+
+    def test_the_snapshot_never_runs_a_write_side_git_command(self):
+        # `git add` applies a configured clean/process filter - an arbitrary
+        # external program, which for git-lfs writes into .git/lfs. Blobs go in
+        # through hash-object instead, which no filter sees. Collection still
+        # runs `git diff`, and that applies the filter exactly as a local
+        # `git diff` does; that is git reading a dirty worktree, not this
+        # harness adding a write.
+        calls = []
+        original = bundle._git
+
+        def recording(repo, *args, **kwargs):
+            calls.append(args)
+            return original(repo, *args, **kwargs)
+
+        with mock.patch.object(bundle, "_git", side_effect=recording):
+            self._round_one()
+        subcommands = [a[0] for a in calls if a and not a[0].startswith("-")]
+        self.assertNotIn("add", subcommands)
+        self.assertIn("hash-object", subcommands)
+        self.assertIn("update-index", subcommands)
+
+    def test_an_executable_bit_survives_into_the_snapshot(self):
+        self._write("run.sh", "#!/bin/sh\necho hi\n")
+        os.chmod(os.path.join(self.repo, "run.sh"), 0o755)
+        res = self._build(record_baseline=True)
+        listing = subprocess.run(["git", "ls-tree", "-r", res.baseline_commit],
+                                 cwd=self.repo, capture_output=True, text=True)
+        self.assertIn("100755", [line.split()[0] for line in
+                                 listing.stdout.strip().split("\n")
+                                 if "run.sh" in line][0])
+
+    def test_a_same_named_file_in_the_run_directory_is_not_destroyed(self):
+        victim = os.path.join(self.out_dir, "baseline.index")
+        with open(victim, "w") as fh:
+            fh.write("someone else's file\n")
+        self._round_one()
+        self.assertTrue(os.path.exists(victim))
+        with open(victim) as fh:
+            self.assertEqual(fh.read(), "someone else's file\n")
+
     def test_unknown_baseline_ref_is_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             self._build(baseline_ref="does-not-exist")
