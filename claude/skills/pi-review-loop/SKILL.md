@@ -18,7 +18,9 @@ Git's NUL-delimited `--pathspec-from-file` interface.
 
 ## When to use
 
-Before committing a change you want reviewed by a different model family. You
+Before committing a change you want independently reviewed. Prefer a different
+model family by default; honor an explicit user-selected Pi reviewer and record
+a same-family review accurately. You
 implement and fix; Pi reviews with fresh context.
 
 ## The loop (you drive this)
@@ -80,11 +82,16 @@ implement and fix; Pi reviews with fresh context.
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
      stall or an oversized bundle. Fix the cause and re-run. Never treat a failed
      review as a pass.
-     If the error says `pi unavailable`, the harness could not see a usable GPT
-     model from its environment. `pi -p` may still work in another interactive
-     shell that has provider auth; verify from the same environment with
-     `PI_TELEMETRY=0 pi --list-models gpt` and rerun after auth/model listing
-     is visible.
+     `pi unavailable` is a wrapper diagnosis, not proof of missing credentials.
+     Read the underlying error. `EPERM`/`EACCES` on `auth.json.lock` or
+     `settings.json.lock` means local state access is blocked before model/auth
+     validation; do not prescribe login. The reviewer cannot edit the repository,
+     but Pi still needs its regular authentication/settings locks and possible
+     credential refresh. Fix permitted invocation errors, or report the exact
+     required access when the environment disallows it. Do not copy credentials,
+     disable locks, or repeat an unchanged denied call. Retry the same harness
+     with a fresh run directory after the cause changes; do not switch to a
+     direct `pi -p` invocation.
    - `4` → the review completed, and the slice ledger says the loop is not
      converging: the same required finding survived two repair rounds, or the
      Critical/Warning count has not fallen across two consecutive rounds. Read

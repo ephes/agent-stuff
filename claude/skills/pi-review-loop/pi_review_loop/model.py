@@ -67,6 +67,21 @@ def validate_review_model(model_pattern):
     return lookup
 
 
+def _diagnose_state_access(output):
+    # Pi locks settings/auth even during model discovery. A local permission
+    # error must not be presented as missing login or hidden by a partial table.
+    for line in output.splitlines():
+        if (re.search(r"\b(?:EPERM|EACCES)\b", line)
+                and re.search(r"(?:auth|settings)\.json\.lock\b", line)):
+            return (
+                "local state access blocked: Pi cannot create its authentication/"
+                "settings locks; authentication and model availability were not verified. "
+                "Run the same review harness in an environment permitting normal Pi "
+                "state access. Do not copy credentials or disable locks."
+            )
+    return None
+
+
 def _diagnose_unavailable(output):
     for line in output.splitlines():
         line = line.strip()
@@ -115,6 +130,11 @@ def resolve_from_cli(fallback=DEFAULT_MODEL, timeout=30,
         if require_available:
             raise PiUnavailable(f"cannot list Pi models: {e}") from e
         return fallback
+    state_error = _diagnose_state_access(out)
+    if state_error:
+        if require_available:
+            raise PiUnavailable(state_error)
+        return fallback
     if proc.returncode != 0:
         if require_available:
             detail = _summarize_output(out)
@@ -159,6 +179,9 @@ def ensure_model_available(model_pattern, timeout=30):
         raise PiUnavailable(f"cannot execute pi: {e}") from e
     except subprocess.SubprocessError as e:
         raise PiUnavailable(f"cannot list Pi models: {e}") from e
+    state_error = _diagnose_state_access(out)
+    if state_error:
+        raise PiUnavailable(state_error)
     if proc.returncode != 0:
         detail = _summarize_output(out)
         msg = f"`pi --list-models gpt` failed with exit {proc.returncode}"

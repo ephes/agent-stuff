@@ -160,6 +160,50 @@ class TestResolveModel(unittest.TestCase):
             with self.assertRaises(model.PiUnavailable):
                 model.ensure_available()
 
+    def test_state_lock_denial_is_not_an_authentication_diagnosis(self):
+        for lock in ("auth.json.lock", "settings.json.lock"):
+            for error in ("EPERM", "EACCES"):
+                for resolver in (
+                    lambda: model.resolve_from_cli(require_available=True),
+                    lambda: model.ensure_model_available(model.DEFAULT_MODEL),
+                ):
+                    with self.subTest(lock=lock, error=error, resolver=resolver):
+                        completed = mock.Mock(
+                            stdout="",
+                            stderr=f"{error}: permission denied, mkdir '/profile/{lock}'",
+                            returncode=1,
+                        )
+                        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed) as run:
+                            with self.assertRaises(model.PiUnavailable) as raised:
+                                resolver()
+                        message = str(raised.exception)
+                        self.assertIn("local state access blocked", message)
+                        self.assertIn("authentication and model availability were not verified", message)
+                        self.assertNotIn("/login", message)
+                        run.assert_called_once()
+
+    def test_lock_denial_cannot_be_hidden_by_a_model_table(self):
+        completed = mock.Mock(
+            stdout=REAL_TABLE,
+            stderr="EPERM: mkdir '/profile/auth.json.lock'",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            with self.assertRaises(model.PiUnavailable):
+                model.resolve_from_cli(require_available=True)
+            with self.assertRaises(model.PiUnavailable):
+                model.ensure_model_available(model.DEFAULT_MODEL)
+
+    def test_unrelated_permission_warning_does_not_hide_usable_model(self):
+        completed = mock.Mock(
+            stdout=REAL_TABLE,
+            stderr="EACCES: mkdir '/profile/optional-extension-cache'",
+            returncode=0,
+        )
+        with mock.patch("pi_review_loop.model.subprocess.run", return_value=completed):
+            self.assertEqual(model.resolve_from_cli(require_available=True), model.DEFAULT_MODEL)
+            self.assertEqual(model.ensure_model_available(model.DEFAULT_MODEL), model.DEFAULT_MODEL)
+
     def test_ensure_model_available_strips_thinking_suffix(self):
         completed = mock.Mock(
             stdout="provider model\nopenai-codex gpt-5.6-sol\n",

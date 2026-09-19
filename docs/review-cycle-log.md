@@ -823,3 +823,12 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Wrapper Shell
   Hazards, to say the quoted delimiter is required whenever the body contains a
   backtick at all, not only a code fence.
+
+## 2026-09-19 - Pi review routing and local-state permissions
+
+- Expected: use the existing Pi harness and diagnose model preflight failures accurately.
+- Actual: cross-agent-review-cycle still prescribed a separate tmux runner; denied authentication/settings locks were reported as generic model unavailability.
+- Impact: no review started; repeated attempts and login advice would not repair local permissions.
+- Fix: route Pi to pi-review-loop, honor explicit user reviewer selection, and distinguish state-lock denial from missing authentication before accepting partial model listings.
+- Status: installed after the user enabled full access; regression checks cover both model-resolution entry points. Pi with openai-codex/gpt-5.6-sol independently returned CLEAN without omitted, truncated or redacted evidence. Existing log edits preserved.
+- Promotion: promoted - cross-agent-review-cycle, Reviewer Procedure; pi-review-loop, failure interpretation and model preflight.
