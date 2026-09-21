@@ -2,6 +2,35 @@
 
 Status: active log
 
+## 2026-09-19 — Check requirements and generated query plans before adding repair work
+
+Feed-cache staleness was initially treated as a defect without an immediate-removal
+requirement. The owner explicitly accepts the existing TTL. Closed the invented
+repair backlog item and marked its proposal historical; retained evidence without
+presenting the rejected policy as required work.
+
+The selection spike's raw row comparison did not guarantee the ORM emitted an
+equivalent index-friendly predicate: SQLite added a boolean equality wrapper,
+and inherited Episode IDs were rewritten onto another table. Actual-service
+query plans caught both. Switched to a direct comparison Lookup and Post-based
+selection, then independently reviewed the delta. A review claim about index
+inheritance was disproved with system checks and model introspection, not patched
+speculatively. Required findings resolved; advisory-only closure recorded.
+
+Promotion: incident — project plan records the accepted policy and compiler
+constraints; existing skills already require evidence-based adjudication.
+
+## 2026-09-19 — Serialize tests that share a SQLite test database
+
+During the feed baseline repair, a focused pytest invocation overlapped the
+full check and hit a database lock. A concurrent edit also left that running
+suite testing its already-loaded, older fixture version. Discarded that run and
+reran the full check only after edits settled, with no competing pytest process.
+Review independently closed with required repairs verified and one advisory.
+
+Promotion: incident — existing stable-worktree validation guidance applies;
+project checks sharing a test database must run serially.
+
 Reusable agent and process lessons from review cycles, goal handoffs, model
 pairing, orchestration, and validation - the things that should change a skill.
 
@@ -909,3 +938,234 @@ Promotion: incident — existing cross-agent-review-cycle guidance already requi
 A delta reviewer attempted Glob outside the harness read sandbox while checking an unchanged caller guarantee. The harness correctly invalidated that run. Retried with the unchanged caller excerpt explicitly included in the review context and the same repair baseline; the fresh valid review closed both required findings. No permission widening or provider substitution. Status: recovered, advisory-only terminal result.
 
 Promotion: incident — existing delta-context and fail-closed retry instructions already cover this case.
+
+
+## 2026-09-16 — CGMES save-refresh review boundaries
+
+- Expected: scoped Opus reviews verify repairs against the production acquisition
+  and projection boundaries.
+- Actual: early findings inferred cache invalidation from a generation callback,
+  and inferred raw timestamp storage from a fixture that skipped ingestion.
+  Tracing the existing callback and reducer disproved those premises; actual
+  rendered-grid assertions supplied the missing evidence. A separate conflicting
+  stable-identity test exposed a stale-row restore fallback that needed the same
+  guard as full-snapshot restoration.
+- Impact and resolution: retained the established hydration owner and snapshot
+  machinery; guarded both restoration paths and verified production-shaped save
+  delivery and rendering. Scoped review converged to a Suggestion-only result.
+  Declined a further live-producer timestamp scenario because it expands
+  unchanged ingestion coverage without a demonstrated residual defect.
+- Status: review gate complete; committed, pushed, and MR opened after the final
+  combined-state check passed.
+- Promotion: incident — existing review-skill rules already require tracing
+  production boundaries, disproving false claims, and stopping at diminishing
+  returns; no additional rule is needed.
+
+## 2026-09-16 — Merge history review scope and retained guards
+
+- Expected: the isolated reviewer consumes its bundle and repair reviews assess
+  the changed behavior together with the stated unchanged guards.
+- Actual: the first attempt requested a raw-worktree helper and was rejected by
+  the harness. A fresh retry with summarized context completed. The repair
+  review then missed an existing selected-identity reset and an existing
+  malformed-timestamp test outside its delta.
+- Impact and resolution: the failed attempt was not counted as review. Source
+  inspection and production-path assertions disproved those later findings;
+  real request-duplication and error-classification findings were repaired and
+  independently re-reviewed. Kept the final outcome advisory rather than buying
+  another round for agreement about unchanged guards or style.
+- Status: automated loop closed at diminishing returns, with generated RTM
+  synchronization separately blocked by existing inputs. No commit gate waived.
+- Promotion: incident — existing isolation, evidence adjudication and delta
+  context rules cover these cases; no additional rule is needed.
+
+## 2026-09-16 — Sparse review evidence and baseline snapshots
+
+Expected an isolated selected-file snapshot to support a baseline-relative design re-review. The first follow-up failed before Claude launched because the copied untracked evidence lay outside the temporary clone's sparse-checkout rules. Including the evidence directory in those rules made the harness snapshot indexable; retried in a fresh run directory. The project worktree was unaffected. For this uncommon review fixture, keep copied evidence inside the sparse selection.
+
+Promotion: incident — temporary fixture setup issue; no general workflow rule needed.
+
+
+## 2026-09-16 — Census stopped on a removed temporary worktree
+
+Expected workspace census to report live reservations before implementation.
+A stale temporary worktree path caused the census to exit before returning its
+report. Read the private ledger and Git/worktree status directly, retained the
+existing reservations, and claimed only the explicitly requested scope. No
+worktree pruning was needed to implement the change.
+
+Promotion: incident — existing direct evidence and claim-before-edit rules
+covered recovery; no general skill change was needed.
+
+## 2026-09-17 — Pi returned a bare CLEAN without inspection evidence
+
+Expected a first-round Pi (`openai-codex/gpt-5.6-sol`) review of a staged
+django-cast evaluation slice to show what it checked. The first attempt exited
+normally with a parseable but evidence-free `CLEAN`, so it could not be
+distinguished from a review that read nothing. A fresh run whose prompt required
+an evidence section (files read, plus named checks with file:line support)
+returned a substantive `CLEAN`, and the cycle stopped there. The cost was one
+extra short run.
+
+Promotion: pending — consider requiring an evidence section in the Codex/Pi
+prompt contents of cross-agent-review-cycle; not changed in this session
+because the skill edit was out of scope for the slice.
+
+## 2026-09-19 — Distinguish verification from independent review
+
+Expected the django-cast section-merge handoff to make its review status clear.
+The initial handoff reported passing checks but had no independent review;
+the user had to ask, then request the cycle. A later harness launch was blocked
+by automatic approval review pending explicit authorization to send repository
+content to Claude. No failed launch was counted as a review. After authorization,
+the isolated review completed with suggestions only; documentation clarifications
+were applied and redundant testing suggestions were deferred with rationale.
+The cycle stopped as advisory rather than seeking a CLEAN label.
+
+Status: resolved. State independent-review status explicitly at handoff and
+distinguish a blocked launch from a completed review.
+
+Promotion: incident — the existing cross-agent-review-cycle evidence, stopping,
+and outcome-reporting rules already cover this; no additional skill rule needed.
+
+## 2026-09-19 — Review evidence completed during an editor-lock review
+
+Expected an isolated review of PATCH locks/logging with validation finishing
+concurrently. The first attempt was invalidated for an out-of-bundle inspection;
+retried fresh rather than treating it as a verdict. The valid review raised
+verification warnings based on the initially pending checks. Completed Wagtail
+edge runs disproved the mocked-log compatibility concern and satisfied the
+completion criterion. Accepted a separate documentation-scope concern: PATCH
+locks do not freeze publication. Documented that limitation and retained the
+publish-lock policy decision in the backlog. A baseline-scoped re-review passed.
+
+Status: resolved. Use completed check evidence when available and adjudicate
+time-sensitive review claims against the final validation state.
+
+Promotion: incident — existing evidence-adjudication, fresh-retry and delta-scope
+rules cover this case; no new skill rule needed.
+
+## 2026-09-19 — Make backend-specific test jobs fail on fallback
+
+Expected the focused PostgreSQL job to prove real row locks. Local execution
+first exposed three publication tests whose missing database markers were hidden
+by warm Wagtail content-type caches; reproduced and fixed their declarations.
+Independent review then identified that backend-specific skips could hide a
+future SQLite fallback. Added an opt-in session guard, proved it fails under
+SQLite and passes under PostgreSQL, and obtained a clean delta re-review.
+Kept the first hosted run as a separate pending verification item.
+
+Status: resolved locally and verified in hosted CI; PostgreSQL job passed.
+
+Promotion: incident — the repair is encoded in this job's guard and development
+docs; no broader review-skill rule is needed.
+
+## 2026-09-19 — Identify test-only endpoints in review context
+
+Expected a narrow CI compatibility review. The reviewer treated a test-only
+upstream API experiment as a shipped consumer contract and proposed stabilizing
+production behavior. Supplied the isolation boundary, clarified the test comment
+and release note, and obtained a delta review confirming closure. Applied its
+remaining prose-wrap suggestion and stopped without chasing a CLEAN label.
+
+Status: resolved; review contexts should identify experiment-only mounting when
+an assertion deliberately follows upstream runtime behavior.
+
+Promotion: incident — existing scope and evidence rules suffice; no new skill
+rule is needed.
+
+## 2026-09-19 — Isolate preview state and its regression caches
+
+Expected preview rendering to leave editorial data unchanged while creating
+missing renditions. Full-matrix validation exposed rendition cache objects
+surviving rolled-back test rows and a redundant save masking that leakage.
+Isolated the test cache and used Wagtail's rendition getter without re-saving
+existing rows. Independent review improved transport allowlisting, documented
+private-hook compatibility coupling, and strengthened HTML/cache evidence.
+The delta review left only proxy-TLS forwarding, implemented with regression
+tests; stopped as advisory rather than seeking a CLEAN label.
+
+Status: addressed in implementation/tests. One isolated review attempt was
+rejected for out-of-scope inspection and was not counted as a completed review.
+
+Promotion: incident — project-specific cache and preview tests encode the
+lessons; existing review scope and stopping rules already cover the workflow.
+
+## 2026-09-19 — Restore bootstrap rows between transactional test cases
+
+Expected a session-scoped Wagtail bootstrap to support an expanded PostgreSQL
+concurrency group. Transactional flushes removed the roots after the first
+case; serialized rollback did not restore rows created after its snapshot.
+Added an explicit restoring fixture before requesting editor actors, and used
+it for both the existing and new editor concurrency cases. Independent review
+prompted matching the session locale pair and allowing more lock-timeout margin.
+The suggestion-only review was adjudicated without another agreement-seeking
+round; claims about a missing docs target and file-order dependence were checked
+against the existing label/build and pytest-django's test ordering.
+
+Status: repaired and exercised in randomized combined PostgreSQL runs.
+
+Promotion: incident — the shared project fixture and concurrency tests encode
+the repair; existing review evidence and stopping rules already cover it.
+
+## 2026-09-19 — Prove caller reachability for shared-helper findings
+
+The comment-access review inferred that a shared None-target guard changed
+creation/preview responses. Both callers already reject missing targets before
+the helper. Added endpoint regressions proving the original error status,
+no writes and no helper call; the focused re-review closed cleanly without an
+unnecessary production rewrite. An initial assertion on the debug-only response
+body was corrected while retaining the authorization-boundary assertions.
+
+Status: resolved. Keep caller reachability evidence separate from a helper's
+standalone input/output change when adjudicating compatibility findings.
+
+Promotion: incident — the existing review skill's caller-chain and evidence
+rules already cover this; project regressions preserve the concrete boundary.
+
+## 2026-09-19 — Dependency cleanup needs every supported constraint boundary
+
+Expected a fixed upstream dependency floor to permit removal of a local shim.
+Focused tests on the oldest and newest framework environments and a clean
+independent review missed an intermediate supported release's upper bound.
+Hosted dependency resolution rejected the new floor before tests could run.
+Existing-environment tests are not proof of installability across the supported
+matrix: resolve every distinct framework dependency constraint when raising a
+shared dependency floor, including intermediate supported branches.
+
+Status: resolved after explicit approval to drop the end-of-life Wagtail 7.3
+branch. Dependency metadata, hosted/local matrix and upgrade guidance now agree;
+all retained CI jobs passed. The correction checked dependency resolution for
+each retained hosted combination before pushing.
+
+Promotion: incident — record the concrete missing validation here; no shared
+skill change is made as part of this application's commit/CI task.
+
+## 2026-09-19 — Review migration promises as contracts, not aspirations
+
+A paged-feed research draft mixed non-expiring cursors with an unconditional
+continuation/rollback promise, although key retirement can invalidate stored
+links. Independent review exposed the contradiction before implementation.
+The repair distinguishes mode-only rollback from key/decoder retirement and
+defines safe-head recovery without claiming recovery of a client's position.
+Parser fixtures, source evidence and installed-client tests now have separate
+claim levels. Existing docs/cache concerns are tracked independently so feature
+deferral cannot hide them.
+
+Status: concept review closed with advisory clarifications; runtime and client
+validation remain explicit implementation gates, not completed evidence.
+
+Promotion: incident — these are concrete design contracts captured in the
+project plan; the existing evidence and scoped re-review rules were sufficient.
+
+## CI typing parity for custom Django expressions
+
+Local Python 3.13 mypy accepted a list-valued custom Lookup return annotation,
+including a cold-cache check, while CI's Python 3.14 environment rejected its
+BaseExpression override. Returning parameter tuples preserved SQL semantics and
+matched the stub contract. Check the locked CI interpreter/environment when
+diagnosing type-check discrepancies; clearing the cache alone is not evidence
+of environment parity. The focused independent repair review closed cleanly.
+
+Promotion: incident — project-specific compatibility repair; no additional
+review-loop rule is warranted.
