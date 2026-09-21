@@ -824,6 +824,21 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
   Hazards, to say the quoted delimiter is required whenever the body contains a
   backtick at all, not only a code fence.
 
+## 2026-09-19 - Isolated dependency-adoption review recovered after invalid inspection
+
+- Expected: a direct Claude Opus 5 review confined to the harness bundle.
+- Actual: the first attempt tried a parent-directory Glob; the harness rejected
+  it as INVALID. A fresh isolated attempt completed with suggestions only.
+- Impact: the invalid attempt supplied no review evidence; no permissions or
+  sandbox settings were relaxed.
+- Resolution: retry in a fresh run directory, strengthen the low-cost test
+  assertion, and reject the dependency-declaration suggestion with evidence
+  from the unchanged project manifest. No further agreement-seeking round.
+- Status: resolved; the reviewed implementation remains uncommitted.
+- Promotion: incident - existing isolation, retry and suggestion-only stopping
+  rules cover this case; no skill change is needed.
+
+
 ## 2026-09-19 - Pi review routing and local-state permissions
 
 - Expected: use the existing Pi harness and diagnose model preflight failures accurately.
@@ -832,3 +847,65 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Fix: route Pi to pi-review-loop, honor explicit user reviewer selection, and distinguish state-lock denial from missing authentication before accepting partial model listings.
 - Status: installed after the user enabled full access; regression checks cover both model-resolution entry points. Pi with openai-codex/gpt-5.6-sol independently returned CLEAN without omitted, truncated or redacted evidence. Existing log edits preserved.
 - Promotion: promoted - cross-agent-review-cycle, Reviewer Procedure; pi-review-loop, failure interpretation and model preflight.
+
+## 2026-09-20 - Preserve native failure semantics in Ansible diagnostics
+
+- Expected: sanitize management-command errors without allowing deployment to continue.
+- Actual: suppressing native failure handling and rebuilding it from return codes missed negative exits and module failures with a zero process exit. Successive scoped reviews exposed the incomplete replacement.
+- Resolution: use native Ansible block/rescue semantics and abort with bounded categories; exercise real command, signal and module failures through the included production helper, checking that downstream work is never reached.
+- Review preparation incident: repository source was copied into trusted review context after compaction. The final attempt was cancelled and restarted with caller-authored invariants only; source remains behind the harness evidence boundary.
+- Status: corrections implemented and locally verified; independent delta review recorded in the Daybook implementation report. No production activation.
+- Promotion: incident - existing native-mechanism, executable-evidence and trusted-context rules already cover both failures; no additional skill rule is needed.
+
+## 2026-09-21 - Diagnose ownership failures before changing production guards
+
+- Expected: SSH fixture race tests reach their injected boundary.
+- Actual: macOS inherited the temporary parent's wheel group while fixtures expected the contributor's primary group, so ownership checks rejected setup before the race.
+- Resolution: set the private fixture root's group before creating children; avoid chown when already correct. Production guards and test assertions remain unchanged. Independent Opus/high review reported suggestions only; alternate effective-group wrappers are outside the documented normal-user test environment.
+- Status: targeted suite and hooks pass; complete infrastructure validation is tracked in the Daybook evidence report.
+- Promotion: incident - project-specific fixture behavior is documented in ops-library TESTING.md; existing evidence-first review rules need no extension.
+
+## 2026-09-21 — Operations rollout integration checks
+
+Expected the reviewed disabled-first playbooks and restore helper to work under
+their actual remote identities. Live staging caught an off-by-one shared-secret
+path, macOS sudo inheriting an inaccessible root working directory, and a
+service restore helper lacking directory write access for atomic replacement.
+All stopped before unintended admission; legacy imports were restored with
+marker/ledger/plist integrity checks. Corrected the concrete deployment contracts
+and proved backup/replay recovery in an isolated database. Keep real privilege
+and path checks in attended deployment evidence; unit contracts alone do not
+prove environment integration.
+
+Promotion: incident — existing live-deploy and documentation requirements cover
+these failures; project regressions and runbook evidence carry the fixes.
+
+## 2026-09-21 — Operations backup monitoring repair
+
+Expected several notification-suppression predicates to form a conjunction. Source inspection before deployment showed Nyxmon evaluates them as alternatives, which would have hidden schedule-contract failures. Split freshness grace and unsuppressed schedule checks, then exercised the persisted configuration through the installed suppression implementation with drift, pause and overdue scenarios. The bounded Opus review cycle closed with advisory findings only; no reviewer delegation was used. Status: fixed and verified.
+
+Promotion: incident — project-specific predicate semantics; the existing requirement to verify repairs through their production caller already covers the lesson.
+
+## 2026-09-21 — Acceptance documentation versus review-only evidence
+
+A documentation closure review treated a temporary evidence patch as a shipped repository artifact despite its stated scope, and confused absence of an active operation with absence of a persisted operation row. Compared both claims with the exact staged files and measured database state, rejected them, and stopped the cycle after applying the actual documentation fixes. Also retained the separate capacity-policy follow-up instead of treating functional acceptance as approval of that policy. Status: adjudicated and closed.
+
+Promotion: incident — existing guidance to reproduce claims and stop on disproven findings already covers this case.
+
+## 2026-09-21 — Content rollout noindex assertion
+
+A temporary acceptance script incorrectly required an HTTP noindex header although the application deliberately emits a robots meta tag. The guarded transaction rolled back all target revisions; an independent snapshot confirmed unchanged content. Corrected the assertion to inspect the configured meta tag, reran the import and retained browser verification. Status: corrected; production implementation was unaffected.
+
+Promotion: incident — inspect the configured contract before copying rollout assertions; existing evidence-first validation guidance already covers this case.
+
+## 2026-09-21 — Planning review and unchanged recovery identities
+
+A scoped planning review improved category mapping and cross-binding fault isolation, then narrowed repeatedly around diagnostic marker lifecycle. Its last warning assumed an in-place attempt reset that the actual recovery protocol cannot perform. Checked every current-attempt assignment and the explicit supersession path, ran the real PostgreSQL recovery suite, documented the unchanged identity invariant, and stopped the plateaued loop with an adjudicated result rather than adding a revision mechanism for an unsupported transition. Future delta context must retain the state-machine invariants on which a repair depends. Status: closed; runtime implementation remains a separate approval gate.
+
+Promotion: incident — existing cross-agent-review-cycle guidance already requires unchanged context, evidence-based rejection, and stopping without chasing reviewer agreement.
+
+## 2026-09-21 — Delta reviewer sought excluded caller context
+
+A delta reviewer attempted Glob outside the harness read sandbox while checking an unchanged caller guarantee. The harness correctly invalidated that run. Retried with the unchanged caller excerpt explicitly included in the review context and the same repair baseline; the fresh valid review closed both required findings. No permission widening or provider substitution. Status: recovered, advisory-only terminal result.
+
+Promotion: incident — existing delta-context and fail-closed retry instructions already cover this case.
