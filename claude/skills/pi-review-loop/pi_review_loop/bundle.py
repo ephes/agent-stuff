@@ -13,5 +13,12 @@ from ._shared import bundle as _shared
 
 BundleResult = _shared.BundleResult
 build_bundle = _shared.build_bundle
+EVIDENCE_BOUNDARY_TITLE = _shared.EVIDENCE_BOUNDARY_TITLE
+EVIDENCE_BOUNDARY = _shared.EVIDENCE_BOUNDARY
 
-__all__ = ["BundleResult", "build_bundle"]
+__all__ = [
+    "BundleResult",
+    "build_bundle",
+    "EVIDENCE_BOUNDARY_TITLE",
+    "EVIDENCE_BOUNDARY",
+]
