@@ -127,6 +127,15 @@ implement and fix; Pi reviews with fresh context.
   defaults to 3 concurrent Pi reviews to avoid a cross-repo bottleneck while still
   limiting provider pressure. Set `PI_REVIEW_MAX_CONCURRENT=1` or pass
   `--max-concurrent 1` if provider stalls return.
+  The pool is the shared implementation from `claude-review-loop`, so a slot is
+  held by an advisory lock on a sibling guard file rather than by the visible
+  directory alone: a displaced or externally deleted slot directory cannot hand
+  the same slot to a second live holder. Every holder carries an owner token
+  that metadata updates and release both check, `meta.json` is replaced
+  atomically, and a slot proven stale is renamed to a unique tombstone before
+  cleanup. A live slot whose metadata does not declare a limit is treated as a
+  limit of one — fail-closed, so an old or half-written record narrows the pool
+  instead of over-admitting into it.
 - A `CLEAN` result over an empty worktree is invalid: the harness refuses to run
   the reviewer when there are no staged, unstaged, or untracked changes.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid

@@ -17,7 +17,7 @@ if SHARED_SKILL not in sys.path:
     sys.path.insert(0, SHARED_SKILL)
 
 try:
-    from claude_review_loop import bundle, ledger  # noqa: F401
+    from claude_review_loop import bundle, ledger, lock  # noqa: F401
 except ImportError as exc:  # pragma: no cover - deployment error, not a code path
     raise ImportError(
         "pi-review-loop needs the shared review machinery from "

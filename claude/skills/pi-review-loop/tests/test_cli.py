@@ -70,7 +70,10 @@ class TestCli(unittest.TestCase):
         slot_dir = os.path.join(lock_dir, "slot-0")
         os.makedirs(slot_dir)
         with open(os.path.join(slot_dir, "meta.json"), "w") as fh:
-            fh.write('{"harness_pid": %d, "command": "pi-review-loop"}' % os.getpid())
+            # A real holder records its limit; the pool fails closed on
+            # metadata that does not, so the fixture has to look like one.
+            fh.write('{"harness_pid": %d, "command": "pi-review-loop",'
+                     ' "max_concurrent": 1}' % os.getpid())
         env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
             [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
@@ -86,7 +89,8 @@ class TestCli(unittest.TestCase):
         slot_dir = os.path.join(lock_dir, "slot-0")
         os.makedirs(slot_dir)
         with open(os.path.join(slot_dir, "meta.json"), "w") as fh:
-            fh.write('{"harness_pid": %d, "command": "pi-review-loop"}' % os.getpid())
+            fh.write('{"harness_pid": %d, "command": "pi-review-loop",'
+                     ' "max_concurrent": 2}' % os.getpid())
         env = dict(os.environ, PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} clean")
         proc = subprocess.run(
             [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),

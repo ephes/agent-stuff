@@ -87,12 +87,54 @@ class TestLock(unittest.TestCase):
         with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
             self.assertTrue(os.path.isdir(self.lock_dir))
 
+    def test_metadata_update_preserves_owner_token(self):
+        # The CLI records the reviewer pgid through this path, so it must keep
+        # the token that proves the slot is still ours.
+        with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}) as held:
+            held.update_meta({"pi_pgid": 12345})
+            meta = lock.read_meta(self.lock_dir)
+            self.assertEqual(meta["owner_token"], held.owner_token)
+            self.assertEqual(meta["pi_pgid"], 12345)
+
+    def test_guard_blocks_second_owner_even_when_lock_directory_is_displaced(self):
+        # The visible directory is the ownership record, but a displaced or
+        # externally deleted one must not hand the same slot to a second live
+        # holder: the sibling guard file decides.
+        held = lock.Lock(self.lock_dir, {"harness_pid": os.getpid()})
+        held.__enter__()
+        displaced = self.lock_dir + ".displaced-by-test"
+        os.rename(self.lock_dir, displaced)
+        try:
+            with self.assertRaises(lock.LockHeld):
+                with lock.Lock(self.lock_dir, {"harness_pid": os.getpid()}):
+                    pass
+        finally:
+            held.__exit__(None, None, None)
+
+    def test_release_does_not_remove_replacement_owner_lock(self):
+        # A harness whose slot was already reclaimed must not delete the
+        # replacement owner's directory on its way out.
+        held = lock.Lock(self.lock_dir, {"harness_pid": os.getpid()})
+        held.__enter__()
+        displaced = self.lock_dir + ".displaced"
+        os.rename(self.lock_dir, displaced)
+        os.mkdir(self.lock_dir)
+        lock.write_meta(self.lock_dir, {
+            "harness_pid": os.getpid(), "owner_token": "new-owner",
+        })
+        held.__exit__(None, None, None)
+        self.assertTrue(os.path.isdir(self.lock_dir))
+        self.assertEqual(lock.read_meta(self.lock_dir)["owner_token"], "new-owner")
+
     def test_lock_pool_uses_next_free_slot(self):
         pool_dir = os.path.join(self.tmp.name, "pool")
         slot0 = os.path.join(pool_dir, "slot-0")
         os.makedirs(slot0)
+        # A real holder records its limit; the pool fails closed on metadata
+        # that does not, so the fixture has to look like one.
         lock.write_meta(slot0, {"harness_pid": os.getpid(),
-                                "command": "pi-review-loop"})
+                                "command": "pi-review-loop",
+                                "max_concurrent": 2})
         with lock.LockPool(pool_dir, {"harness_pid": os.getpid()}, max_concurrent=2) as held:
             self.assertEqual(os.path.basename(held.lock_dir), "slot-1")
             self.assertTrue(os.path.isdir(held.lock_dir))

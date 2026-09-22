@@ -9,7 +9,7 @@ import time
 from . import bundle as bundle_mod
 from . import ledger as ledger_mod
 from . import model as model_mod
-from .lock import LockHeld, LockPool, write_meta
+from .lock import LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
 from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
@@ -209,11 +209,10 @@ def main(argv=None):
     try:
         with LockPool(args.lock_dir, meta, args.max_concurrent) as held_lock:
             def _record_pgid(pgid):
-                write_meta(held_lock.lock_dir, {
-                    **meta, "pi_pgid": pgid,
-                    "lock_slot": held_lock.slot,
-                    "max_concurrent": args.max_concurrent,
-                })
+                # Through the slot's owner token, not a raw write: a harness
+                # whose slot was already reclaimed must not overwrite the
+                # record of the replacement owner now holding it.
+                held_lock.update_meta({"pi_pgid": pgid})
             result = run_review(
                 cmd=_pi_cmd(model, bundle_path, delta=bool(args.baseline_ref)),
                 run_dir=args.run_dir,

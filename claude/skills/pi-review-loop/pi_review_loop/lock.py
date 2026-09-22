@@ -1,68 +1,37 @@
-"""Atomic, global-per-user review slot locks.
+"""Pi's review slot pool is the shared pool from `claude-review-loop`.
 
-The harness uses a bounded slot pool rather than an unlimited fan-out or a single
-cross-repo mutex: a few Pi reviews may run in parallel, while stale slot reclaim
-remains reuse-safe and only removes a slot whose recorded holder is gone.
+The pool is reviewer-agnostic: bounded slots, a guard file per slot so a
+displaced or externally deleted directory cannot hand the same slot to a second
+live holder, owner tokens so a reclaimed harness cannot overwrite or delete its
+replacement's slot, atomic metadata, and a unique tombstone for a proven-stale
+slot. This module used to be a smaller, older implementation with none of that,
+which mattered more here than on the sibling path: a double-held Pi slot means
+two concurrent reviews egressing a diff to an external provider.
+
+Only the reviewer identity differs, so that is all this module supplies.
 """
-import errno
-import json
 import os
-import signal
 import subprocess
 
-META_NAME = "meta.json"
+from ._shared import lock as _shared
 
+LockHeld = _shared.LockHeld
+META_NAME = _shared.META_NAME
+write_meta = _shared.write_meta
+read_meta = _shared.read_meta
+pid_alive = _shared.pid_alive
 
-class LockHeld(Exception):
-    """Raised when a live review already holds the lock."""
-
-
-def write_meta(lock_dir, meta):
-    with open(os.path.join(lock_dir, META_NAME), "w") as fh:
-        json.dump(meta, fh)
-
-
-def read_meta(lock_dir):
-    try:
-        with open(os.path.join(lock_dir, META_NAME)) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return {}
-
-
-def _group_alive(pgid):
-    if not pgid or pgid <= 1:
-        return False
-    try:
-        os.killpg(pgid, 0)  # signal 0 = liveness probe
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists but owned elsewhere; treat as alive (do not reclaim)
-    except OSError as e:
-        return e.errno != errno.ESRCH
-
-
-def pid_alive(pid):
-    if not pid or pid <= 1:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError as e:
-        return e.errno != errno.ESRCH
+DEFAULT_MAX_CONCURRENT = 3
 
 
 def _pgid_is_pi(pgid):
-    """Best-effort identity check before killing a recorded process group: confirm
-    the group leader's command is `pi` (the leader pid == pgid because Pi is spawned
-    with start_new_session). Fail-safe: returns False (do NOT kill) on any
-    uncertainty, so a reused PGID never gets an unrelated process group killed."""
+    """Best-effort identity check before killing a recorded process group.
+
+    Confirm the group leader's command is `pi` - the leader pid equals the pgid
+    because Pi is spawned with start_new_session=True. Fail-safe: returns False
+    (do NOT kill) on any uncertainty, so a reused PGID never gets an unrelated
+    process group killed.
+    """
     if not pgid or pgid <= 1:
         return False
     try:
@@ -75,118 +44,29 @@ def _pgid_is_pi(pgid):
     return bool(tokens) and os.path.basename(tokens[0]) == "pi"
 
 
-def _remove_lock_dir(lock_dir):
-    try:
-        os.remove(os.path.join(lock_dir, META_NAME))
-    except OSError:
-        pass
-    try:
-        os.rmdir(lock_dir)
-    except OSError:
-        pass
+PI_PROFILE = _shared.ReviewerProfile("pi_pgid", _pgid_is_pi)
 
 
-def _reclaim_if_stale(lock_dir):
-    """Remove the lock dir iff its holder is provably gone. Reuse-safe and
-    fail-closed: never reclaim a lock with no readable metadata."""
-    meta = read_meta(lock_dir)
-    # Fail closed: a lock dir with no readable metadata may belong to a holder
-    # that created the dir microseconds before writing meta. Treat it as held.
-    if not meta:
-        return False
-    # The CLI holds the lock keyed on its own (harness) PID; the runner owns the
-    # Pi process. Prefer harness liveness when recorded.
-    if "harness_pid" in meta:
-        if pid_alive(meta.get("harness_pid")):
-            return False
-        pgid = meta.get("pi_pgid")  # kill an orphaned Pi group only if it is still pi
-        if pgid and pgid > 1 and _pgid_is_pi(pgid):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
-        _remove_lock_dir(lock_dir)
-        return True
-    if _group_alive(meta.get("pi_pgid")):
-        return False
-    pgid = meta.get("pi_pgid")
-    if pgid and pgid > 1 and _pgid_is_pi(pgid):
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    _remove_lock_dir(lock_dir)
-    return True
+class Lock(_shared.Lock):
+    def __init__(self, lock_dir, meta, profile=PI_PROFILE):
+        super().__init__(lock_dir, meta, profile)
 
 
-class Lock:
-    def __init__(self, lock_dir, meta):
-        self.lock_dir = lock_dir
-        self.meta = dict(meta)
-
-    def __enter__(self):
-        try:
-            os.mkdir(self.lock_dir)
-        except FileExistsError:
-            if not _reclaim_if_stale(self.lock_dir):
-                raise LockHeld(f"review lock held: {self.lock_dir}")
-            try:
-                os.mkdir(self.lock_dir)
-            except FileExistsError:
-                raise LockHeld(f"review lock held (lost reclaim race): {self.lock_dir}")
-        write_meta(self.lock_dir, self.meta)
-        return self
-
-    def __exit__(self, *exc):
-        try:
-            os.remove(os.path.join(self.lock_dir, META_NAME))
-        except OSError:
-            pass
-        try:
-            os.rmdir(self.lock_dir)
-        except OSError:
-            pass
-        return False
-
-
-class LockPool:
+class LockPool(_shared.LockPool):
     """Acquire one slot from a bounded per-user review pool.
 
-    A single global lock serialized every repository behind one Pi call. The pool
-    keeps a hard cap for provider protection while allowing unrelated agents to
-    review in parallel.
+    A single global lock serialized every repository behind one Pi call. The
+    pool keeps a hard cap for provider protection while allowing unrelated
+    agents to review in parallel.
     """
 
-    def __init__(self, pool_dir, meta, max_concurrent=3):
-        if max_concurrent < 1:
-            raise ValueError("max_concurrent must be >= 1")
-        self.pool_dir = pool_dir
-        self.meta = dict(meta)
-        self.max_concurrent = max_concurrent
-        self._lock = None
-        self.lock_dir = None
-        self.slot = None
+    def __init__(self, pool_dir, meta, max_concurrent=DEFAULT_MAX_CONCURRENT,
+                 selection_timeout=5.0, profile=PI_PROFILE):
+        super().__init__(pool_dir, meta, max_concurrent=max_concurrent,
+                         selection_timeout=selection_timeout, profile=profile)
 
-    def __enter__(self):
-        os.makedirs(self.pool_dir, exist_ok=True)
-        last_error = None
-        for slot in range(self.max_concurrent):
-            slot_dir = os.path.join(self.pool_dir, f"slot-{slot}")
-            slot_meta = {**self.meta, "lock_slot": slot,
-                         "max_concurrent": self.max_concurrent}
-            try:
-                self._lock = Lock(slot_dir, slot_meta).__enter__()
-                self.lock_dir = slot_dir
-                self.slot = slot
-                return self
-            except LockHeld as e:
-                last_error = e
-                continue
-        raise LockHeld(
-            f"all {self.max_concurrent} review slots held: {self.pool_dir}"
-        ) from last_error
 
-    def __exit__(self, *exc):
-        if self._lock is not None:
-            return self._lock.__exit__(*exc)
-        return False
+__all__ = [
+    "LockHeld", "META_NAME", "write_meta", "read_meta", "pid_alive",
+    "Lock", "LockPool", "PI_PROFILE", "DEFAULT_MAX_CONCURRENT",
+]

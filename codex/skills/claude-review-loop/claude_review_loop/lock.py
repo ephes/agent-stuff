@@ -99,6 +99,26 @@ def _pgid_is_claude(pgid):
     )
 
 
+class ReviewerProfile:
+    """What differs between the two harnesses that share this pool.
+
+    Only two things: the meta key its runner records the reviewer's process
+    group under, and how that group is identified before anything kills it.
+    Everything else - the guard files, owner tokens, atomic metadata and stale
+    tombstones - is reviewer-agnostic, so both harnesses use this module rather
+    than a copy that can fall behind.
+    """
+
+    __slots__ = ("pgid_key", "identifies_pgid")
+
+    def __init__(self, pgid_key, identifies_pgid):
+        self.pgid_key = pgid_key
+        self.identifies_pgid = identifies_pgid
+
+
+CLAUDE_PROFILE = ReviewerProfile("claude_pgid", _pgid_is_claude)
+
+
 def _remove_lock_dir(lock_dir):
     try:
         entries = list(os.scandir(lock_dir))
@@ -116,7 +136,7 @@ def _remove_lock_dir(lock_dir):
         pass
 
 
-def _retire_stale_lock(lock_dir, meta):
+def _retire_stale_lock(lock_dir, meta, profile=CLAUDE_PROFILE):
     """Atomically take ownership of a proven-stale directory before cleanup."""
     tombstone = f"{lock_dir}.stale.{uuid.uuid4().hex}"
     try:
@@ -126,8 +146,8 @@ def _retire_stale_lock(lock_dir, meta):
     except OSError:
         return False
 
-    pgid = meta.get("claude_pgid")
-    if pgid and pgid > 1 and _pgid_is_claude(pgid):
+    pgid = meta.get(profile.pgid_key)
+    if pgid and pgid > 1 and profile.identifies_pgid(pgid):
         try:
             os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
@@ -136,7 +156,7 @@ def _retire_stale_lock(lock_dir, meta):
     return True
 
 
-def _reclaim_if_stale(lock_dir):
+def _reclaim_if_stale(lock_dir, profile=CLAUDE_PROFILE):
     """Remove the lock dir iff its holder is provably gone. Reuse-safe and
     fail-closed: never reclaim a lock with no readable metadata."""
     meta = read_meta(lock_dir)
@@ -149,14 +169,15 @@ def _reclaim_if_stale(lock_dir):
     if "harness_pid" in meta:
         if pid_alive(meta.get("harness_pid")):
             return False
-        return _retire_stale_lock(lock_dir, meta)
-    if _group_alive(meta.get("claude_pgid")):
+        return _retire_stale_lock(lock_dir, meta, profile)
+    if _group_alive(meta.get(profile.pgid_key)):
         return False
-    return _retire_stale_lock(lock_dir, meta)
+    return _retire_stale_lock(lock_dir, meta, profile)
 
 
 class Lock:
-    def __init__(self, lock_dir, meta):
+    def __init__(self, lock_dir, meta, profile=CLAUDE_PROFILE):
+        self.profile = profile
         self.lock_dir = lock_dir
         self.guard_path = lock_dir + ".guard"
         self.guard_fd = None
@@ -193,7 +214,7 @@ class Lock:
                     owned_dir = True
                     break
                 except FileExistsError:
-                    if not _reclaim_if_stale(self.lock_dir):
+                    if not _reclaim_if_stale(self.lock_dir, self.profile):
                         raise LockHeld(f"review lock held: {self.lock_dir}")
             else:
                 raise LockHeld(f"review lock held (reclaim contention): {self.lock_dir}")
@@ -242,11 +263,13 @@ class LockPool:
         meta,
         max_concurrent=DEFAULT_MAX_CONCURRENT,
         selection_timeout=5.0,
+        profile=CLAUDE_PROFILE,
     ):
         if max_concurrent < 1:
             raise ValueError("max_concurrent must be >= 1")
         if selection_timeout < 0:
             raise ValueError("selection_timeout must be >= 0")
+        self.profile = profile
         self.pool_dir = pool_dir
         self.selection_guard_path = os.path.join(pool_dir, ".pool.guard")
         self.meta = dict(meta)
@@ -266,7 +289,7 @@ class LockPool:
                     continue
                 slot = int(match.group(1))
                 highest_slot = max(highest_slot, slot)
-                if _reclaim_if_stale(entry.path):
+                if _reclaim_if_stale(entry.path, self.profile):
                     continue
                 if not os.path.isdir(entry.path):
                     continue
@@ -325,7 +348,7 @@ class LockPool:
                     "lock_slot": slot,
                     "max_concurrent": self.max_concurrent,
                 }
-                candidate = Lock(slot_dir, slot_meta)
+                candidate = Lock(slot_dir, slot_meta, self.profile)
                 try:
                     candidate.__enter__()
                 except LockHeld:
