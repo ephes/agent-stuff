@@ -1,7 +1,9 @@
 import os
+import signal
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pi_review_loop import runner
 from pi_review_loop.states import CLEAN, ISSUES, CRASHED, STALLED, PROVIDER_ERROR
 
@@ -36,6 +38,35 @@ class TestRunner(unittest.TestCase):
     def test_hang_is_stalled_and_killed(self):
         r = self._run("hang", stall_timeout=1)
         self.assertEqual(r.state, STALLED)
+
+    def test_keyboard_interrupt_kills_group_and_writes_crashed_result(self):
+        # Ctrl-C used to unwind with no result.json, leaving the caller polling
+        # for an artifact that never appeared.
+        seen = []
+        with mock.patch.object(runner._Streams, "pump",
+                               side_effect=KeyboardInterrupt):
+            r = self._run("hang", on_spawn=seen.append)
+        self.assertEqual(r.state, CRASHED)
+        self.assertIn("interrupted by user", r.error or "")
+        self.assertTrue(os.path.exists(os.path.join(self.run_dir, "result.json")))
+        self.assertTrue(seen)
+        self.assertFalse(runner._group_alive(seen[0]))
+
+    def test_kill_group_escalates_when_wrapper_exits_but_group_survives(self):
+        # Reaping the leader is not evidence the group is gone: a wrapper can
+        # exit while a descendant survives, so liveness decides the escalation.
+        proc = mock.Mock()
+        proc.wait.side_effect = [None, None]
+        with mock.patch("pi_review_loop.runner.os.killpg") as killpg, mock.patch(
+            "pi_review_loop.runner._group_alive",
+            side_effect=[True, False],
+        ):
+            runner._kill_group(proc, 12345, grace=0.01)
+
+        self.assertEqual(
+            killpg.call_args_list,
+            [mock.call(12345, signal.SIGTERM), mock.call(12345, signal.SIGKILL)],
+        )
 
     def test_crash_with_malformed_output(self):
         r = self._run("crash")
