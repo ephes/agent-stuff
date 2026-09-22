@@ -1,4 +1,5 @@
 """Assemble a bounded, redacted review bundle from the working tree."""
+import errno
 import os
 import re
 import shutil
@@ -38,6 +39,42 @@ class BundleResult:
     baseline_ref: str = None
     baseline_commit: str = None
     has_changes: bool = False
+
+
+# Walking a path by descriptor needs each ancestor opened. Ordinary traversal
+# only requires search permission, so prefer a flag that asks for exactly that:
+# O_PATH on Linux, O_SEARCH where POSIX 2008 offers it. Platforms with neither
+# (macOS) fall back to O_RDONLY, where a search-only directory yields a refusal
+# recorded in the skip manifest rather than a silent read.
+_DIR_TRAVERSE_FLAGS = os.O_DIRECTORY | getattr(
+    os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY)
+)
+
+
+def _open_within_repo(repo, path):
+    """Open a repo-relative path with no component allowed to be a symlink.
+
+    O_NOFOLLOW guards only the final component, so an ancestor directory
+    replaced by a symlink would still redirect the open outside the repository.
+    Each component is therefore resolved against the previous directory's
+    descriptor, starting from the repository root, so nothing after the root is
+    re-resolved by pathname.
+    """
+    parts = [part for part in path.split("/") if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        raise OSError(errno.EINVAL, "unsafe repository-relative path", path)
+    dir_fd = os.open(repo, _DIR_TRAVERSE_FLAGS)
+    try:
+        for part in parts[:-1]:
+            nested = os.open(part, _DIR_TRAVERSE_FLAGS | os.O_NOFOLLOW,
+                             dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = nested
+        return os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd
+        )
+    finally:
+        os.close(dir_fd)
 
 
 def _git(repo, *args, replacement_log, env_extra=None, input_bytes=None):
@@ -384,32 +421,46 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 f"### {path}\n\n[redacted: secret-looking file not sent]"
             )
             continue
-        full = os.path.join(repo, path)
+        # Resolve the path exactly once, component by component, and take every
+        # later decision from the descriptor. A separate lstat leaves a window in
+        # which the path can be swapped: the open would then follow a symlink to
+        # content outside the repository and egress it, or block forever on a
+        # FIFO with no writer. O_NOFOLLOW refuses the link at open, O_NONBLOCK
+        # returns on the FIFO, and the component walk covers ancestors too.
         try:
-            mode = os.lstat(full).st_mode
-        except OSError:
-            skipped.append({"path": path, "reason": "unreadable"})
-            continue
-        if stat.S_ISLNK(mode):
-            skipped.append({"path": path, "reason": "symlink"})
-            continue
-        if not stat.S_ISREG(mode):
-            skipped.append({"path": path, "reason": "not-a-regular-file"})
-            continue
-        try:
-            size = os.path.getsize(full)
-        except OSError:
-            skipped.append({"path": path, "reason": "unreadable"})  # never silent
-            continue
-        if size > max_file_size:
-            skipped.append({"path": path, "reason": "size", "size": size})
+            fd = _open_within_repo(repo, path)
+        except OSError as exc:
+            # A symlink under O_NOFOLLOW is ELOOP on Linux and macOS; some BSDs
+            # report EMLINK. Either way it is a refusal to follow, not a bad path.
+            reason = ("symlink" if exc.errno in (errno.ELOOP, errno.EMLINK)
+                      else "unreadable")
+            skipped.append({"path": path, "reason": reason})
             continue
         try:
-            with open(full, "rb") as fh:
-                raw = fh.read()
-        except OSError:
-            skipped.append({"path": path, "reason": "unreadable"})
-            continue
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                skipped.append({"path": path, "reason": "not-a-regular-file"})
+                continue
+            size = info.st_size
+            if size > max_file_size:
+                skipped.append({"path": path, "reason": "size", "size": size})
+                continue
+            try:
+                # dup so the wrapper's close does not race the finally below.
+                # Read one byte past the cap rather than trusting the size the
+                # fstat reported: a file still being written grows between the
+                # two, and an unbounded read would then pull it into the bundle.
+                with os.fdopen(os.dup(fd), "rb") as fh:
+                    raw = fh.read(max_file_size + 1)
+            except OSError:
+                skipped.append({"path": path, "reason": "unreadable"})
+                continue
+            if len(raw) > max_file_size:
+                skipped.append({"path": path, "reason": "size",
+                                "size": len(raw)})
+                continue
+        finally:
+            os.close(fd)
         if b"\x00" in raw:
             skipped.append({"path": path, "reason": "binary"})
             continue

@@ -1,4 +1,7 @@
+import errno
 import os
+import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -76,6 +79,52 @@ class TestBundle(unittest.TestCase):
         ))
         with open(res.path) as fh:
             self.assertNotIn(marker, fh.read())
+
+    def test_file_grown_past_the_cap_after_its_stat_is_skipped(self):
+        # The size is read from the descriptor, but a file still being written
+        # grows between that stat and the read, so the read itself is bounded.
+        path = os.path.join(self.repo, "grows.log")
+        with open(path, "w") as fh:
+            fh.write("x")
+        real_fstat = os.fstat
+
+        def grow_then_stat(fd):
+            info = real_fstat(fd)
+            if stat.S_ISREG(info.st_mode) and info.st_size == 1:
+                with open(path, "w") as fh:
+                    fh.write("y" * 4096)
+            return info
+
+        with mock.patch.object(bundle.os, "fstat", side_effect=grow_then_stat):
+            res = self._build(max_file_size=16)
+        self.assertTrue(any(
+            item["path"] == "grows.log" and item["reason"] == "size"
+            for item in res.skipped_files
+        ), res.skipped_files)
+        with open(res.path) as fh:
+            self.assertNotIn("yyyy", fh.read())
+
+    def test_symlinked_ancestor_cannot_redirect_a_content_read(self):
+        # O_NOFOLLOW guards only the final component, so the walk has to resolve
+        # ancestors too: a directory swapped for a symlink would otherwise hand
+        # back a descriptor for a file outside the repository.
+        marker = "outside-repository-marker-that-must-not-egress"
+        outside = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(outside, "secrets.env"), "w") as fh:
+                fh.write(marker)
+            os.symlink(outside, os.path.join(self.repo, "conf"))
+            with self.assertRaises(OSError) as caught:
+                bundle._open_within_repo(self.repo, "conf/secrets.env")
+            self.assertIn(caught.exception.errno, (errno.ELOOP, errno.EMLINK,
+                                                   errno.ENOTDIR))
+        finally:
+            shutil.rmtree(outside)
+
+    def test_open_within_repo_refuses_paths_that_climb_out(self):
+        with self.assertRaises(OSError) as caught:
+            bundle._open_within_repo(self.repo, "../escape")
+        self.assertEqual(caught.exception.errno, errno.EINVAL)
 
     def test_untracked_fifo_is_skipped_without_blocking(self):
         fifo = os.path.join(self.repo, "event-pipe")
