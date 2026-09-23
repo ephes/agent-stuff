@@ -16,6 +16,41 @@ from .verdict import (
 INSPECTION_TOOLS = ("Read", "Grep", "Glob")
 ALLOWED_REVIEW_TOOLS = frozenset((*INSPECTION_TOOLS, "StructuredOutput"))
 
+# How Claude Code answers a tool call its `dontAsk` permission mode refused
+# (verified against Claude Code 2.1.x). An out-of-scope call answered with
+# exactly this text returned no data, so it is recorded and the review goes on;
+# any other answer invalidates the review. A reworded denial fails closed.
+PERMISSION_DENIAL_HEAD = (
+    "Permission to use {tool} has been denied because Claude Code is running "
+    "in don't ask mode."
+)
+PERMISSION_DENIAL_GUIDANCE = (
+    " IMPORTANT: You *may* attempt to accomplish this action using other tools "
+    "that might naturally be used to accomplish this goal, e.g. using head "
+    "instead of cat. But you *should not* attempt to work around this denial in "
+    "malicious ways, e.g. do not use your ability to run tests to execute "
+    "non-test actions. You should only try to work around this restriction in "
+    "reasonable ways that do not attempt to bypass the intent behind this "
+    "denial. If you believe this capability is essential to complete the user's "
+    "request, STOP and explain to the user what you were trying to do and why "
+    "you need this permission. Let the user decide how to proceed."
+)
+
+
+def _is_permission_denial(block, tool):
+    """True only for a tool_result that is exactly Claude's denial of `tool`:
+    one string or one text block, nothing else that could carry data."""
+    if block.get("is_error") is not True:
+        return False
+    content = block.get("content")
+    if isinstance(content, list):
+        if len(content) != 1 or not isinstance(content[0], dict) \
+                or content[0].get("type") != "text":
+            return False
+        content = content[0].get("text")
+    head = PERMISSION_DENIAL_HEAD.format(tool=tool)
+    return content in (head, head + PERMISSION_DENIAL_GUIDANCE)
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -40,6 +75,8 @@ class Monitor:
         self.structured_output = None
         self.tool_uses = []
         self.forbidden_tool_uses = []
+        self.denied_tool_uses = []     # out-of-scope calls Claude itself refused
+        self.pending_out_of_scope = {}  # tool_use id -> (entry, error)
         self.invalid_error = None
         self.review_root = os.path.realpath(review_root)
 
@@ -79,7 +116,7 @@ class Monitor:
             return f"out-of-scope Claude {name} target: {target}"
         return None
 
-    def _record_tool_use(self, name, tool_input):
+    def _record_tool_use(self, name, tool_input, tool_use_id=None):
         if not isinstance(name, str) or not name:
             entry = {"tool": "<unnamed>",
                      "input": tool_input if isinstance(tool_input, dict) else {}}
@@ -94,16 +131,39 @@ class Monitor:
             self.invalid_error = f"forbidden Claude tool use: {name}"
             return
         target_error = self._target_error(name, tool_input)
-        if target_error is not None:
-            self.forbidden_tool_uses.append(entry)
-            self.invalid_error = target_error
+        if target_error is None:
+            return
+        if isinstance(tool_use_id, str) and tool_use_id:
+            # Wait for Claude's answer: a permission denial is harmless.
+            self.pending_out_of_scope[tool_use_id] = (entry, target_error)
+            return
+        self.forbidden_tool_uses.append(entry)
+        self.invalid_error = target_error
+
+    def _inspect_tool_result(self, event):
+        content = (event.get("message") or {}).get("content") or []
+        for block in content if isinstance(content, list) else []:
+            if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                continue
+            pending = self.pending_out_of_scope.pop(block.get("tool_use_id"), None)
+            if pending is None:
+                continue
+            entry, target_error = pending
+            if _is_permission_denial(block, entry["tool"]):
+                self.denied_tool_uses.append({**entry, "error": target_error})
+            else:
+                self.forbidden_tool_uses.append(entry)
+                self.invalid_error = f"{target_error} (not denied by Claude)"
 
     def _inspect_tool_use(self, event):
         if event.get("type") == "assistant":
             content = (event.get("message") or {}).get("content") or []
             for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    self._record_tool_use(block.get("name"), block.get("input"))
+                    self._record_tool_use(block.get("name"), block.get("input"),
+                                          block.get("id"))
+        elif event.get("type") == "user":
+            self._inspect_tool_result(event)
         elif event.get("type") == "stream_event":
             inner = event.get("event") or {}
             block = inner.get("content_block") or {}
@@ -115,7 +175,7 @@ class Monitor:
                 # tool names immediately, but defer target validation until the
                 # complete input exists.
                 if name not in INSPECTION_TOOLS or tool_input:
-                    self._record_tool_use(name, tool_input)
+                    self._record_tool_use(name, tool_input, block.get("id"))
 
     def on_event(self, event, now):
         self.last_event_at = now
@@ -153,6 +213,11 @@ class Monitor:
         if self.invalid_error is not None:
             return Decision("kill", INVALID)
         if self.verdict_state is not None:
+            if self.pending_out_of_scope:
+                # A verdict with an unanswered out-of-scope call cannot count.
+                _, target_error = next(iter(self.pending_out_of_scope.values()))
+                self.invalid_error = f"{target_error} (no answer from Claude)"
+                return Decision("kill", INVALID)
             return Decision("finish", self.verdict_state)
         if self.provider_error is not None:
             return Decision("kill", PROVIDER_ERROR)

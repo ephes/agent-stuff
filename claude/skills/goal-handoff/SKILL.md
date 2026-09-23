@@ -272,6 +272,11 @@ commits, reviews, or UI/workflow checkpoints:
 - When review gates are required, say what blocks progress. Unresolved
   Critical/Warning findings block claiming the goal complete; Nits/Suggestions
   must be fixed or explicitly deferred with rationale.
+  Never put a fixed review round, cycle, or retry count in the prompt, even when
+  the target repo's AGENTS.md or CLAUDE.md states one: say to continue review
+  cycles until diminishing returns under `cross-agent-review-cycle`. A cap the
+  next agent reaches forces an interactive rescue. If the repo documents a cap,
+  point it out to the user instead of copying it.
 
 ## Rules
 

@@ -244,6 +244,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             effort=effort, structured_output=monitor.structured_output,
             tool_uses=monitor.tool_uses,
             forbidden_tool_uses=monitor.forbidden_tool_uses,
+            denied_tool_uses=monitor.denied_tool_uses,
         )
         result.write(paths["result"])
     except Exception:
@@ -256,6 +257,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             effort=effort, structured_output=monitor.structured_output,
             tool_uses=monitor.tool_uses,
             forbidden_tool_uses=monitor.forbidden_tool_uses,
+            denied_tool_uses=monitor.denied_tool_uses,
         )
         try:
             result.write(paths["result"])

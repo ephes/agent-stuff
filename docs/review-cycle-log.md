@@ -2,6 +2,31 @@
 
 Status: active log
 
+## 2026-09-23 — Let Claude's own denial settle an out-of-scope reviewer read
+
+Session traces from July to September show about half of all `claude-review-loop`
+INVALID results were Opus reaching outside the review root (a Glob on the raw
+repository, an absolute `/private/tmp/**` pattern). Claude's `dontAsk` mode had
+already refused each of those calls, as a live probe confirmed. The monitor still
+killed the review at the tool-use event, so every such run was lost and restarted.
+The monitor now holds an out-of-scope call until Claude answers it. A permission
+denial is recorded in `denied_tool_uses` and the review continues. Returned data,
+any other error, or a verdict before the answer still makes the result INVALID.
+The review instruction also names the review root and asks for relative paths.
+
+Promotion: promoted - `claude-review-loop`, harness monitor and review instruction
+
+## 2026-09-23 — Keep fixed round caps out of handoff prompts
+
+"At most three review cycles" appeared in 61 handoff prompts, 32 of them in
+September, long after `cross-agent-review-cycle` dropped its cap. The phrase came
+from project AGENTS.md files (podcast, pipy) that handoff drafts copied, and
+agents that hit the cap stopped for an interactive rescue. Asking for review
+cycles until diminishing returns works better in practice. A hard retry limit
+in the harness was rejected for the same reason.
+
+Promotion: promoted - `goal-handoff` (both), `handoff-impl`, `implement-handoff`: never copy a fixed cap into a prompt
+
 ## 2026-09-19 — Check requirements and generated query plans before adding repair work
 
 Feed-cache staleness was initially treated as a defect without an immediate-removal

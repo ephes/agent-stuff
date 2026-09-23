@@ -36,8 +36,14 @@ Verdicts use Claude Code's `--json-schema` structured output. Claude Code emits
 an internal `StructuredOutput` transport event for that schema; it is not a
 repository capability and is the sole non-inspection tool event allowed. The harness rejects
 missing or inconsistent structured output and automatically changes the result
-to `INVALID` if Claude emits any forbidden tool use or requests an inspection
-target outside the canonical review directory. Git diff collection always
+to `INVALID` if Claude emits any forbidden tool use. An inspection call that
+targets something outside the canonical review directory is held until Claude
+answers it: when the answer is exactly Claude's `dontAsk` permission-denial
+text for that tool (one text result, nothing else), no data came back, so the call is recorded in `denied_tool_uses`, the summary prints a
+`denied:` line, and the review continues. Any other answer (data, a
+non-permission error, a reworded denial) or a verdict that arrives before the answer turns the
+result `INVALID`. The review instruction names the review root and asks for
+relative paths, so such calls should be rare. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
 recorded and make a clean verdict scoped. Read the `redactions` manifest and
@@ -338,7 +344,7 @@ bundle headings and context-redaction manifest entries.
 `.claude-review-loop.claim/` (atomic run-directory ownership marker),
 `result.json` (`state`, `items`, `model`, `effort`, `cost`, `started_at`,
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
-`forbidden_tool_uses`, `skipped_files`, `truncations`, `redactions`,
+`forbidden_tool_uses`, `denied_tool_uses`, `skipped_files`, `truncations`, `redactions`,
 `baseline_ref`, `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
 and `scoped_clean`), `events.jsonl` (strict JSONL event
 stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and

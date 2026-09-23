@@ -9,7 +9,8 @@
   provider_error -> emit an error result then exit 1
   forbidden_tool -> emit a forbidden Bash tool event before a CLEAN result
   forbidden_provider_error -> emit forbidden Bash and a provider error together
-  out_of_scope_read -> request /etc/hosts before returning CLEAN
+  out_of_scope_read -> read /etc/hosts (not denied) before returning CLEAN
+  out_of_scope_denied -> request /etc/hosts, get a permission denial, return CLEAN
   missing_structured -> emit a success result without structured output
   stdin_empty -> return CLEAN only when stdin is empty
   stdin_prompt -> return CLEAN only when stdin contains "review prompt"
@@ -98,9 +99,19 @@ def main():
             "type": "result", "subtype": "error", "is_error": True,
             "api_error_status": "529 overloaded", "terminal_reason": "api_error",
         })
-    elif mode == "out_of_scope_read":
+    elif mode in ("out_of_scope_read", "out_of_scope_denied"):
         emit({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Read", "input": {"file_path": "/etc/hosts"}}
+            {"type": "tool_use", "id": "toolu_oos", "name": "Read",
+             "input": {"file_path": "/etc/hosts"}}
+        ]}})
+        if mode == "out_of_scope_denied":
+            answer = {"is_error": True, "content": (
+                "Permission to use Read has been denied because Claude Code "
+                "is running in don't ask mode.")}
+        else:
+            answer = {"content": "127.0.0.1 localhost"}
+        emit({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_oos", **answer}
         ]}})
         emit(result("REVIEW: CLEAN"))
     elif mode == "missing_structured":

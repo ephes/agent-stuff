@@ -100,7 +100,12 @@ Output the prompt and tell the user to paste it into a fresh Claude Code session
 - concrete implementation expectations
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
-- workflow-capture or review-cycle expectations when the target repo documents them
+- workflow-capture or review-cycle expectations when the target repo documents them.
+  Never put a fixed review round, cycle, or retry count in the prompt, even when
+  the target repo's AGENTS.md or CLAUDE.md states one: say to continue review
+  cycles until diminishing returns under `cross-agent-review-cycle`. A cap the
+  next agent reaches forces an interactive rescue. If the repo documents a cap,
+  point it out to the user instead of copying it.
 - a suggested descriptive session slug when the target repo records session or workflow events and the task has a clear name
 - a verified starting state: the branch and commit to start from, the test
   count and any size/limit gate figures measured there, and the paths confirmed

@@ -118,6 +118,11 @@ This skill is for goal tracking and continuation, not full implementation contex
      that is what drives agreement-seeking rounds. Treat nonzero exits,
      failed/stalled reviews, unresolved Critical or Warning findings, and
      scoped-clean reviews with relevant skipped/truncated files as not complete.
+     Never put a fixed review round, cycle, or retry count in the prompt, even
+     when the target repo's AGENTS.md or CLAUDE.md states one: say to continue
+     review cycles until diminishing returns under `cross-agent-review-cycle`. A
+     cap the next agent reaches forces an interactive rescue. If the repo
+     documents a cap, point it out to the user instead of copying it.
    - an explicit verification matrix when the goal names multiple modes,
      product surfaces, policy branches, runtimes, providers, storage paths, or
      platforms. Each named surface/policy combination needs product-path

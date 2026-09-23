@@ -85,7 +85,15 @@ class TestRunner(unittest.TestCase):
         r = self._run("out_of_scope_read", cwd=self.run_dir)
         self.assertEqual(r.state, INVALID)
         self.assertIn("out-of-scope Claude Read target", r.error or "")
+        self.assertIn("not denied by Claude", r.error or "")
         self.assertEqual(r.forbidden_tool_uses[0]["tool"], "Read")
+
+    def test_out_of_scope_call_denied_by_claude_is_recorded_not_fatal(self):
+        r = self._run("out_of_scope_denied", cwd=self.run_dir)
+        self.assertEqual(r.state, CLEAN)
+        self.assertFalse(r.forbidden_tool_uses)
+        self.assertEqual(r.denied_tool_uses[0]["tool"], "Read")
+        self.assertIn("out-of-scope Claude Read target", r.denied_tool_uses[0]["error"])
 
     def test_forbidden_tool_error_precedes_provider_error(self):
         r = self._run("forbidden_provider_error")

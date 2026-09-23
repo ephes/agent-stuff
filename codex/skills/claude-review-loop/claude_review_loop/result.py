@@ -21,6 +21,7 @@ class ReviewResult:
     structured_output: dict | None = None
     tool_uses: list = field(default_factory=list)
     forbidden_tool_uses: list = field(default_factory=list)
+    denied_tool_uses: list = field(default_factory=list)
     baseline_ref: str | None = None
     baseline_commit: str | None = None
     slice_id: str | None = None

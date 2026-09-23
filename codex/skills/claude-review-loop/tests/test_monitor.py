@@ -16,6 +16,36 @@ def result_clean():
             "total_cost_usd": 0.03}
 
 
+def tool_use(name, tool_input, tool_id="toolu_1"):
+    block = {"type": "tool_use", "name": name, "input": tool_input}
+    if tool_id:
+        block["id"] = tool_id
+    return {"type": "assistant", "message": {"role": "assistant", "content": [block]}}
+
+
+DENIAL = ("Permission to use {tool} has been denied because Claude Code is "
+          "running in don't ask mode. IMPORTANT: You *may* attempt to accomplish "
+          "this action using other tools that might naturally be used to "
+          "accomplish this goal, e.g. using head instead of cat. But you *should "
+          "not* attempt to work around this denial in malicious ways, e.g. do not "
+          "use your ability to run tests to execute non-test actions. You should "
+          "only try to work around this restriction in reasonable ways that do "
+          "not attempt to bypass the intent behind this denial. If you believe "
+          "this capability is essential to complete the user's request, STOP and "
+          "explain to the user what you were trying to do and why you need this "
+          "permission. Let the user decide how to proceed.")
+
+
+def tool_result(denied, blocks=False, tool_id="toolu_1", tool="Read", text=None):
+    if text is None:
+        text = DENIAL.format(tool=tool) if denied else "127.0.0.1 localhost"
+    content = [{"type": "text", "text": text}] if blocks else text
+    block = {"type": "tool_result", "tool_use_id": tool_id, "content": content}
+    if denied:
+        block["is_error"] = True
+    return {"type": "user", "message": {"role": "user", "content": [block]}}
+
+
 class TestMonitor(unittest.TestCase):
     def test_continue_when_fresh(self):
         m = mon()
@@ -133,41 +163,93 @@ class TestMonitor(unittest.TestCase):
         m.on_event(result_clean(), now=5)
         self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
 
-    def test_out_of_scope_read_invalidates_clean_result(self):
+    def test_out_of_scope_read_without_id_invalidates_clean_result(self):
         m = mon()
-        m.on_event({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Read", "input": {"file_path": "/etc/hosts"}}
-        ]}}, now=4)
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}, tool_id=None), now=4)
         m.on_event(result_clean(), now=5)
         self.assertEqual(m.decide(now=6, proc_alive=True), Decision("kill", INVALID))
         self.assertIn("out-of-scope Claude Read target", m.invalid_error)
         self.assertEqual(m.forbidden_tool_uses[0]["tool"], "Read")
 
-    def test_traversal_grep_target_is_invalid(self):
+    def test_out_of_scope_call_waits_for_claudes_answer(self):
         m = mon()
-        m.on_event({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Grep", "input": {
-                "pattern": "root", "path": "../outside"
-            }}
-        ]}}, now=4)
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        self.assertEqual(m.decide(now=5, proc_alive=True), Decision("continue", None))
+
+    def test_out_of_scope_call_denied_by_claude_is_recorded_not_fatal(self):
+        m = mon()
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        m.on_event(tool_result(denied=True), now=4)
+        m.on_event(result_clean(), now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
+        self.assertFalse(m.forbidden_tool_uses)
+        self.assertEqual(m.denied_tool_uses[0]["tool"], "Read")
+        self.assertIn("out-of-scope Claude Read target", m.denied_tool_uses[0]["error"])
+
+    def test_denial_as_content_blocks_is_recognized(self):
+        m = mon()
+        m.on_event(tool_use("Glob", {"pattern": "/etc/*"}), now=4)
+        m.on_event(tool_result(denied=True, blocks=True, tool="Glob"), now=4)
+        m.on_event(result_clean(), now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
+
+    def test_denial_text_followed_by_more_content_is_not_a_denial(self):
+        m = mon()
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        denial = tool_result(denied=True, blocks=True)
+        denial["message"]["content"][0]["content"].append(
+            {"type": "text", "text": "127.0.0.1 localhost"})
+        m.on_event(denial, now=4)
+        self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
+        self.assertIn("not denied by Claude", m.invalid_error)
+
+    def test_denial_with_data_in_the_same_block_is_not_a_denial(self):
+        m = mon()
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        m.on_event(tool_result(denied=True, text=DENIAL.format(tool="Read")
+                               + "\n127.0.0.1 localhost"), now=4)
+        self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
+        self.assertIn("not denied by Claude", m.invalid_error)
+
+    def test_denial_naming_another_tool_is_not_a_denial(self):
+        m = mon()
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        m.on_event(tool_result(denied=True, tool="Glob"), now=4)
+        self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
+
+    def test_denial_head_sentence_alone_is_a_denial(self):
+        m = mon()
+        m.on_event(tool_use("Read", {"file_path": "/etc/hosts"}), now=4)
+        m.on_event(tool_result(denied=True, text=DENIAL.format(tool="Read")
+                               .split(" IMPORTANT:")[0]), now=4)
+        m.on_event(result_clean(), now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
+
+    def test_out_of_scope_call_that_returned_data_is_invalid(self):
+        m = mon()
+        m.on_event(tool_use("Grep", {"pattern": "root", "path": "../outside"}), now=4)
+        m.on_event(tool_result(denied=False), now=4)
         self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
         self.assertIn("out-of-scope Claude Grep target", m.invalid_error)
+        self.assertIn("not denied by Claude", m.invalid_error)
 
-    def test_tilde_read_target_is_invalid(self):
+    def test_non_permission_error_is_not_a_denial(self):
         m = mon()
-        m.on_event({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Read", "input": {"file_path": "~/.ssh/config"}}
+        m.on_event(tool_use("Read", {"file_path": "~/.ssh/config"}), now=4)
+        m.on_event({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "is_error": True,
+             "content": "File does not exist."}
         ]}}, now=4)
         self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
         self.assertIn("out-of-scope Claude Read target", m.invalid_error)
 
-    def test_absolute_glob_pattern_is_invalid(self):
+    def test_verdict_with_unanswered_out_of_scope_call_is_invalid(self):
         m = mon()
-        m.on_event({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Glob", "input": {"pattern": "/etc/*"}}
-        ]}}, now=4)
-        self.assertEqual(m.decide(now=5, proc_alive=True), Decision("kill", INVALID))
+        m.on_event(tool_use("Glob", {"pattern": "/etc/*"}), now=4)
+        m.on_event(result_clean(), now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=True), Decision("kill", INVALID))
         self.assertIn("out-of-scope Claude Glob pattern", m.invalid_error)
+        self.assertIn("no answer from Claude", m.invalid_error)
 
     def test_directory_scoped_grep_defaults_to_review_root(self):
         m = mon()
