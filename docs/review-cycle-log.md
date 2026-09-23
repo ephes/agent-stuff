@@ -1169,3 +1169,33 @@ of environment parity. The focused independent repair review closed cleanly.
 
 Promotion: incident — project-specific compatibility repair; no additional
 review-loop rule is warranted.
+
+## 2026-09-23 — A Codex review harness has to prove its own boundary
+
+Building `codex-review-loop` (gpt-6-sol through the Codex CLI) turned up three
+assumptions that were false on the installed Codex 0.156.1:
+
+- `--sandbox read-only` restricts writes, not reads: a file outside the working
+  directory was readable. A named permission profile (`:minimal`, the review
+  root, explicit denies for the temporary directories) confines reads; with
+  `--ignore-user-config` the model still had account app tools, subagents and
+  image generation until each was disabled.
+- `codex exec --json` names no model and did not show a subagent spawn. The
+  session record under `$CODEX_HOME/sessions` holds both, so the verdict is
+  accepted only after that record proves the model and the tools.
+- The npm `codex` launcher exits 0 after its native child dies of SIGTERM: its
+  own handler swallows the signal it re-raises. The harness runs the native
+  binary, whose status is the signal's.
+
+A boundary canary using the production review instruction passed vacuously: a
+compliant reviewer never tried to leave its root. The canary drives the
+production command with a canary instruction and requires recorded attempts.
+
+Five read-only gpt-6-sol rounds: 5 Critical and 4 Warning in total, every one a
+fail-open or missing-result path, several introduced by the previous repair
+(a liveness sample standing in for signal delivery, then 143 standing in for a
+signal death, then the launcher's exit 0). The fifth round closed clean.
+
+Promotion: promoted — codex-review-loop, "Read boundary", "What makes a
+verdict count" and "Lifecycle and timing"; cross-agent-review-cycle, Codex
+branch pointer to the harness.

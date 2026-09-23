@@ -17,6 +17,7 @@ chezmoi symlinks.
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
 | Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-5.6-sol`; shares the bundle and slice ledger with `claude-review-loop` |
+| Claude | `codex-review-loop` | Fail-closed Codex gate using only `gpt-6-sol` at high reasoning; proves the model from Codex's session record, confines reads to a harness-owned review root, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
@@ -51,6 +52,7 @@ agent-stuff/
       handoff-impl/
       handoff-review/
       pi-review-loop/
+      codex-review-loop/
       mermaid-marked2-markdown/
       summarize-youtube/
     commands/

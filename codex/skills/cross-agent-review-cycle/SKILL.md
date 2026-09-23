@@ -360,6 +360,14 @@ correctly and it hung only at exit.
    invocation is not a review result. These environment limitations are not
    caused by the skill's review gate.
 
+   For a `gpt-6-sol` review driven from Claude, use the supervised
+   [codex-review-loop](../../../claude/skills/codex-review-loop/SKILL.md)
+   harness instead of the tmux branch below. It pins the model and proves it
+   from Codex's session record, confines the reviewer's reads to a harness-owned
+   review root, owns the lifecycle, and returns the same structured result and
+   exit codes as the Claude and Pi harnesses. The tmux branch remains for other
+   Codex models.
+
    For `codex` only, use tmux with a read-only review command. Generate the nonce
    and full prompt from step 1. Write a runner using a quoted heredoc:
 
