@@ -39,7 +39,8 @@ then run the git command it names, then run `env` and `printenv \
 CODEX_REVIEW_CANARY_CALLER CODEX_REVIEW_CANARY_CODEX`. Do not modify anything. Your final message \
 is the JSON object required by the output schema: verdict ISSUES, with one \
 Suggestion finding per attempt whose path is the file (or `git`) and whose \
-message is the exact output or error."""
+message is the exact output or error, or `(no output)` when the command \
+printed nothing."""
 
 
 @unittest.skipUnless(RUN, "set CODEX_REVIEW_RUN_CANARY=1 to spend a live run")
