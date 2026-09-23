@@ -118,6 +118,10 @@ def _build_parser():
                         f"(default {DEFAULT_MAX_CONCURRENT})")
     p.add_argument("--model", type=_model, default=command_mod.REVIEW_MODEL,
                    help=f"review model (only {command_mod.REVIEW_MODEL})")
+    p.add_argument("--effort", choices=command_mod.REVIEW_EFFORTS,
+                   default=command_mod.REVIEW_EFFORT,
+                   help="reasoning effort, proven per turn from the session "
+                        f"record (default {command_mod.REVIEW_EFFORT})")
     p.add_argument("--stall-timeout", type=_positive_float, default=600)
     p.add_argument("--review-deadline", type=_positive_float, default=2700)
     p.add_argument("--exit-grace", type=_positive_float, default=30)
@@ -173,12 +177,13 @@ def _claim_run_dir(run_dir):
     return True
 
 
-def _fail(run_dir, model, message, state=CRASHED, kind=KIND_PREFLIGHT, **extra):
+def _fail(run_dir, model, message, state=CRASHED, kind=KIND_PREFLIGHT,
+          effort=command_mod.REVIEW_EFFORT, **extra):
     print(f"{PROG}: {message}", file=sys.stderr)
     now = time.monotonic()
     try:
         ReviewResult(state=state, items=[], model=model,
-                     effort=command_mod.REVIEW_EFFORT, cost=None,
+                     effort=effort, cost=None,
                      started_at=now, ended_at=now, failure_kind=kind,
                      error=message, **extra).write(
                          os.path.join(run_dir, "result.json"))
@@ -249,6 +254,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
     if not _claim_run_dir(args.run_dir):
         return 2
     model = args.model
+    effort = args.effort
     review_root = os.path.join(args.run_dir, REVIEW_ROOT_NAME)
     os.mkdir(review_root, 0o700)
     bundle_path = os.path.join(review_root, BUNDLE_NAME)
@@ -274,19 +280,21 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
         elif not isinstance(err, str):
             err = (err or b"").decode(errors="replace")
         return _fail(args.run_dir, model,
-                     f"cannot build review bundle: {(err or '').strip()}")
+                     f"cannot build review bundle: {(err or '').strip()}",
+                     effort=effort)
 
     if not b.has_changes:
         return _fail(args.run_dir, model,
                      "no changes to review; refusing to treat an empty bundle "
-                     "as clean", state=INVALID)
+                     "as clean", state=INVALID, effort=effort)
 
     try:
         evidence, evidence_redactions = evidence_mod.copy_evidence(
             args.evidence_file, review_root,
             max_size=args.max_evidence_file_size)
     except (OSError, ValueError) as e:
-        return _fail(args.run_dir, model, f"cannot prepare evidence: {e}")
+        return _fail(args.run_dir, model, f"cannot prepare evidence: {e}",
+                     effort=effort)
     for entry in evidence:
         source = os.path.realpath(entry["source"])
         entry["display"] = (os.path.relpath(source, repo_abs)
@@ -297,7 +305,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
         try:
             native, launch_env = native_mod.resolve()
         except native_mod.NativeCodexNotFound as exc:
-            return _fail(args.run_dir, model, str(exc))
+            return _fail(args.run_dir, model, str(exc), effort=effort)
         codex_bin = [native]
         extra_env = {**launch_env, **(extra_env or {})}
 
@@ -314,7 +322,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
     cmd = command_mod.codex_cmd(
         codex_bin=codex_bin[0], review_root=review_root,
         schema_path=schema_path, last_message_path=last_message_path,
-        instruction=instruction)
+        instruction=instruction, effort=effort)
     cmd = codex_bin + cmd[1:]
 
     meta = {"harness_pid": os.getpid(), "cwd": repo_abs, "command": PROG,
@@ -326,7 +334,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
             result = run_review(
                 cmd=cmd, run_dir=args.run_dir, prompt_path=prompt_path,
                 last_message_path=last_message_path, model=model,
-                effort=command_mod.REVIEW_EFFORT,
+                effort=effort,
                 stall_timeout=args.stall_timeout,
                 global_deadline=args.review_deadline,
                 exit_grace=args.exit_grace, extra_env=extra_env,
@@ -348,7 +356,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
     if args.slice_id and result.state not in FAILED:
         ledger_path = ledger_mod.path_for(args.ledger_dir, args.slice_id)
         record = ledger_mod.record_for(
-            result=result, model=model, effort=command_mod.REVIEW_EFFORT,
+            result=result, model=model, effort=effort,
             run_dir=args.run_dir, baseline_ref=result.baseline_ref,
             baseline_commit=result.baseline_commit)
         try:
@@ -373,7 +381,7 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
 
     scope = " (scoped)" if result.scoped_clean else ""
     print(f"REVIEW: {result.state}{scope}  items={len(result.items)}  "
-          f"model={model}  effort={command_mod.REVIEW_EFFORT}  "
+          f"model={model}  effort={effort}  "
           f"result={os.path.join(args.run_dir, 'result.json')}")
     if result.baseline_commit:
         print(f"  baseline={result.baseline_commit}"

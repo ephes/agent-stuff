@@ -24,6 +24,9 @@ import os
 
 REVIEW_MODEL = "gpt-6-sol"
 REVIEW_EFFORT = "high"
+#: The efforts a caller may ask for. The audit pins every turn to the one asked
+#: for, so a run at medium is proven medium exactly as the default is proven high.
+REVIEW_EFFORTS = ("high", "medium")
 PROFILE_NAME = "codex_review_loop"
 
 #: Features the reviewer must not have. Each one either reaches outside the
@@ -60,14 +63,16 @@ def filesystem_profile(review_root):
 
 
 def codex_cmd(*, codex_bin, review_root, schema_path, last_message_path,
-              instruction):
+              instruction, effort=REVIEW_EFFORT):
+    if effort not in REVIEW_EFFORTS:
+        raise ValueError(f"effort {effort!r} is not one of {REVIEW_EFFORTS}")
     cmd = [
         codex_bin, "-a", "never", "exec",
         "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
         "--json",
         "-C", os.path.realpath(review_root),
         "-m", REVIEW_MODEL,
-        "-c", f"model_reasoning_effort={toml_string(REVIEW_EFFORT)}",
+        "-c", f"model_reasoning_effort={toml_string(effort)}",
         "-c", f"default_permissions={toml_string(PROFILE_NAME)}",
         "-c", f"permissions.{PROFILE_NAME}.filesystem="
               + filesystem_profile(review_root),

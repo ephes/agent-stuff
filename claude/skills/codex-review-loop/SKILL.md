@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6-sol` at high reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6-sol review\", \"codex review before commit\", \"run the codex review loop\"."
+description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
 # Codex Review Loop
@@ -109,7 +109,8 @@ A verdict is accepted only when all of these hold; otherwise the result is
 - **The model is proven, not assumed.** `codex exec --json` does not say which
   model answered, so the harness reads Codex's own session record
   (`$CODEX_HOME/sessions/.../rollout-*-<thread>.jsonl`). Every turn must name
-  `gpt-6-sol` at effort `high`, and the record must hold no model-reroute
+  `gpt-6-sol` at the effort the run asked for (`--effort`, default `high`),
+  and the record must hold no model-reroute
   entry. A missing record is `model_unproven`, not a pass. The record is copied
   to `session.jsonl` in the run directory.
 - **The review stayed one direct context.** Only the tools `exec` (the code-mode
@@ -217,7 +218,10 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 
 ## Hard rules
 
-- `gpt-6-sol` at `high` only. `--model` accepts nothing else.
+- `gpt-6-sol` only. `--model` accepts nothing else.
+- Effort `high` by default; `--effort medium` only when the user asked for
+  medium. Nothing else is accepted, and the run is proven at the effort it
+  asked for, so a medium run that answered at another effort is `INVALID`.
 - A commit-gate "clean" is exit `0` plus your judgement that any `(scoped)`
   omissions do not matter. Exits `1`–`4` are never clean.
 - One review at a time by default (`--max-concurrent`,
@@ -227,7 +231,8 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 
 ## Useful flags
 
-`--context-file` (repeatable), `--evidence-file` (repeatable),
+`--effort` (`high` default, or `medium`), `--context-file` (repeatable),
+`--evidence-file` (repeatable),
 `--record-baseline`, `--baseline-ref`, `--cumulative`, `--slice-id`, `--ledger-dir` (default
 `~/.cache/review-loop/ledger`, shared with the sibling harnesses),
 `--staged-only`, `--max-bundle-bytes` (default 2MB), `--max-file-size`,

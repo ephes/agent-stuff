@@ -38,6 +38,15 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertEqual(result["observed_efforts"], ["high"])
         self.assertIsNone(result["failure_kind"])
 
+    def test_medium_effort_is_passed_through_and_proven(self):
+        proc, result, _ = self.fx.run("clean", "--effort", "medium")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("effort=medium", proc.stdout)
+        with open(os.path.join(self.fx.home, "last-argv.json")) as fh:
+            self.assertIn('model_reasoning_effort="medium"', json.load(fh))
+        self.assertEqual(result["effort"], "medium")
+        self.assertEqual(result["observed_efforts"], ["medium"])
+
     def test_issues_exits_one_with_items(self):
         proc, result, _ = self.fx.run("issues")
         self.assertEqual(proc.returncode, 1, proc.stderr)
@@ -90,6 +99,12 @@ class TestCliFailsClosed(unittest.TestCase):
 
     def test_another_effort_is_invalid(self):
         self.assertFailed("wrong_effort", "INVALID", "model_mismatch")
+
+    def test_another_effort_than_asked_for_is_invalid(self):
+        # The record says low; asking for medium does not widen what passes.
+        result, _ = self.assertFailed("wrong_effort", "INVALID", "model_mismatch",
+                                      "--effort", "medium")
+        self.assertIn("not medium", result["error"])
 
     def test_a_model_reroute_is_invalid(self):
         self.assertFailed("reroute", "INVALID", "model_mismatch")
@@ -225,6 +240,13 @@ class TestCliPreflight(unittest.TestCase):
         proc, result, run_dir = self.fx.run("clean", "--model", "gpt-5.6-sol")
         self.assertEqual(proc.returncode, 2)
         self.assertIn("only gpt-6-sol", proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
+
+    def test_an_unlisted_effort_is_refused_before_anything_runs(self):
+        proc, result, _ = self.fx.run("clean", "--effort", "low")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("--effort", proc.stderr)
+        self.assertEqual(result["state"], "INVALID")
         self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
 
     def test_a_non_empty_run_dir_is_refused(self):

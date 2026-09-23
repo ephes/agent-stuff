@@ -56,6 +56,14 @@ class TestCommand(unittest.TestCase):
         self.assertNotIn("--sandbox", c)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", c)
 
+    def test_effort_is_selectable_but_only_from_the_list(self):
+        kw = dict(codex_bin="codex", review_root=self.root, schema_path="s.json",
+                  last_message_path="m.json", instruction="x")
+        cmd = command.codex_cmd(effort="medium", **kw)
+        self.assertIn('model_reasoning_effort="medium"', cmd)
+        with self.assertRaises(ValueError):
+            command.codex_cmd(effort="low", **kw)
+
     def test_disables_every_listed_feature(self):
         disabled = {self.cmd[i + 1] for i, a in enumerate(self.cmd) if a == "--disable"}
         self.assertEqual(disabled, set(command.DISABLED_FEATURES))

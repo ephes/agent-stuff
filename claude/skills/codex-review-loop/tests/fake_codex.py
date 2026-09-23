@@ -58,6 +58,12 @@ def main():
     with open(os.path.join(home, "last-env.json"), "w") as fh:
         json.dump(dict(os.environ), fh)
     out_path = arg_after("-o")
+    # Report the effort the harness asked for, as Codex does; wrong_effort
+    # reports another one.
+    effort = EFFORT
+    for i, arg in enumerate(sys.argv[:-1]):
+        if arg == "-c" and sys.argv[i + 1].startswith("model_reasoning_effort="):
+            effort = json.loads(sys.argv[i + 1].split("=", 1)[1])
 
     if mode == "crash":
         sys.exit(3)
@@ -87,7 +93,7 @@ def main():
     if mode != "no_turn_context":
         records.append({"type": "turn_context", "payload": {
             "model": "gpt-5.6-sol" if mode == "wrong_model" else MODEL,
-            "effort": "medium" if mode == "wrong_effort" else EFFORT}})
+            "effort": "low" if mode == "wrong_effort" else effort}})
     records.append({"type": "response_item", "payload": {
         "type": "custom_tool_call", "name": "exec",
         "input": "text('reroute is just a word in reviewed code')"}})
