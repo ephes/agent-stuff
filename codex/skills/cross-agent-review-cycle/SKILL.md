@@ -570,6 +570,9 @@ A reviewer is a source of claims, not verdicts you owe agreement to.
   behavioral-preservation evidence, not a reproduction. Run it against the old
   code and require it to fail; assert that an injected fault actually executed,
   since a rollback test returning False can pass before its failure runs.
+- A mutation result counts only when the unmutated tree builds and passes in the
+  same run. A repair that did not compile once let the mutated copy - which
+  did - report its test as catching the mutation.
 - When successive rounds keep finding *new* defects in one component rather than
   narrowing on one argument, the design is the finding. Three rounds once spent
   their Criticals on a hand-rolled encoder for git tree entries - submodules,

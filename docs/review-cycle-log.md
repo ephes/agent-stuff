@@ -1199,3 +1199,14 @@ signal death, then the launcher's exit 0). The fifth round closed clean.
 Promotion: promoted — codex-review-loop, "Read boundary", "What makes a
 verdict count" and "Lifecycle and timing"; cross-agent-review-cycle, Codex
 branch pointer to the harness.
+
+## 2026-09-23 — A mutation run proved nothing because the repair did not build
+
+In the emerge-ios Merge result series, a cumulative-review repair did not
+compile. The mutation run swapped in a mutated copy that did compile, and its
+test failed, so the run read as "caught". It was evidence about code that could
+not run. Redone against a build verified first; every later mutation run built
+the unmutated tree before mutating.
+
+Promotion: promoted - cross-agent-review-cycle, "Judging the evidence a repair offers".
+
