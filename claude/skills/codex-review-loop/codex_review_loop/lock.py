@@ -1,7 +1,9 @@
 """Codex's review slot pool is the shared pool from `claude-review-loop`.
 
-Only the reviewer identity differs. The default is one slot: concurrent Codex
-reviews on one account slowed each other badly enough to hit their deadlines.
+Only the reviewer identity differs. The default matches `claude-review-loop`:
+ten concurrent reviews, so sessions in different repositories never queue
+behind one another. A single slot made every other session wait for the one
+review in flight.
 """
 import os
 import subprocess
@@ -14,7 +16,7 @@ write_meta = _shared.write_meta
 read_meta = _shared.read_meta
 pid_alive = _shared.pid_alive
 
-DEFAULT_MAX_CONCURRENT = 1
+DEFAULT_MAX_CONCURRENT = 10
 
 
 def _pgid_is_codex(pgid):

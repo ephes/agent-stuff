@@ -11,8 +11,8 @@ Skills and command prompts for Claude Code.
 | `handoff-impl` | Generate an implementation prompt for a second agent |
 | `handoff-review` | Generate a code review prompt for a second agent |
 | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
-| `pi-review-loop` | Fail-closed Pi review gate using only `openai-codex/gpt-5.6-sol`; no provider or local-model fallback. Builds its bundle and slice ledger with the shared modules from `claude-review-loop` |
-| `codex-review-loop` | Fail-closed Codex review gate using only `gpt-6-sol` at high reasoning; no model, provider or reviewer fallback. The reviewer reads only a harness-owned review root, and the model is proven from Codex's session record. Uses the shared bundle, slot pool and slice ledger from `claude-review-loop` |
+| `pi-review-loop` | Fail-closed Pi review gate using only `openai-codex/gpt-6-sol` at medium thinking; no provider or local-model fallback. Builds its bundle and slice ledger with the shared modules from `claude-review-loop` |
+| `codex-review-loop` | Default reviewer for Claude implementers. Fail-closed Codex review gate using only `gpt-6-sol` at medium reasoning (high on request); no model, provider or reviewer fallback. The reviewer reads only a harness-owned review root, and the model is proven from Codex's session record. Uses the shared bundle, slot pool and slice ledger from `claude-review-loop` |
 | `claude-review-loop` (shared dependency) | Supervised Claude gate loaded from `../codex/skills/claude-review-loop` |
 | `summarize-youtube` | Summarize a YouTube video via transcript extraction |
 

@@ -11,13 +11,13 @@ chezmoi symlinks.
 | Codex, Claude | `cross-agent-review-cycle` | Canonical value-driven different-family review loop; owns the continuation, stopping, containment, and commit-gate rules. One shared copy under `codex/skills/`, symlinked for both agents |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
-| Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus default) |
+| Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default); default reviewer for Codex and Pi implementers |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
-| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-5.6-sol`; shares the bundle and slice ledger with `claude-review-loop` |
-| Claude | `codex-review-loop` | Fail-closed Codex gate using only `gpt-6-sol` at high reasoning (medium on request, `--effort medium`); proves the model from Codex's session record, confines reads to a harness-owned review root, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
+| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-6-sol` at medium thinking (high on request); shares the bundle and slice ledger with `claude-review-loop` |
+| Claude | `codex-review-loop` | Default reviewer for Claude implementers: fail-closed Codex gate using only `gpt-6-sol` at medium reasoning (high on request, `--effort high`); proves the model from Codex's session record, confines reads to a harness-owned review root, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
 | Claude | `mermaid-marked2-markdown` | Create Marked 2-safe Mermaid Markdown for light and dark mode |
 | Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `summarize-youtube` | Summarize a YouTube video via transcript extraction |

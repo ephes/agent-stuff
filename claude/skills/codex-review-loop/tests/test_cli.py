@@ -35,17 +35,17 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertIn("REVIEW: CLEAN", proc.stdout)
         self.assertEqual(result["state"], "CLEAN")
         self.assertEqual(result["observed_models"], ["gpt-6-sol"])
-        self.assertEqual(result["observed_efforts"], ["high"])
+        self.assertEqual(result["observed_efforts"], ["medium"])
         self.assertIsNone(result["failure_kind"])
 
-    def test_medium_effort_is_passed_through_and_proven(self):
-        proc, result, _ = self.fx.run("clean", "--effort", "medium")
+    def test_high_effort_is_passed_through_and_proven(self):
+        proc, result, _ = self.fx.run("clean", "--effort", "high")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("effort=medium", proc.stdout)
+        self.assertIn("effort=high", proc.stdout)
         with open(os.path.join(self.fx.home, "last-argv.json")) as fh:
-            self.assertIn('model_reasoning_effort="medium"', json.load(fh))
-        self.assertEqual(result["effort"], "medium")
-        self.assertEqual(result["observed_efforts"], ["medium"])
+            self.assertIn('model_reasoning_effort="high"', json.load(fh))
+        self.assertEqual(result["effort"], "high")
+        self.assertEqual(result["observed_efforts"], ["high"])
 
     def test_issues_exits_one_with_items(self):
         proc, result, _ = self.fx.run("issues")
@@ -101,10 +101,10 @@ class TestCliFailsClosed(unittest.TestCase):
         self.assertFailed("wrong_effort", "INVALID", "model_mismatch")
 
     def test_another_effort_than_asked_for_is_invalid(self):
-        # The record says low; asking for medium does not widen what passes.
+        # The record says low; asking for high does not widen what passes.
         result, _ = self.assertFailed("wrong_effort", "INVALID", "model_mismatch",
-                                      "--effort", "medium")
-        self.assertIn("not medium", result["error"])
+                                      "--effort", "high")
+        self.assertIn("not high", result["error"])
 
     def test_a_model_reroute_is_invalid(self):
         self.assertFailed("reroute", "INVALID", "model_mismatch")

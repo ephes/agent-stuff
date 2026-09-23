@@ -57,11 +57,11 @@ class TestModelPreflightIsolation(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             captured.update(kwargs)
-            return mock.Mock(returncode=0, stdout="openai-codex/gpt-5.6-sol\n", stderr="")
+            return mock.Mock(returncode=0, stdout="openai-codex/gpt-6-sol\n", stderr="")
 
         with mock.patch.dict(os.environ, {"PI_CODING_AGENT_DIR": "/stale"}, clear=False):
             with mock.patch("pi_review_loop.model.subprocess.run", fake_run):
-                model.ensure_model_available("openai-codex/gpt-5.6-sol")
+                model.ensure_model_available("openai-codex/gpt-6-sol")
 
         self.assertEqual(
             captured["env"]["PI_CODING_AGENT_DIR"],

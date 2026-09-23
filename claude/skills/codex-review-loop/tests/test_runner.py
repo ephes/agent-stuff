@@ -64,7 +64,7 @@ class TestRunnerSessionLiveness(unittest.TestCase):
             return runner.run_review(
                 cmd=[sys.executable, FAKE, "-o", last, "-"], run_dir=self.run_dir,
                 prompt_path=self.prompt, last_message_path=last,
-                model="gpt-6-sol", effort="high", stall_timeout=1.0,
+                model="gpt-6-sol", effort="medium", stall_timeout=1.0,
                 global_deadline=60, env=env, extra_env=controls,
                 poll_interval=0.1)
 

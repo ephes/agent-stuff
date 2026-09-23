@@ -8,8 +8,8 @@ description: Legacy compatibility alias for claude-review-loop. Use only when an
 Use `claude-review-loop` for new workflows. Preserve this alias only for callers
 that have not migrated yet.
 
-The legacy executable forwards to the canonical harness with Opus as its
-default:
+The legacy executable forwards to the canonical harness unchanged, so it runs
+the canonical default reviewer (Opus 5.5 at `medium`):
 
 ```bash
 python3 ~/projects/agent-stuff/codex/skills/opus-review-loop/bin/opus-review-loop \

@@ -21,7 +21,7 @@ write_meta = _shared.write_meta
 read_meta = _shared.read_meta
 pid_alive = _shared.pid_alive
 
-DEFAULT_MAX_CONCURRENT = 3
+DEFAULT_MAX_CONCURRENT = 10
 
 
 def _pgid_is_pi(pgid):

@@ -173,7 +173,7 @@ def _build_parser():
         ),
     )
     p.add_argument("--model", default=None,
-                   help="Claude model id or alias (default: opus)")
+                   help="Claude model id or alias (default: claude-opus-5-5)")
     p.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
     p.add_argument("--stall-timeout", type=float, default=300)
     p.add_argument("--retry-grace", type=float, default=30)
@@ -210,13 +210,16 @@ def _build_parser():
 
 
 # Reasoning effort tracks the model generation, not its price tier: a newer
-# generation reasons better per token, so `xhigh` belongs to the Opus 4.x
-# generation that needed it. Everything current - the `opus` alias (Opus 5),
-# Fable, Sonnet, and any model id this table does not recognize - defaults to
-# `high`. Asking for a stronger model must never silently change effort too;
-# `--effort` always wins when a run wants a different point on that axis.
+# generation reasons better per token. `xhigh` belongs to the Opus 4.x
+# generation that needed it, and Opus 5.5 - the default reviewer - reviews at
+# `medium`. Everything else - the `opus` alias, Opus 5, Fable, Sonnet, and any
+# model id this table does not recognize - defaults to `high`. Asking for a
+# stronger model must never silently change effort too; `--effort` always wins
+# when a run wants a different point on that axis.
 LEGACY_TOP_EFFORT_MODELS = ("claude-opus-4",)
 TOP_EFFORT = "xhigh"
+MEDIUM_EFFORT_MODELS = ("claude-opus-5-5",)
+MEDIUM_EFFORT = "medium"
 DEFAULT_EFFORT = "high"
 
 
@@ -224,6 +227,8 @@ def _default_effort(model):
     name = model.lower()
     if any(legacy in name for legacy in LEGACY_TOP_EFFORT_MODELS):
         return TOP_EFFORT
+    if any(current in name for current in MEDIUM_EFFORT_MODELS):
+        return MEDIUM_EFFORT
     return DEFAULT_EFFORT
 
 

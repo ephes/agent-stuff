@@ -3,8 +3,8 @@ from claude_review_loop import model
 
 
 class TestResolveModel(unittest.TestCase):
-    def test_defaults_to_opus_alias(self):
-        self.assertEqual(model.resolve_model(), "opus")
+    def test_defaults_to_pinned_opus_5_5(self):
+        self.assertEqual(model.resolve_model(), "claude-opus-5-5")
 
     def test_explicit_model_passes_through(self):
         self.assertEqual(model.resolve_model("claude-opus-4-8"), "claude-opus-4-8")

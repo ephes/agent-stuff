@@ -37,7 +37,7 @@ class TestPgidIdentity(unittest.TestCase):
         self.assertFalse(self.check("python3 server.py\n"))
         self.assertFalse(self.check(""))
         self.assertFalse(lock._pgid_is_codex(1))
-        self.assertEqual(lock.DEFAULT_MAX_CONCURRENT, 1)
+        self.assertEqual(lock.DEFAULT_MAX_CONCURRENT, 10)
 
 
 if __name__ == "__main__":

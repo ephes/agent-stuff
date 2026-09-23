@@ -1,6 +1,6 @@
 ---
 name: pi-review-loop
-description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-5.6 Sol model at high reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
+description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-6 Sol model at medium (or, on request, high) reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
 # Pi Review Loop
@@ -114,7 +114,7 @@ implement and fix; Pi reviews with fresh context.
 
 ## Hard rules
 
-- Pi code review uses `openai-codex/gpt-5.6-sol` only. Claude models (Opus,
+- Pi code review uses `openai-codex/gpt-6-sol` only. Claude models (Opus,
   Sonnet, Fable, or any other Anthropic model) must run through Claude Code and
   `claude-review-loop`, never through Pi.
 - Never use OpenRouter or a local model such as Qwen/Ollama/LM Studio for a
@@ -123,10 +123,12 @@ implement and fix; Pi reviews with fresh context.
   another model, provider, or transport.
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
   are irrelevant. Exit `1`/`2`/`3` are never clean.
-- Bounded parallelism only — the harness enforces a per-user slot pool. It now
-  defaults to 3 concurrent Pi reviews to avoid a cross-repo bottleneck while still
-  limiting provider pressure. Set `PI_REVIEW_MAX_CONCURRENT=1` or pass
-  `--max-concurrent 1` if provider stalls return.
+- Bounded parallelism only — the harness enforces a per-user slot pool. It
+  defaults to 10 concurrent Pi reviews, the same as the Claude and Codex
+  harnesses, so sessions in different repositories do not queue behind each
+  other. Live holders honor the lowest limit any of them requested, so one run
+  with `PI_REVIEW_MAX_CONCURRENT=1` or `--max-concurrent 1` serializes everyone
+  until it ends; lower it only when provider stalls make that deliberate.
   The pool is the shared implementation from `claude-review-loop`, so a slot is
   held by an advisory lock on a sibling guard file rather than by the visible
   directory alone: a displaced or externally deleted slot directory cannot hand
@@ -186,14 +188,15 @@ subprocesses somewhere else deliberately; that override is honored, ambient
 ## Useful flags
 
 `--model <id>` exists for explicitness but accepts only
-`openai-codex/gpt-5.6-sol`; any other value fails before Pi starts. When omitted,
+`openai-codex/gpt-6-sol`; any other value fails before Pi starts. When omitted,
 the harness requires that same model to appear in Pi's authenticated listing.
-Pi runs at `high` reasoning. `--review-deadline <s>` (hard
+`--effort <level>` sets Pi's thinking level: `medium` by default, `high` only
+when the user asked for it. `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 180), `--staged-only`,
 `--max-bundle-bytes <n>` (default 2MB), `--max-file-size <n>` (default 256KB, untracked
 files larger are skipped), `--max-diff-bytes-per-file <n>` (default 256KB, a single
 file's diff is truncated past this), `--lock-dir <dir>` (slot-pool directory),
-`--max-concurrent <n>` (default 3, or `PI_REVIEW_MAX_CONCURRENT`),
+`--max-concurrent <n>` (default 10, or `PI_REVIEW_MAX_CONCURRENT`),
 `--record-baseline` (snapshot the reviewed content and report `baseline_commit`),
 `--baseline-ref <commit-ish>` (review only what changed since that baseline; not
 combinable with `--staged-only`), `--slice-id <id>` (record the round in the

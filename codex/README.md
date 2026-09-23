@@ -10,7 +10,7 @@ Skills for the Codex coding agent.
 | `cross-agent-review-cycle` | Canonical value-driven different-family review loop, shared by Codex and Claude; Claude reviews use `claude-review-loop` |
 | `goal-handoff` | Generate a compact goal condition for another agent session |
 | `implement-handoff` | Generate an implementation prompt for a second agent |
-| `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus default) |
+| `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default) |
 | `review-handoff` | Generate a code review prompt for a second agent |
 
 `opus-review-loop` remains in the repository as an uninstalled compatibility

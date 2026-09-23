@@ -10,7 +10,7 @@ Claude Code model as a fresh-context reviewer and read its structured verdict.
 Treat unresolved Critical/Warning findings as fail-closed; treat Suggestions
 proportionately and stop cycling when further review no longer adds material
 value. `cross-agent-review-cycle` owns the continuation, stopping, and
-containment rules for the loop around this harness. Default to `opus`; select another model with `--model` or the calling
+containment rules for the loop around this harness. Default to `claude-opus-5-5` (Opus 5.5) at `medium` effort; select another model with `--model` or the calling
 workflow's `REVIEWER_MODEL`.
 The harness owns Claude's whole lifecycle (spawn, observe, kill/reap), so you never poll
 a process or guess whether Claude is stuck. A hung or blocked spawned review is detected,
@@ -72,7 +72,8 @@ are not allowed. Separate harness invocations may run concurrently.
      --repo "$PWD" --run-dir "$(mktemp -d)/claude-review"
    ```
 
-   This uses Opus by default. To choose another installed Claude model alias:
+   This uses Opus 5.5 (`claude-opus-5-5`) at `medium` effort by default. To
+   choose another installed Claude model id or alias:
 
    ```bash
    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
@@ -307,10 +308,11 @@ are not allowed. Separate harness invocations may run concurrently.
 
 ## Useful flags
 
-`--model <id>` (default: `opus`), `--effort <level>` (default `high`; only the
-Opus 4.x generation defaults to `xhigh`, which is what it needed - a newer
-generation reasons better per token, so asking for a stronger model must not
-silently raise effort as well), `--review-deadline <s>` (hard
+`--model <id>` (default: `claude-opus-5-5`), `--effort <level>` (default
+`medium` for Opus 5.5, `high` for every other model including the `opus` alias,
+and `xhigh` only for the Opus 4.x generation that needed it - a newer generation
+reasons better per token, so asking for a stronger model must not silently
+raise effort as well), `--review-deadline <s>` (hard
 per-review cap, default 1500), `--stall-timeout <s>` (default 300),
 `--retry-grace <s>` (default 30), `--staged-only`,
 `--slice-id <id>` (record the round in the slice ledger and report convergence),

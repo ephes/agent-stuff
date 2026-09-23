@@ -113,7 +113,7 @@ class TestLiveBoundary(unittest.TestCase):
         self.assertIn(result.state, ("CLEAN", "ISSUES"),
                       f"{result.failure_kind}: {result.error}")
         self.assertEqual(set(result.observed_models), {"gpt-6-sol"})
-        self.assertEqual(set(result.observed_efforts), {"high"})
+        self.assertEqual(set(result.observed_efforts), {"medium"})
         self.assertEqual(result.forbidden_tool_uses, [])
         with open(os.path.join(self.run_dir, "session.jsonl")) as fh:
             record = fh.read()

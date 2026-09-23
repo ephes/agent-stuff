@@ -1,11 +1,14 @@
-"""Resolve the Claude Code model alias used by the review harness."""
+"""Resolve the Claude model the review harness runs."""
 
 
-DEFAULT_MODEL = "opus"
+# Pinned to a model id rather than the `opus` alias, so the default reviewer and
+# its default effort change together, deliberately, instead of whenever the
+# alias moves.
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 def resolve_model(value=None, fallback=DEFAULT_MODEL):
-    """Return an explicit model value or the default Claude Code alias."""
+    """Return an explicit model value or the default Claude model."""
     return value or fallback
 
 

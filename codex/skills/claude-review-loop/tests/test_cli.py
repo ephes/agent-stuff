@@ -201,8 +201,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         with open(os.path.join(run_dir, "result.json")) as fh:
             result = json.load(fh)
-        self.assertEqual(result["model"], "opus")
-        self.assertEqual(result["effort"], "high")
+        self.assertEqual(result["model"], "claude-opus-5-5")
+        self.assertEqual(result["effort"], "medium")
 
     def test_issues_exit_one(self):
         env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} issues")
@@ -779,7 +779,10 @@ class TestClaudeCmd(unittest.TestCase):
         # xhigh belonged to the Opus 4.x generation.
         self.assertEqual(cli._default_effort("claude-opus-4-7"), "xhigh")
         self.assertEqual(cli._default_effort("claude-opus-4-8"), "xhigh")
-        # Current models reason well at high, whatever they cost.
+        # The default reviewer, Opus 5.5, reviews at medium.
+        self.assertEqual(cli._default_effort("claude-opus-5-5"), "medium")
+        self.assertEqual(cli._default_effort(cli.model_mod.DEFAULT_MODEL), "medium")
+        # Everything else reasons well at high, whatever it costs.
         self.assertEqual(cli._default_effort("opus"), "high")
         self.assertEqual(cli._default_effort("claude-opus-5"), "high")
         self.assertEqual(cli._default_effort("fable"), "high")

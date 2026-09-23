@@ -9,7 +9,7 @@ import time
 from . import bundle as bundle_mod
 from . import ledger as ledger_mod
 from . import model as model_mod
-from .lock import LockHeld, LockPool
+from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
 from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
@@ -69,9 +69,10 @@ def _positive_int(value):
 
 def _default_max_concurrent():
     try:
-        return _positive_int(os.environ.get("PI_REVIEW_MAX_CONCURRENT", "3"))
+        return _positive_int(os.environ.get("PI_REVIEW_MAX_CONCURRENT",
+                                            str(DEFAULT_MAX_CONCURRENT)))
     except argparse.ArgumentTypeError:
-        return 3
+        return DEFAULT_MAX_CONCURRENT
 
 
 def _build_parser():
@@ -86,8 +87,12 @@ def _build_parser():
                    help="maximum concurrent Pi review slots for this user")
     p.add_argument(
         "--model", default=None,
-        help="review model (only openai-codex/gpt-5.6-sol is permitted)",
+        help="review model (only openai-codex/gpt-6-sol is permitted)",
     )
+    p.add_argument(
+        "--effort", choices=model_mod.REVIEW_EFFORTS,
+        default=model_mod.REVIEW_EFFORT,
+        help=f"Pi thinking level (default {model_mod.REVIEW_EFFORT})")
     p.add_argument("--stall-timeout", type=float, default=180)
     p.add_argument("--retry-grace", type=float, default=30)
     p.add_argument("--review-deadline", type=float, default=1500)
@@ -119,7 +124,7 @@ def _build_parser():
     return p
 
 
-def _pi_cmd(model, bundle_path, delta=False):
+def _pi_cmd(model, bundle_path, delta=False, effort=None):
     # Test seam: PI_REVIEW_FAKE_CMD replaces the `pi ...` argv entirely.
     fake = os.environ.get("PI_REVIEW_FAKE_CMD")
     if fake:
@@ -134,7 +139,8 @@ def _pi_cmd(model, bundle_path, delta=False):
         "pi", "--mode", "json", "--no-session", "--no-tools",
         "--no-extensions", "--no-skills", "--no-prompt-templates",
         "--no-context-files", "--append-system-prompt", instruction,
-        "--model", model, "--thinking", "high", f"@{bundle_path}",
+        "--model", model, "--thinking", effort or model_mod.REVIEW_EFFORT,
+        f"@{bundle_path}",
     ]
 
 
@@ -214,7 +220,8 @@ def main(argv=None):
                 # record of the replacement owner now holding it.
                 held_lock.update_meta({"pi_pgid": pgid})
             result = run_review(
-                cmd=_pi_cmd(model, bundle_path, delta=bool(args.baseline_ref)),
+                cmd=_pi_cmd(model, bundle_path, delta=bool(args.baseline_ref),
+                            effort=args.effort),
                 run_dir=args.run_dir,
                 model=model, stall_timeout=args.stall_timeout,
                 retry_grace=args.retry_grace, global_deadline=args.review_deadline,
@@ -239,7 +246,7 @@ def main(argv=None):
     if args.slice_id and result.state not in FAILED:
         ledger_path = ledger_mod.path_for(args.ledger_dir, args.slice_id)
         record = ledger_mod.record_for(
-            result=result, model=model, effort="high", run_dir=args.run_dir,
+            result=result, model=model, effort=args.effort, run_dir=args.run_dir,
             baseline_ref=result.baseline_ref,
             baseline_commit=result.baseline_commit,
         )

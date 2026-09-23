@@ -20,15 +20,16 @@ choice overrides this default; record same-family reviews accurately.
   select separate Claude execution paths.
 - `REVIEWER_MODEL` may override the default model for the selected reviewer.
 - If `REVIEWER_AGENT` is unset or `auto`:
-  - Claude-family implementer: use `codex` with
-    `REVIEWER_MODEL="${REVIEWER_MODEL:-gpt-5.6-sol}"` at high reasoning.
-  - Codex/GPT-family implementer: use `claude` with
-    `REVIEWER_MODEL="${REVIEWER_MODEL:-opus}"`.
+  - Claude-family implementer: use `codex` through the supervised
+    `codex-review-loop` harness, which runs `gpt-6-sol` at `medium` reasoning.
+  - Codex/GPT-family implementer, including Pi: use `claude` with
+    `REVIEWER_MODEL="${REVIEWER_MODEL:-claude-opus-5-5}"` (Opus 5.5) at
+    `medium` effort, the harness default for that model.
 - Every Claude-family review must use `claude-review-loop`. Do not invoke direct
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
   output, lifecycle supervision, and fail-closed verdicts.
-- Every Pi review must use `openai-codex/gpt-5.6-sol`. Never ask Pi to run a
+- Every Pi review must use `openai-codex/gpt-6-sol`. Never ask Pi to run a
   Claude/Anthropic model, a local model such as Qwen/Ollama/LM Studio, an
   OpenRouter model, or any other provider. Claude models run only through
   Claude Code and `claude-review-loop`.
@@ -53,8 +54,8 @@ where the work is mechanical.
 | Role | Default | Escalate a tier when |
 |------|---------|----------------------|
 | Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
-| Implementer | mid tier: `gpt-5.6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
-| Reviewer, first round of a slice | `opus` (Claude) / `gpt-5.6-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
+| Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
+| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
 
 `REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
@@ -65,9 +66,10 @@ Never default to the top tier. Claude Fable and GPT Astra are opt-in per run,
 chosen deliberately and recorded - not the resting default for any role.
 
 Reasoning effort is a separate axis from model choice, and it follows the model
-generation rather than the price. Opus 5 and GPT-5.6 review at `high`, the newer
-Astra generation at `medium`, and `xhigh` belongs to the Opus 4.x generation that
-needed it. Do not raise effort merely because a model is expensive, and do not
+generation rather than the price. The default reviewers - Opus 5.5 and GPT-6
+Sol - review at `medium`, as does GPT Astra; Opus 5 and GPT-5.6 review at `high`,
+and `xhigh` belongs to the Opus 4.x generation that needed it. Raise a default
+reviewer to `high` only when the user asks for it. Do not raise effort merely because a model is expensive, and do not
 let a request for a stronger model silently change effort as well.
 
 A cheaper delta re-review is only safe on a round that is actually scoped -
@@ -266,7 +268,7 @@ correctly and it hung only at exit.
    copied into the exact, redacted bundle artifact:
 
    ```bash
-   reviewer_model="${REVIEWER_MODEL:-opus}"
+   reviewer_model="${REVIEWER_MODEL:-claude-opus-5-5}"
    run_dir="$(mktemp -d -t claude-review.XXXXXX)"
    slice_id="${SLICE_ID:-$(basename "$PWD")-$(git rev-parse --short HEAD 2>/dev/null || echo no-head)}"
    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
@@ -313,6 +315,11 @@ correctly and it hung only at exit.
    current attempt. Create a fresh `run_dir` for every attempt, including retries
    after exits `1`, `2`, or `3`; never retry the same command with a populated
    artifact directory.
+   Every harness admits ten concurrent reviews per user by default, so exit `3`
+   should be rare. When it happens, read the `meta.json` of the held slots under
+   the harness's `--lock-dir` before waiting: a holder started with a lower
+   `--max-concurrent` caps the whole pool until it ends. Do not wrap the harness
+   in a sleep-and-retry loop; report the contention and its holder instead.
    Preserve the harness defaults unless the user requested a model/effort change.
 
 3. For `pi`, use the existing [pi-review-loop](../../../claude/skills/pi-review-loop/SKILL.md)
@@ -324,7 +331,7 @@ correctly and it hung only at exit.
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
      --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
-     --model openai-codex/gpt-5.6-sol
+     --model openai-codex/gpt-6-sol
    ```
 
    Pi uses the shared redacted bundle, no repository tools, and structured
@@ -360,7 +367,8 @@ correctly and it hung only at exit.
    invocation is not a review result. These environment limitations are not
    caused by the skill's review gate.
 
-   For a `gpt-6-sol` review driven from Claude, use the supervised
+   For a `gpt-6-sol` review driven from Claude - the default for a
+   Claude-family implementer - use the supervised
    [codex-review-loop](../../../claude/skills/codex-review-loop/SKILL.md)
    harness instead of the tmux branch below. It pins the model and proves it
    from Codex's session record, confines the reviewer's reads to a harness-owned
@@ -375,13 +383,13 @@ correctly and it hung only at exit.
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    log_file="/tmp/${session}.out"
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
-   reviewer_model="${REVIEWER_MODEL:-gpt-5.6-sol}"
+   reviewer_model="${REVIEWER_MODEL:-gpt-6-sol}"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]
    set reviewer_model $argv[3]
    set reasoning_effort high
-   if string match -q '*astra*' -- "$reviewer_model"
+   if string match -q -r 'astra|gpt-6' -- "$reviewer_model"
        set reasoning_effort medium
    end
    codex -a never exec --sandbox read-only -m "$reviewer_model" \

@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6-sol review\", \"codex review before commit\", \"run the codex review loop\"."
+description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6-sol` at medium (or, on request, high) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
 # Codex Review Loop
@@ -20,10 +20,12 @@ slot pool, and slice ledger rather than copying them.
 
 ## When to use
 
-Before committing a change you want reviewed by `gpt-6-sol`. This is the only
-model the harness runs. Codex is the only harness that can run it; do not
-substitute Pi, Claude, another model, or your own verdict when it is
-unavailable — stop and report the blocked gate.
+Before committing a change you want reviewed by `gpt-6-sol`. This is the
+default reviewer for a Claude-family implementer and the only model the harness
+runs. `pi-review-loop` can run the same model through Pi, but it is a different
+harness: use it only when the user asks for Pi. Do not substitute Pi, Claude,
+another model, or your own verdict when this gate is unavailable — stop and
+report the blocked gate.
 
 ## The loop (you drive this)
 
@@ -84,8 +86,10 @@ unavailable — stop and report the blocked gate.
      `--run-dir` is new or empty; a used directory is never written to. Retry once with a fresh
      `--run-dir`; if it fails again, stop and report — do not substitute
      another reviewer.
-   - `3` → the review slot is busy (default one slot: concurrent Codex reviews
-     slowed each other past their deadlines). Wait for the other review.
+   - `3` → every review slot is busy (default ten, shared per user with no
+     other harness). Ten concurrent reviews is unusual: check the slot
+     metadata under `--lock-dir` before waiting, and ask the user rather than
+     looping on retries.
    - `4` → the review completed and the slice ledger says the loop is not
      converging. Stop and report the residual risk.
 
@@ -109,7 +113,7 @@ A verdict is accepted only when all of these hold; otherwise the result is
 - **The model is proven, not assumed.** `codex exec --json` does not say which
   model answered, so the harness reads Codex's own session record
   (`$CODEX_HOME/sessions/.../rollout-*-<thread>.jsonl`). Every turn must name
-  `gpt-6-sol` at the effort the run asked for (`--effort`, default `high`),
+  `gpt-6-sol` at the effort the run asked for (`--effort`, default `medium`),
   and the record must hold no model-reroute
   entry. A missing record is `model_unproven`, not a pass. The record is copied
   to `session.jsonl` in the run directory.
@@ -219,19 +223,21 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 ## Hard rules
 
 - `gpt-6-sol` only. `--model` accepts nothing else.
-- Effort `high` by default; `--effort medium` only when the user asked for
-  medium. Nothing else is accepted, and the run is proven at the effort it
-  asked for, so a medium run that answered at another effort is `INVALID`.
+- Effort `medium` by default; `--effort high` only when the user asked for
+  high. Nothing else is accepted, and the run is proven at the effort it
+  asked for, so a high run that answered at another effort is `INVALID`.
 - A commit-gate "clean" is exit `0` plus your judgement that any `(scoped)`
   omissions do not matter. Exits `1`–`4` are never clean.
-- One review at a time by default (`--max-concurrent`,
-  `CODEX_REVIEW_MAX_CONCURRENT`).
+- Up to ten concurrent reviews by default (`--max-concurrent`,
+  `CODEX_REVIEW_MAX_CONCURRENT`). Live holders honor the lowest limit any of
+  them requested, so one run started with `--max-concurrent 1` serializes
+  everyone until it ends; lower it only for deliberate serialization.
 - Never add `--dangerously-bypass-approvals-and-sandbox`, `--sandbox`, or a
   wider permission profile to get a review through.
 
 ## Useful flags
 
-`--effort` (`high` default, or `medium`), `--context-file` (repeatable),
+`--effort` (`medium` default, or `high`), `--context-file` (repeatable),
 `--evidence-file` (repeatable),
 `--record-baseline`, `--baseline-ref`, `--cumulative`, `--slice-id`, `--ledger-dir` (default
 `~/.cache/review-loop/ledger`, shared with the sibling harnesses),
