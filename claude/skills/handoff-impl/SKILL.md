@@ -28,6 +28,29 @@ Before drafting the prompt, inspect the current repo context and session context
 - Prior review findings or agreed follow-up tasks already established in the session
 - Local specs or design docs that define the requested work
 
+**Verify every concrete fact before writing it down. Session memory is not
+evidence.** A receiving agent cannot tell an asserted number from a measured
+one, and spends real time reconciling a wrong one against reality:
+
+- **Paths**: `test -d` every worktree, directory and file the prompt names. A
+  path that existed in your session may not exist on the receiving machine, and
+  one you are about to tell an agent to create is a different instruction from
+  one you claim is already there.
+- **Similar names**: when a coordination ledger or workspace list holds a name
+  close to the one you mean (`workspaces/merge-frontend` beside
+  `workspaces/ws-merge-frontend`), say which is which and that the other is
+  claimed. A careless read collides with another agent.
+- **Test and size baselines**: measure them on the branch the agent will start
+  from, usually `origin/main`, not from your session's last run. A stale count
+  turns into phantom new tests or phantom regressions the agent then chases.
+- **Referenced artifact directories**: open them and confirm they hold what you
+  say. A directory of LOC baselines is not a directory of request-load
+  baselines, and the difference only surfaces when the agent needs the data.
+- **Steps copied out of a decision record or plan**: check the step is
+  implementable against the current code before repeating it as an instruction.
+  A recorded decision can be wrong; say what the agent should do if it measures
+  the step to be impossible, rather than leaving it to guess whether to obey.
+
 ### Step 2 — Determine Implementation Scope
 
 Use this source-of-truth order:
@@ -79,6 +102,11 @@ Output the prompt and tell the user to paste it into a fresh Claude Code session
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
 - workflow-capture or review-cycle expectations when the target repo documents them
 - a suggested descriptive session slug when the target repo records session or workflow events and the task has a clear name
+- a verified starting state: the branch and commit to start from, the test
+  count and any size/limit gate figures measured there, and the paths confirmed
+  to exist
+- for work that lands as a series of slices, an instruction to review the batch
+  as a whole in addition to reviewing each slice
 - an implementer report contract
 
 Unless the user asks for something else, return only the implementation prompt.
@@ -95,6 +123,20 @@ Do not invoke any coding agent or reviewer command — no `pi`, `claude`, `codex
 ## Goal
 
 [Clear description of what to build/change and why. Include motivation — user story, bug report, review feedback, etc. State the scope explicitly and why that is the scope now.]
+
+## Starting State — verified, not remembered
+
+Everything here was checked against the repository, not recalled:
+
+- Branch and commit to start from: `<branch>` at `<sha>`
+- Test baseline on that commit: `<N> passed, <M> skipped` (command: `<cmd>`)
+- Gate/limit figures on that commit, if the work touches them
+- Worktree path: `<path>` — **exists** / **you must create it**
+- Named artifact directories and what they actually contain
+
+If your first run disagrees with any number above, stop and say so before
+implementing: one of us is looking at a different tree, and finding out later
+costs more than asking now.
 
 ## Required Reading
 
@@ -180,6 +222,17 @@ When done, report:
 
 ## Rules
 
+- **Never state a path, test count, baseline or artifact location you have not
+  just verified.** Measure baselines on the branch the agent starts from, not
+  from your own last run; a receiving agent cannot distinguish an asserted
+  number from a measured one and will chase the difference.
+- **For work that lands as a series of slices, require a cumulative review of
+  the whole branch, not only a review per slice.** Slices that each pass review
+  individually can still combine into a defect no single review can see — one
+  slice captures state that a later slice replaces wholesale, and nothing in
+  either diff shows it. Tell the implementer to re-review against the
+  merge-base once the series is complete, and to treat that as part of the
+  work rather than an optional extra.
 - Never generate a prompt that only says "implement X" without context. Always include required reading, constraints, and acceptance criteria.
 - If the implementation scope is ambiguous, ask the user before generating.
 - Use absolute file paths so the receiving agent can read files directly.
