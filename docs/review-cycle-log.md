@@ -1235,3 +1235,50 @@ the unmutated tree before mutating.
 
 Promotion: promoted - cross-agent-review-cycle, "Judging the evidence a repair offers".
 
+
+## 2026-09-24 — Behavior slices drew a docs Warning when docs were planned last
+
+In an emerge frontend series where the user put docs and the single changelog
+entry in the final slice, the codex-review-loop reviewer raised "no docs or
+release note" as a Warning on two behavior slices, because the review
+instruction includes the documentation rule and the context did not say docs
+were deferred. Both were rejected under the user's slice plan; the docs slice
+and the cumulative review covered them.
+Follow-up: when docs are deliberately sequenced into a later slice, say so in
+the slice's context file so the reviewer does not spend a finding on it.
+
+Promotion: incident
+
+## 2026-09-26 — Viewer consolidation measurement narrowed the plan
+
+The emerge log-viewer handoff expected a large duplicate-path reduction. Reading
+both adapters and measuring exact blocks showed the hard filtering and layout
+components were already shared; remaining savings were modest. The first plan
+review caught the old largest-gain claim still in the backlog and a title that
+covered less than its slice table. Updated the goal, parent plan and backlog
+together; the repair review confirmed both required corrections. Existing
+measurement and documentation-sync rules cover this case; no new gate is needed.
+
+Promotion: incident
+
+## 2026-09-26 — Qt setter order during shared widget setup
+
+Expected a construction-only extraction to preserve input behavior. The full
+viewer suite showed that moving read-only setup after explicit selection flags
+removed keyboard selection: Qt resets those flags in setReadOnly. Restored
+explicit interaction flags after the shared setup and retained stylesheet
+append order. Existing end-to-end assertions caught the change; keep setter
+side effects in the ordering audit even when all final calls remain present.
+Promotion: incident
+
+## 2026-09-27 — Verify rendered behavior against saved source
+
+Expected the Connect & Score implementer report to describe the saved Qt code.
+It claimed an interpolated animation marker that was absent from paintEvent;
+passing interaction tests covered results but not that presentation behavior.
+Parent source inspection and narrow-window captures found the mismatch and
+palette/clipping defects before the independent review gate. The implementer
+was sent a bounded repair with a presentation regression test. Existing
+cross-agent-review-cycle instructions already require checking actual edits
+and independently rerunning checks; no additional rule is needed.
+Promotion: incident
