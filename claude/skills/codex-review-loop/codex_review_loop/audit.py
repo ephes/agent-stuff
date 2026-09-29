@@ -21,7 +21,7 @@ import os
 from dataclasses import dataclass, field
 
 #: Tools the reviewer may call. `exec` is the code-mode host through which
-#: gpt-6-sol runs sandboxed shell commands; the others are the plain shell tool
+#: gpt-6.1-sol runs sandboxed shell commands; the others are the plain shell tool
 #: names used when code mode is not in play, and the side-effect-free plan and
 #: wait tools. Everything else fails the review, so a new Codex tool is refused
 #: until someone decides it belongs here.

@@ -31,7 +31,7 @@ import sys
 import time
 import uuid
 
-MODEL, EFFORT = "gpt-6-sol", "medium"
+MODEL, EFFORT = "gpt-6.1-sol", "medium"
 
 
 def emit(obj):

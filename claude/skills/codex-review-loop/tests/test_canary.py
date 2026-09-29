@@ -1,4 +1,4 @@
-"""Live boundary canary against the installed Codex and gpt-6-sol.
+"""Live boundary canary against the installed Codex and gpt-6.1-sol.
 
 Skipped unless CODEX_REVIEW_RUN_CANARY=1: it spends a real model run. Run it
 after any change to the Codex flags, the permission profile, or the Codex
@@ -139,7 +139,7 @@ class TestLiveBoundary(unittest.TestCase):
             global_deadline=1800, env=env, extra_env=codex_only)
         self.assertIn(result.state, ("CLEAN", "ISSUES"),
                       f"{result.failure_kind}: {result.error}")
-        self.assertEqual(set(result.observed_models), {"gpt-6-sol"})
+        self.assertEqual(set(result.observed_models), {"gpt-6.1-sol"})
         self.assertEqual(set(result.observed_efforts), {"medium"})
         self.assertEqual(result.forbidden_tool_uses, [])
         with open(os.path.join(self.run_dir, "session.jsonl")) as fh:

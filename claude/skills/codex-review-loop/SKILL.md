@@ -1,11 +1,11 @@
 ---
 name: codex-review-loop
-description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6-sol` at medium (or, on request, high) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6-sol review\", \"codex review before commit\", \"run the codex review loop\"."
+description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6.1-sol` at medium (or, on request, high) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.1-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
 # Codex Review Loop
 
-Run a bounded review cycle: hand the current diff to `gpt-6-sol` through the
+Run a bounded review cycle: hand the current diff to `gpt-6.1-sol` through the
 Codex CLI as a fresh-context reviewer and read its structured verdict.
 `cross-agent-review-cycle` owns the continuation, stopping, scope-containment,
 and commit-gate rules for the loop around this harness; an unresolved Critical
@@ -20,7 +20,7 @@ slot pool, and slice ledger rather than copying them.
 
 ## When to use
 
-Before committing a change you want reviewed by `gpt-6-sol`. This is the
+Before committing a change you want reviewed by `gpt-6.1-sol`. This is the
 default reviewer for a Claude-family implementer and the only model the harness
 runs. `pi-review-loop` can run the same model through Pi, but it is a different
 harness: use it only when the user asks for Pi. Do not substitute Pi, Claude,
@@ -116,12 +116,12 @@ A verdict is accepted only when all of these hold; otherwise the result is
 - **The model is proven, not assumed.** `codex exec --json` does not say which
   model answered, so the harness reads Codex's own session record
   (`$CODEX_HOME/sessions/.../rollout-*-<thread>.jsonl`). Every turn must name
-  `gpt-6-sol` at the effort the run asked for (`--effort`, default `medium`),
+  `gpt-6.1-sol` at the effort the run asked for (`--effort`, default `medium`),
   and the record must hold no model-reroute
   entry. A missing record is `model_unproven`, not a pass. The record is copied
   to `session.jsonl` in the run directory.
 - **The review stayed one direct context.** Only the tools `exec` (the code-mode
-  host through which `gpt-6-sol` runs sandboxed shell commands), `wait`,
+  host through which `gpt-6.1-sol` runs sandboxed shell commands), `wait`,
   `exec_command`, `write_stdin`, `shell`, and `update_plan` may appear.
   Anything else — a `collaboration.*` call, a subagent record, an unlisted tool
   — is `forbidden_tool`. The session record is checked, not just the event
@@ -139,7 +139,7 @@ by the tests is injected only through `tests/harness_entry.py`.
 
 ## Boundary
 
-Demonstrated against Codex 0.158.0 on macOS with `gpt-6-sol` by
+Demonstrated against Codex 0.159.1 on macOS with `gpt-6.1-sol` by
 `tests/test_canary.py`, which builds a production copy, asks the model to run
 commands inside and outside it, and then checks Codex's session record — which
 holds every command's output — and the filesystem. The canary drives the
@@ -255,7 +255,7 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 
 ## Hard rules
 
-- `gpt-6-sol` only. `--model` accepts nothing else.
+- `gpt-6.1-sol` only. `--model` accepts nothing else.
 - Effort `medium` by default; `--effort high` only when the user asked for
   high. Nothing else is accepted, and the run is proven at the effort it
   asked for, so a high run that answered at another effort is `INVALID`.

@@ -107,7 +107,7 @@ def _model(value):
 
 def _build_parser():
     p = _Parser(
-        prog=PROG, description="Run one pinned gpt-6-sol review over a git diff.")
+        prog=PROG, description="Run one pinned gpt-6.1-sol review over a git diff.")
     env_limit = os.environ.get("CODEX_REVIEW_MAX_CONCURRENT")
     default_limit = DEFAULT_MAX_CONCURRENT
     if env_limit is not None:

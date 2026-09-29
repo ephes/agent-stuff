@@ -23,7 +23,7 @@ the installed Codex (0.158.0) rather than assumed:
   approval settings. It does not drop account-bound app tools, subagents or
   image generation, so those are disabled one by one below; the canary in
   `tests/test_canary.py` lists the tools the reviewer actually had.
-- `code_mode_host` stays enabled: `gpt-6-sol` reaches its shell only through
+- `code_mode_host` stays enabled: `gpt-6.1-sol` reaches its shell only through
   the code-mode `exec` tool, and a review without it could not read anything.
 - `unbounded_connection_retries` is disabled so a capacity failure ends the
   turn instead of retrying forever inside the deadline.
@@ -31,7 +31,7 @@ the installed Codex (0.158.0) rather than assumed:
 import json
 import os
 
-REVIEW_MODEL = "gpt-6-sol"
+REVIEW_MODEL = "gpt-6.1-sol"
 REVIEW_EFFORT = "medium"
 #: The efforts a caller may ask for. The audit pins every turn to the one asked
 #: for, so a run at high is proven high exactly as the default is proven medium.

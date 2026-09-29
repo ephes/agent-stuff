@@ -75,7 +75,7 @@ class TestCommand(unittest.TestCase):
     def test_pins_model_effort_profile_and_stdin(self):
         c = self.cmd
         self.assertEqual(c[:4], ["codex", "-a", "never", "exec"])
-        self.assertEqual(c[c.index("-m") + 1], "gpt-6-sol")
+        self.assertEqual(c[c.index("-m") + 1], "gpt-6.1-sol")
         self.assertEqual(c[-1], "-")
         self.assertIn('model_reasoning_effort="medium"', self.overrides())
         self.assertIn(f'default_permissions="{command.PROFILE_NAME}"', self.overrides())

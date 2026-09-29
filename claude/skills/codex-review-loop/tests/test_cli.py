@@ -67,7 +67,7 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("REVIEW: CLEAN", proc.stdout)
         self.assertEqual(result["state"], "CLEAN")
-        self.assertEqual(result["observed_models"], ["gpt-6-sol"])
+        self.assertEqual(result["observed_models"], ["gpt-6.1-sol"])
         self.assertEqual(result["observed_efforts"], ["medium"])
         self.assertIsNone(result["failure_kind"])
 
@@ -96,7 +96,7 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertEqual(argv[-1], "-")
         self.assertIn("review-bundle.md", stdin)
         self.assertNotIn(stdin.strip(), " ".join(argv))
-        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.1-sol")
 
     def test_inherited_codex_home_is_not_used(self):
         stray = os.path.join(self.fx.root, "stray-home")
@@ -272,7 +272,7 @@ class TestCliPreflight(unittest.TestCase):
     def test_another_model_is_refused_before_anything_runs(self):
         proc, result, run_dir = self.fx.run("clean", "--model", "gpt-5.6-sol")
         self.assertEqual(proc.returncode, 2)
-        self.assertIn("only gpt-6-sol", proc.stderr)
+        self.assertIn("only gpt-6.1-sol", proc.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
 
     def test_an_unlisted_effort_is_refused_before_anything_runs(self):
@@ -327,7 +327,7 @@ class TestCliPreflight(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertEqual((result["state"], result["failure_kind"]),
                          ("INVALID", "preflight"))
-        self.assertIn("only gpt-6-sol", result["error"])
+        self.assertIn("only gpt-6.1-sol", result["error"])
 
     def test_an_invalid_slot_limit_in_the_environment_leaves_a_result(self):
         proc, result, _ = self.fx.run(

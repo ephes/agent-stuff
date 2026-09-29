@@ -94,7 +94,7 @@ def _build_parser():
                    help="maximum concurrent Pi review slots for this user")
     p.add_argument(
         "--model", default=None,
-        help="review model (only openai-codex/gpt-6-sol is permitted)",
+        help="review model (only openai-codex/gpt-6.1-sol is permitted)",
     )
     p.add_argument(
         "--effort", choices=model_mod.REVIEW_EFFORTS,

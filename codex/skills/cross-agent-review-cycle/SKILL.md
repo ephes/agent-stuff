@@ -21,7 +21,7 @@ choice overrides this default; record same-family reviews accurately.
 - `REVIEWER_MODEL` may override the default model for the selected reviewer.
 - If `REVIEWER_AGENT` is unset or `auto`:
   - Claude-family implementer: use `codex` through the supervised
-    `codex-review-loop` harness, which runs `gpt-6-sol` at `medium` reasoning.
+    `codex-review-loop` harness, which runs `gpt-6.1-sol` at `medium` reasoning.
   - Codex/GPT-family implementer, including Pi: use `claude` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-claude-opus-5-5}"` (Opus 5.5) at
     `medium` effort, the harness default for that model.
@@ -29,7 +29,7 @@ choice overrides this default; record same-family reviews accurately.
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
   output, lifecycle supervision, and fail-closed verdicts.
-- Every Pi review must use `openai-codex/gpt-6-sol`. Never ask Pi to run a
+- Every Pi review must use `openai-codex/gpt-6.1-sol`. Never ask Pi to run a
   Claude/Anthropic model, a local model such as Qwen/Ollama/LM Studio, an
   OpenRouter model, or any other provider. Claude models run only through
   Claude Code and `claude-review-loop`.
@@ -55,7 +55,7 @@ where the work is mechanical.
 |------|---------|----------------------|
 | Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
 | Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
-| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
+| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
 
 `REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
@@ -331,7 +331,7 @@ correctly and it hung only at exit.
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
      --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
-     --model openai-codex/gpt-6-sol
+     --model openai-codex/gpt-6.1-sol
    ```
 
    Pi uses the shared redacted bundle as its starting point and works in a
@@ -369,7 +369,7 @@ correctly and it hung only at exit.
    invocation is not a review result. These environment limitations are not
    caused by the skill's review gate.
 
-   For a `gpt-6-sol` review driven from Claude - the default for a
+   For a `gpt-6.1-sol` review driven from Claude - the default for a
    Claude-family implementer - use the supervised
    [codex-review-loop](../../../claude/skills/codex-review-loop/SKILL.md)
    harness instead of the tmux branch below. It pins the model and proves it
@@ -386,7 +386,7 @@ correctly and it hung only at exit.
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    log_file="/tmp/${session}.out"
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
-   reviewer_model="${REVIEWER_MODEL:-gpt-6-sol}"
+   reviewer_model="${REVIEWER_MODEL:-gpt-6.1-sol}"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]

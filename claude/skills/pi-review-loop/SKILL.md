@@ -116,7 +116,7 @@ implement and fix; Pi reviews with fresh context.
 
 ## Hard rules
 
-- Pi code review uses `openai-codex/gpt-6-sol` only. Claude models (Opus,
+- Pi code review uses `openai-codex/gpt-6.1-sol` only. Claude models (Opus,
   Sonnet, Fable, or any other Anthropic model) must run through Claude Code and
   `claude-review-loop`, never through Pi.
 - Never use OpenRouter or a local model such as Qwen/Ollama/LM Studio for a
@@ -241,7 +241,7 @@ subprocesses somewhere else deliberately; that override is honored, ambient
 ## Useful flags
 
 `--model <id>` exists for explicitness but accepts only
-`openai-codex/gpt-6-sol`; any other value fails before Pi starts. When omitted,
+`openai-codex/gpt-6.1-sol`; any other value fails before Pi starts. When omitted,
 the harness requires that same model to appear in Pi's authenticated listing.
 `--effort <level>` sets Pi's thinking level: `medium` by default, `high` only
 when the user asked for it. `--review-deadline <s>` (hard

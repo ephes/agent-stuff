@@ -9,7 +9,7 @@ import subprocess
 
 from .env import pi_env
 
-DEFAULT_MODEL = "openai-codex/gpt-6-sol"
+DEFAULT_MODEL = "openai-codex/gpt-6.1-sol"
 #: Thinking levels a caller may ask for; medium unless the user asked for high.
 REVIEW_EFFORT = "medium"
 REVIEW_EFFORTS = ("medium", "high")

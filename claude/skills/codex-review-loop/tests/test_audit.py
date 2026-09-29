@@ -12,7 +12,7 @@ def record(path, *entries):
             fh.write(json.dumps(entry) + "\n")
 
 
-TURN = {"type": "turn_context", "payload": {"model": "gpt-6-sol", "effort": "high"}}
+TURN = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol", "effort": "high"}}
 
 
 def call(name, namespace=None, kind="function_call"):
@@ -33,7 +33,7 @@ class TestAudit(unittest.TestCase):
     def judged(self, *entries):
         record(self.path, *entries)
         result = audit.audit_session(self.path)
-        return result, audit.judge(result, model="gpt-6-sol", effort="high")
+        return result, audit.judge(result, model="gpt-6.1-sol", effort="high")
 
     def test_a_pinned_run_passes(self):
         result, reason = self.judged(TURN, call("exec", kind="custom_tool_call"),
@@ -47,7 +47,7 @@ class TestAudit(unittest.TestCase):
         self.assertIn("gpt-5.6-sol", self.judged(TURN, other)[1])
 
     def test_any_turn_at_another_effort_fails(self):
-        other = {"type": "turn_context", "payload": {"model": "gpt-6-sol", "effort": "low"}}
+        other = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol", "effort": "low"}}
         self.assertIn("effort", self.judged(TURN, other)[1])
 
     def test_no_turn_fails(self):
@@ -82,11 +82,11 @@ class TestAudit(unittest.TestCase):
 
     def test_missing_or_broken_record_is_an_error(self):
         self.assertIsNotNone(audit.judge(audit.audit_session(None),
-                                         model="gpt-6-sol", effort="high"))
+                                         model="gpt-6.1-sol", effort="high"))
         with open(self.path, "w") as fh:
             fh.write("{not json\n")
         self.assertIn("not JSON", audit.judge(audit.audit_session(self.path),
-                                              model="gpt-6-sol", effort="high"))
+                                              model="gpt-6.1-sol", effort="high"))
 
     def test_find_session_record_requires_exactly_one_match(self):
         day = os.path.join(self.tmp.name, "sessions", "2026", "09", "23")
