@@ -123,7 +123,7 @@ class _Streams:
 
 def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                global_deadline, poll_interval=0.5, env=None, on_spawn=None,
-               input_path=None, cwd=None, effort=None):
+               input_path=None, cwd=None, effort=None, review_root=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
         "raw": "stdout.raw.log", "events": "events.jsonl",
@@ -138,7 +138,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
     monitor = Monitor(
         started_at=started, stall_timeout=stall_timeout,
         retry_grace=retry_grace, global_deadline=global_deadline,
-        review_root=cwd or run_dir,
+        review_root=review_root or cwd or run_dir, cwd=cwd or run_dir,
     )
     proc = None
     pgid = None

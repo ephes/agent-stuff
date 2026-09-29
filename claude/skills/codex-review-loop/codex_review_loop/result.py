@@ -24,6 +24,7 @@ class ReviewResult:
     truncations: list = field(default_factory=list)
     redactions: list = field(default_factory=list)
     evidence_files: list = field(default_factory=list)
+    review_copy: dict | None = None
     baseline_ref: str | None = None
     baseline_commit: str | None = None
     slice_id: str | None = None

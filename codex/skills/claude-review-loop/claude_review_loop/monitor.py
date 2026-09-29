@@ -13,8 +13,13 @@ from .verdict import (
 
 # One registry drives both Claude's launch allowlist and the monitor. The only
 # monitor-only exception is Claude Code's internal --json-schema transport.
+# The file tools may only target the reviewer's workspace (the repository copy
+# and its scratch space); Bash is confined by Claude's OS sandbox instead, whose
+# settings the harness writes, because a command line has no reliable target.
 INSPECTION_TOOLS = ("Read", "Grep", "Glob")
-ALLOWED_REVIEW_TOOLS = frozenset((*INSPECTION_TOOLS, "StructuredOutput"))
+EDIT_TOOLS = ("Edit", "Write")
+REVIEW_TOOL_NAMES = (*INSPECTION_TOOLS, "Bash", *EDIT_TOOLS)
+ALLOWED_REVIEW_TOOLS = frozenset((*REVIEW_TOOL_NAMES, "StructuredOutput"))
 
 # How Claude Code answers a tool call its `dontAsk` permission mode refused
 # (verified against Claude Code 2.1.x). An out-of-scope call answered with
@@ -60,7 +65,7 @@ class Decision:
 
 class Monitor:
     def __init__(self, *, started_at, stall_timeout, retry_grace, global_deadline,
-                 review_root):
+                 review_root, cwd=None):
         self.started_at = started_at
         self.stall_timeout = stall_timeout
         self.retry_grace = retry_grace
@@ -78,18 +83,21 @@ class Monitor:
         self.denied_tool_uses = []     # out-of-scope calls Claude itself refused
         self.pending_out_of_scope = {}  # tool_use id -> (entry, error)
         self.invalid_error = None
+        # File tools may target only paths inside `review_root`; a relative
+        # path resolves against Claude's working directory, `cwd`.
         self.review_root = os.path.realpath(review_root)
+        self.cwd = os.path.realpath(cwd or review_root)
 
     def _target_error(self, name, tool_input):
-        if name == "StructuredOutput":
+        if name in ("StructuredOutput", "Bash"):
             return None
         if not isinstance(tool_input, dict):
             return f"malformed Claude {name} tool input"
 
-        if name == "Read":
+        if name in ("Read", *EDIT_TOOLS):
             target = tool_input.get("file_path") or tool_input.get("path")
             if not isinstance(target, str) or not target:
-                return "malformed Claude Read target"
+                return f"malformed Claude {name} target"
         else:
             target = tool_input.get("path", ".")
             if not isinstance(target, str) or not target:
@@ -106,7 +114,7 @@ class Monitor:
             if os.path.isabs(pattern) or pattern.startswith("~") or ".." in pattern_parts:
                 return f"out-of-scope Claude Glob pattern: {pattern}"
 
-        candidate = target if os.path.isabs(target) else os.path.join(self.review_root, target)
+        candidate = target if os.path.isabs(target) else os.path.join(self.cwd, target)
         candidate = os.path.realpath(candidate)
         try:
             inside = os.path.commonpath((self.review_root, candidate)) == self.review_root
@@ -174,7 +182,7 @@ class Monitor:
                 # in the later complete assistant event. Still reject forbidden
                 # tool names immediately, but defer target validation until the
                 # complete input exists.
-                if name not in INSPECTION_TOOLS or tool_input:
+                if name not in (*INSPECTION_TOOLS, *EDIT_TOOLS) or tool_input:
                     self._record_tool_use(name, tool_input, block.get("id"))
 
     def on_event(self, event, now):

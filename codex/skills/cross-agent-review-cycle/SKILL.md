@@ -334,8 +334,10 @@ correctly and it hung only at exit.
      --model openai-codex/gpt-6-sol
    ```
 
-   Pi uses the shared redacted bundle, no repository tools, and structured
-   results. Use its `--record-baseline`, `--baseline-ref`, `--slice-id`, and
+   Pi uses the shared redacted bundle as its starting point and works in a
+   throwaway copy of the repository with read, bash and edit tools; Pi has no
+   sandbox, so that copy is a convention, not an enforced boundary (see the
+   harness's "Repository copy and boundary"). Results are structured. Use its `--record-baseline`, `--baseline-ref`, `--slice-id`, and
    manifest checks for the same repair containment as Claude. Baseline snapshots
    are optional when Git object storage is read-only; a first full review does
    not require them. For subsequent repair reviews, prepare a scoped reviewable
@@ -371,8 +373,9 @@ correctly and it hung only at exit.
    Claude-family implementer - use the supervised
    [codex-review-loop](../../../claude/skills/codex-review-loop/SKILL.md)
    harness instead of the tmux branch below. It pins the model and proves it
-   from Codex's session record, confines the reviewer's reads to a harness-owned
-   review root, owns the lifecycle, and returns the same structured result and
+   from Codex's session record, confines the reviewer to a sandboxed throwaway
+   copy of the repository at the reviewed state (plus the review bundle), owns
+   the lifecycle, and returns the same structured result and
    exit codes as the Claude and Pi harnesses. The tmux branch remains for other
    Codex models.
 

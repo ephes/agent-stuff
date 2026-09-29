@@ -1,3 +1,4 @@
+import signal
 import json
 import os
 import shutil
@@ -9,6 +10,39 @@ from unittest import mock
 
 SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(SKILL_ROOT, "tests", "fake_pi.py")
+
+
+
+def interrupting_copy_builder(workspace, where, root):
+    """Patches that send this process SIGTERM at one point of building the
+    copy: right after its root exists, right after the clone, or right after
+    create_copy returned."""
+    import contextlib
+    from unittest import mock as _mock
+    real_mkdir, real_run, real_create = (workspace.os.mkdir, workspace._run,
+                                         workspace.create_copy)
+
+    def mkdir(path, *a, **kw):
+        real_mkdir(path, *a, **kw)
+        if where == "mkdir" and os.path.realpath(path) == os.path.realpath(root):
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    def run(repo, *args, **kw):
+        out = real_run(repo, *args, **kw)
+        if where == "clone" and "clone" in args:
+            os.kill(os.getpid(), signal.SIGTERM)
+        return out
+
+    def create(*a, **kw):
+        copy = real_create(*a, **kw)
+        if where == "return":
+            os.kill(os.getpid(), signal.SIGTERM)
+        return copy
+    stack = contextlib.ExitStack()
+    stack.enter_context(_mock.patch.object(workspace.os, "mkdir", mkdir))
+    stack.enter_context(_mock.patch.object(workspace, "_run", run))
+    stack.enter_context(_mock.patch.object(workspace, "create_copy", create))
+    return stack
 
 
 class TestCli(unittest.TestCase):
@@ -156,8 +190,13 @@ class TestPiCmd(unittest.TestCase):
             cmd = cli._pi_cmd("openai-codex/gpt-6-sol", "/tmp/bundle.md")
         self.assertEqual(cmd[0], "pi")
         self.assertIn("--mode", cmd)
-        self.assertIn("--no-tools", cmd)
-        self.assertIn("@/tmp/bundle.md", cmd)
+        self.assertNotIn("--no-tools", cmd)
+        self.assertEqual(cmd[cmd.index("--tools") + 1],
+                         "read,bash,edit,write,grep,find,ls")
+        for flag in ("--no-extensions", "--no-skills", "--no-context-files",
+                     "--no-approve", "--no-session"):
+            self.assertIn(flag, cmd)
+        self.assertIn("@" + os.path.realpath("/tmp/bundle.md"), cmd)
         self.assertIn("--append-system-prompt", cmd)
         self.assertEqual(cmd[cmd.index("--thinking") + 1], "medium")
         i = cmd.index("--append-system-prompt")
@@ -165,6 +204,8 @@ class TestPiCmd(unittest.TestCase):
         self.assertIn("REVIEW: CLEAN", instruction)
         self.assertIn("REVIEW: ISSUES", instruction)
         self.assertIn("code reviewer", instruction)
+        self.assertIn("throwaway copy of the repository", instruction)
+        self.assertIn("do not start other agents", instruction)
 
     def test_high_thinking_only_when_asked_for(self):
         from pi_review_loop import cli
@@ -205,10 +246,6 @@ class TestPiCmd(unittest.TestCase):
         from pi_review_loop import cli
         with mock.patch.dict(os.environ, {"PI_REVIEW_FAKE_CMD": "echo hi there"}, clear=False):
             self.assertEqual(cli._pi_cmd("m", "/x/b.md"), ["echo", "hi", "there"])
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestPiBaselineAndLedger(unittest.TestCase):
@@ -313,3 +350,150 @@ class TestPiBaselineAndLedger(unittest.TestCase):
         self.assertTrue(result["redactions"])
         self.assertTrue(result["scoped_clean"])
         self.assertIn("(scoped)", proc.stdout)
+
+
+class TestPiRepositoryCopy(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.realpath(self.tmp.name)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+        for args in (["init", "-q"], ["config", "user.email", "t@t"],
+                     ["config", "user.name", "t"]):
+            self._git(*args)
+        for rel, text in (("a.py", "print(1)\n"), ("gone.py", "GONE = 1\n")):
+            self._write(rel, text)
+        self._git("add", ".")
+        self._git("commit", "-qm", "i")
+        self._write("a.py", "print(2)\n")
+        os.remove(os.path.join(self.repo, "gone.py"))
+        self._write("new.py", "NEW = 1\n")
+        self._write(".env", "TOKEN=abc\n")
+        self.seen = os.path.join(self.base, "seen.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def _write(self, rel, text):
+        with open(os.path.join(self.repo, rel), "w") as fh:
+            fh.write(text)
+
+    def _run(self, mode="clean", *extra):
+        run_dir = os.path.join(self.base, "run-" + mode)
+        env = dict(os.environ,
+                   PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} {mode}",
+                   FAKE_PI_OUT=self.seen)
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.base, "lock"),
+             "--ledger-dir", os.path.join(self.base, "ledger"),
+             "--model", "openai-codex/gpt-6-sol", *extra],
+            capture_output=True, text=True, env=env, timeout=120)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            return proc, json.load(fh), run_dir
+
+    def test_pi_runs_in_a_copy_of_the_reviewed_state(self):
+        before = self._git("status", "--porcelain", "--untracked-files=all")
+        proc, result, run_dir = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(self.seen) as fh:
+            seen = json.load(fh)
+        workspace = os.path.join(os.path.realpath(run_dir), "workspace")
+        self.assertEqual(seen["cwd"], os.path.join(workspace, "repo"))
+        self.assertEqual(seen["tmpdir"], os.path.join(workspace, "tmp"))
+        self.assertEqual(seen["files"]["a.py"], "print(2)\n")
+        self.assertEqual(seen["files"]["new.py"], "NEW = 1\n")
+        self.assertNotIn("gone.py", seen["files"])
+        self.assertNotIn(".env", seen["files"])
+        # Removed afterwards, and the reviewer's write stayed in the copy.
+        self.assertFalse(os.path.lexists(workspace))
+        self.assertTrue(result["review_copy"]["removed"])
+        with open(os.path.join(self.repo, "a.py")) as fh:
+            self.assertEqual(fh.read(), "print(2)\n")
+        self.assertEqual(
+            self._git("status", "--porcelain", "--untracked-files=all"), before)
+        self.assertEqual(len(self._git("worktree", "list").splitlines()), 1)
+        self.assertEqual(result["tool_uses"][0]["tool"], "bash")
+
+    def test_copy_is_removed_after_a_killed_review(self):
+        proc, result, run_dir = self._run("hang", "--stall-timeout", "1")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(result["state"], "STALLED")
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+
+    def test_copy_is_removed_when_the_harness_is_terminated(self):
+        import signal
+        import time
+        run_dir = os.path.join(self.base, "terminated")
+        env = dict(os.environ,
+                   PI_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} hang",
+                   FAKE_PI_OUT=self.seen)
+        harness = subprocess.Popen(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "pi-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.base, "lock"),
+             "--model", "openai-codex/gpt-6-sol"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.time() + 30
+        while not os.path.exists(self.seen) and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(self.seen), "the fake never started")
+        time.sleep(0.5)
+        harness.send_signal(signal.SIGTERM)
+        _, err = harness.communicate(timeout=30)
+        self.assertEqual(harness.returncode, 2, err)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            self.assertEqual(json.load(fh)["state"], "CRASHED")
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+
+    def test_sigterm_while_the_copy_is_built_leaves_nothing_behind(self):
+        from pi_review_loop import cli
+        from pi_review_loop._shared import workspace
+        env = {"PI_REVIEW_FAKE_CMD": f"{sys.executable} {FAKE} clean"}
+        for where in ("mkdir", "clone", "return"):
+            with self.subTest(where=where):
+                run_dir = os.path.join(self.base, "term-" + where)
+                root = os.path.join(run_dir, "workspace")
+                with interrupting_copy_builder(workspace, where, root), \
+                        mock.patch.dict(os.environ, env):
+                    code = cli.main(["--repo", self.repo, "--run-dir", run_dir,
+                                     "--lock-dir", os.path.join(self.base, "lock"),
+                                     "--model", "openai-codex/gpt-6-sol"])
+                self.assertEqual(code, 2)
+                with open(os.path.join(run_dir, "result.json")) as fh:
+                    result = json.load(fh)
+                self.assertEqual(result["state"], "CRASHED")
+                self.assertIn("interrupted while preparing", result["error"])
+                self.assertFalse(os.path.lexists(root))
+
+    def test_an_unlisted_tool_voids_the_review(self):
+        proc, result, _ = self._run("forbidden_tool")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(result["state"], "INVALID")
+        self.assertIn("forbidden Pi tool use: subagent", result["error"])
+
+    def test_starting_another_agent_voids_the_review(self):
+        proc, result, _ = self._run("delegate")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(result["state"], "INVALID")
+        self.assertIn("delegation", result["error"])
+
+    def test_staged_only_copy_is_the_index(self):
+        self._git("add", "a.py")
+        self._write("a.py", "print('unstaged')\n")
+        proc, _, _ = self._run("clean", "--staged-only")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(self.seen) as fh:
+            files = json.load(fh)["files"]
+        self.assertEqual(files["a.py"], "print(2)\n")
+        self.assertIn("gone.py", files)
+        self.assertNotIn("new.py", files)
+
+
+if __name__ == "__main__":
+    unittest.main()

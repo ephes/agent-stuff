@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
 class TestSharedBundleCapabilities(unittest.TestCase):
     """Pi's bundle is the shared one, so it carries protections the old Pi-local
-    copy never had. Pi runs with --no-tools and sends this file to an external
+    copy never had. Pi sends this file, as its starting point, to an external
     provider, so an unredacted bundle is an exfiltration path."""
 
     def setUp(self):

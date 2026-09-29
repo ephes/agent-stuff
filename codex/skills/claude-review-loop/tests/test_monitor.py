@@ -140,11 +140,11 @@ class TestMonitor(unittest.TestCase):
     def test_forbidden_tool_use_invalidates_even_a_clean_result(self):
         m = mon()
         m.on_event({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}}
+            {"type": "tool_use", "name": "Agent", "input": {"prompt": "review"}}
         ]}}, now=4)
         m.on_event(result_clean(), now=5)
         self.assertEqual(m.decide(now=6, proc_alive=True), Decision("kill", INVALID))
-        self.assertEqual(m.forbidden_tool_uses[0]["tool"], "Bash")
+        self.assertEqual(m.forbidden_tool_uses[0]["tool"], "Agent")
 
     def test_unnamed_tool_use_is_forbidden(self):
         m = mon()
@@ -258,6 +258,54 @@ class TestMonitor(unittest.TestCase):
         ]}}, now=4)
         m.on_event(result_clean(), now=5)
         self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
+
+    def tool_call(self, name, tool_input, tool_id="toolu_1"):
+        return {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}
+        ]}}
+
+    def test_bash_edit_and_write_inside_the_workspace_are_allowed(self):
+        m = Monitor(started_at=0.0, stall_timeout=180, retry_grace=30,
+                    global_deadline=1500, review_root="/ws", cwd="/ws/repo")
+        m.on_event(self.tool_call("Bash", {"command": "cat ~/.ssh/id_rsa"}), now=1)
+        m.on_event(self.tool_call("Edit", {"file_path": "a.py",
+                                           "old_string": "x", "new_string": "y"}), now=2)
+        m.on_event(self.tool_call("Write", {"file_path": "/ws/tmp/scratch.py",
+                                            "content": "x"}), now=3)
+        m.on_event(self.tool_call("Read", {"file_path": "../home/notes"}), now=3)
+        m.on_event(result_clean(), now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=True), Decision("finish", CLEAN))
+        self.assertEqual([t["tool"] for t in m.tool_uses],
+                         ["Bash", "Edit", "Write", "Read"])
+
+    def test_write_outside_the_workspace_voids_unless_claude_denied_it(self):
+        for denied in (True, False):
+            with self.subTest(denied=denied):
+                m = Monitor(started_at=0.0, stall_timeout=180, retry_grace=30,
+                            global_deadline=1500, review_root="/ws",
+                            cwd="/ws/repo")
+                m.on_event(self.tool_call("Write", {
+                    "file_path": "/src/repo/a.py", "content": "x"}), now=1)
+                answer = ({"is_error": True, "content":
+                           "Permission to use Write has been denied because "
+                           "Claude Code is running in don't ask mode."}
+                          if denied else {"content": "File created"})
+                m.on_event({"type": "user", "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", **answer}]}},
+                    now=2)
+                m.on_event(result_clean(), now=3)
+                expected = (Decision("finish", CLEAN) if denied
+                            else Decision("kill", INVALID))
+                self.assertEqual(m.decide(now=4, proc_alive=True), expected)
+
+    def test_edit_escaping_the_workspace_by_dotdot_is_out_of_scope(self):
+        m = Monitor(started_at=0.0, stall_timeout=180, retry_grace=30,
+                    global_deadline=1500, review_root="/ws", cwd="/ws/repo")
+        m.on_event(self.tool_call("Edit", {"file_path": "../../src/a.py",
+                                           "old_string": "x", "new_string": "y"}), now=1)
+        m.on_event(result_clean(), now=2)
+        self.assertEqual(m.decide(now=3, proc_alive=True), Decision("kill", INVALID))
+        self.assertIn("out-of-scope Claude Edit target", m.invalid_error)
 
     def test_empty_stream_start_defers_inspection_target_validation(self):
         m = mon()

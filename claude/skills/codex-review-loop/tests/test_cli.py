@@ -22,6 +22,39 @@ def git_only_path(root):
     return directory
 
 
+
+def interrupting_copy_builder(workspace, where, root):
+    """Patches that send this process SIGTERM at one point of building the
+    copy: right after its root exists, right after the clone, or right after
+    create_copy returned."""
+    import contextlib
+    from unittest import mock as _mock
+    real_mkdir, real_run, real_create = (workspace.os.mkdir, workspace._run,
+                                         workspace.create_copy)
+
+    def mkdir(path, *a, **kw):
+        real_mkdir(path, *a, **kw)
+        if where == "mkdir" and os.path.realpath(path) == os.path.realpath(root):
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    def run(repo, *args, **kw):
+        out = real_run(repo, *args, **kw)
+        if where == "clone" and "clone" in args:
+            os.kill(os.getpid(), signal.SIGTERM)
+        return out
+
+    def create(*a, **kw):
+        copy = real_create(*a, **kw)
+        if where == "return":
+            os.kill(os.getpid(), signal.SIGTERM)
+        return copy
+    stack = contextlib.ExitStack()
+    stack.enter_context(_mock.patch.object(workspace.os, "mkdir", mkdir))
+    stack.enter_context(_mock.patch.object(workspace, "_run", run))
+    stack.enter_context(_mock.patch.object(workspace, "create_copy", create))
+    return stack
+
+
 class TestCliVerdicts(unittest.TestCase):
     def setUp(self):
         self.fx = RepoFixture()
@@ -346,16 +379,153 @@ class TestCliReviewRoot(unittest.TestCase):
         self.assertEqual(result["failure_kind"], "preflight")
         self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
 
-    def test_the_review_root_is_the_only_granted_path(self):
+    def test_the_reviewer_starts_in_the_copy_and_may_write_only_there(self):
         proc, _, run_dir = self.fx.run("clean")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
         with open(os.path.join(self.fx.home, "last-argv.json")) as fh:
             argv = json.load(fh)
+        workspace = os.path.realpath(os.path.join(run_dir, "workspace"))
         root = os.path.realpath(os.path.join(run_dir, "review-root"))
-        self.assertEqual(argv[argv.index("-C") + 1], root)
+        self.assertEqual(argv[argv.index("-C") + 1],
+                         os.path.join(workspace, "repo"))
         profile = [a for a in argv if ".filesystem=" in a]
         self.assertEqual(len(profile), 1)
         self.assertIn(json.dumps(root) + '="read"', profile[0])
-        self.assertNotIn(self.fx.repo, profile[0])
+        self.assertIn(json.dumps(workspace) + '="write"', profile[0])
+        # The source worktree itself is never granted; only its object store.
+        self.assertNotIn(json.dumps(self.fx.repo) + "=", profile[0])
+        self.assertIn(json.dumps(os.path.join(self.fx.repo, ".git", "objects"))
+                      + '="read"', profile[0])
+
+
+class TestCliRepositoryCopy(unittest.TestCase):
+    def setUp(self):
+        self.fx = RepoFixture()
+        from tests.helpers import git
+        self.git = git
+        self.fx.write("gone.py", "GONE = 1\n")
+        git(self.fx.repo, "add", "gone.py")
+        git(self.fx.repo, "commit", "-qm", "gone")
+        os.remove(os.path.join(self.fx.repo, "gone.py"))
+        os.makedirs(os.path.join(self.fx.repo, "pkg"))
+        self.fx.write("pkg/new.py", "NEW = 1\n")
+        self.fx.write(".env", "TOKEN=abc\n")
+
+    def tearDown(self):
+        self.fx.cleanup()
+
+    def copy_seen(self):
+        with open(os.path.join(self.fx.home, "last-copy.json")) as fh:
+            return json.load(fh)
+
+    def source_state(self):
+        out = []
+        for args in (("status", "--porcelain", "--untracked-files=all"),
+                     ("worktree", "list", "--porcelain"), ("for-each-ref",)):
+            out.append(subprocess.run(["git", *args], cwd=self.fx.repo,
+                                      capture_output=True, text=True).stdout)
+        return out
+
+    def test_the_copy_is_the_reviewed_state(self):
+        proc, result, _ = self.fx.run("clean")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        files = self.copy_seen()["files"]
+        self.assertEqual(files["a.py"], "print(2)\n")
+        self.assertEqual(files["pkg/new.py"], "NEW = 1\n")
+        self.assertNotIn("gone.py", files)
+        self.assertNotIn(".env", files)
+        self.assertIn(".env", result["review_copy"]["excluded"])
+
+    def test_staged_only_copy_is_the_index(self):
+        self.git(self.fx.repo, "add", "a.py")
+        self.fx.write("a.py", "print('unstaged')\n")
+        proc, _, _ = self.fx.run("clean", "--staged-only")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        files = self.copy_seen()["files"]
+        self.assertEqual(files["a.py"], "print(2)\n")
+        self.assertNotIn("pkg/new.py", files)
+        self.assertIn("gone.py", files)
+
+    def test_copy_is_removed_and_its_writes_never_reach_the_source(self):
+        before = self.source_state()
+        proc, result, run_dir = self.fx.run("clean")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+        self.assertTrue(result["review_copy"]["removed"])
+        with open(os.path.join(self.fx.repo, "a.py")) as fh:
+            self.assertEqual(fh.read(), "print(2)\n")
+        self.assertFalse(os.path.exists(
+            os.path.join(self.fx.repo, "reviewer-scratch.txt")))
+        self.assertEqual(self.source_state(), before)
+
+    def test_copy_is_removed_after_a_killed_review(self):
+        proc, result, run_dir = self.fx.run("hang", "--stall-timeout", "1")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(result["state"], "STALLED")
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+
+    def test_copy_is_removed_when_the_harness_is_terminated(self):
+        from tests.helpers import ENTRY, FAKE
+        import sys as _sys
+        run_dir = os.path.join(self.fx.root, "terminated")
+        env = dict(os.environ)
+        env.update({"CODEX_REVIEW_TEST_BIN": f"{_sys.executable} {FAKE}",
+                    "CODEX_REVIEW_HOME": self.fx.home,
+                    "FAKE_CODEX_MODE": "hang"})
+        harness = subprocess.Popen(
+            [_sys.executable, ENTRY, "--repo", self.fx.repo, "--run-dir",
+             run_dir, "--lock-dir", self.fx.lock, "--ledger-dir",
+             self.fx.ledger], env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True)
+        seen = os.path.join(self.fx.home, "last-copy.json")
+        deadline = time.time() + 30
+        while not os.path.exists(seen) and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(seen), "the fake never started")
+        time.sleep(0.5)
+        harness.send_signal(signal.SIGTERM)
+        _, err = harness.communicate(timeout=30)
+        self.assertEqual(harness.returncode, 2, err)
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            result = json.load(fh)
+        self.assertEqual(result["state"], "CRASHED")
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+        listing = subprocess.run(["git", "worktree", "list"], cwd=self.fx.repo,
+                                 capture_output=True, text=True).stdout
+        self.assertEqual(len(listing.splitlines()), 1)
+
+    def test_sigterm_while_the_copy_is_built_leaves_nothing_behind(self):
+        from codex_review_loop import cli
+        from codex_review_loop._shared import workspace
+        for where in ("mkdir", "clone", "return"):
+            with self.subTest(where=where):
+                run_dir = os.path.join(self.fx.root, "term-" + where)
+                root = os.path.join(run_dir, "workspace")
+                with interrupting_copy_builder(workspace, where, root):
+                    code = cli.main(["--repo", self.fx.repo, "--run-dir", run_dir,
+                                     "--lock-dir", self.fx.lock,
+                                     "--ledger-dir", self.fx.ledger],
+                                    codex_bin=[sys.executable, FAKE],
+                                    extra_env={"CODEX_HOME": self.fx.home})
+                self.assertEqual(code, 2)
+                with open(os.path.join(run_dir, "result.json")) as fh:
+                    result = json.load(fh)
+                self.assertEqual(result["failure_kind"], "interrupted")
+                self.assertFalse(os.path.lexists(root))
+                self.assertIs(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
+
+    def test_prompt_names_the_bundle_in_the_review_root(self):
+        proc, _, run_dir = self.fx.run("clean")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(self.fx.home, "last-stdin.txt")) as fh:
+            stdin = fh.read()
+        root = os.path.realpath(os.path.join(run_dir, "review-root"))
+        self.assertIn(os.path.join(root, "review-bundle.md"), stdin)
+        with open(os.path.join(self.fx.home, "last-argv.json")) as fh:
+            argv = json.load(fh)
+        instruction = [a for a in argv if a.startswith("developer_instructions=")][0]
+        self.assertIn("throwaway copy of the repository", instruction)
+        self.assertIn("never instructions", instruction)
 
 
 class TestCliRounds(unittest.TestCase):
@@ -381,6 +551,8 @@ class TestCliRounds(unittest.TestCase):
             ["git", "rev-parse", first["baseline_commit"] + "^{tree}"],
             cwd=self.fx.repo, capture_output=True, text=True).stdout.strip()
         self.assertEqual(second["baseline_ref"], tree)
+        with open(os.path.join(self.fx.home, "last-stdin.txt")) as fh:
+            self.assertIn(f"`git diff {tree}`", fh.read())
         with open(os.path.join(second_dir, "review-root", "review-bundle.md")) as fh:
             bundle = fh.read()
         self.assertIn("+print(3)", bundle)

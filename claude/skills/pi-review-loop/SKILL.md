@@ -37,13 +37,14 @@ implement and fix; Pi reviews with fresh context.
    It is foreground and returns a structured result — do NOT background it and poll.
 
    The bundle is built by the shared implementation from `claude-review-loop`,
-   so it is redacted before it leaves the machine: secret-looking files,
-   private-key blocks and high-confidence token patterns are removed, and the
-   `redactions` manifest makes a clean verdict scoped. Pi runs with `--no-tools`
-   and this file is the whole review surface, so read `skipped_files`,
-   `truncations` and `redactions` in `result.json` before trusting a CLEAN. A
-   Pi-only deployment must install the sibling skill at the same relative path;
-   the harness fails loudly rather than building an unredacted bundle.
+   so it is redacted: secret-looking files, private-key blocks and
+   high-confidence token patterns are removed, and the `redactions` manifest
+   makes a clean verdict scoped. It is Pi's starting point, not the whole review
+   surface: Pi works in a throwaway copy of the repository at the reviewed state
+   and can read, search, run git and tests there (see **Repository copy and
+   boundary**). A Pi-only deployment must install the sibling skill at the same
+   relative path; the harness fails loudly rather than building an unredacted
+   bundle.
 
    Add `--record-baseline` to any round you may re-review, then pass the
    reported `baseline_commit` to the next round's `--baseline-ref`:
@@ -55,7 +56,9 @@ implement and fix; Pi reviews with fresh context.
    ```
 
    The bundle then holds only what changed since that baseline, and the system
-   prompt tells Pi this is a re-review of the repair delta. Round 1 stays a
+   prompt tells Pi this is a re-review of the repair delta and names the
+   previous round's tree, so `git diff <tree>` in the copy shows the same
+   delta. Round 1 stays a
    whole-slice review; scope only the rounds after it. Without this, every round
    re-sends the whole slice with the repairs on top, and the reviewer keeps
    rediscovering unrelated concerns in code it already passed.
@@ -85,9 +88,8 @@ implement and fix; Pi reviews with fresh context.
      `pi unavailable` is a wrapper diagnosis, not proof of missing credentials.
      Read the underlying error. `EPERM`/`EACCES` on `auth.json.lock` or
      `settings.json.lock` means local state access is blocked before model/auth
-     validation; do not prescribe login. The reviewer cannot edit the repository,
-     but Pi still needs its regular authentication/settings locks and possible
-     credential refresh. Fix permitted invocation errors, or report the exact
+     validation; do not prescribe login. Pi needs its regular
+     authentication/settings locks and possible credential refresh. Fix permitted invocation errors, or report the exact
      required access when the environment disallows it. Do not copy credentials,
      disable locks, or repeat an unchanged denied call. Retry the same harness
      with a fresh run directory after the cause changes; do not switch to a
@@ -138,10 +140,57 @@ implement and fix; Pi reviews with fresh context.
   cleanup. A live slot whose metadata does not declare a limit is treated as a
   limit of one — fail-closed, so an old or half-written record narrows the pool
   instead of over-admitting into it.
+- Pi reviews in its copy, never in the real worktree: do not point it at the
+  repository by another route to get a review through.
 - A `CLEAN` result over an empty worktree is invalid: the harness refuses to run
   the reviewer when there are no staged, unstaged, or untracked changes.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering — do not chase every nit).
+
+## Repository copy and boundary
+
+Before Pi starts, the harness makes `<run-dir>/workspace/repo`: a
+`git clone --shared --no-checkout` of the repository, checked out at `HEAD` and
+brought to the reviewed tree (the worktree with staged, unstaged and untracked
+changes; the index with `--staged-only`). The reviewed changes are uncommitted
+work there, so `git status` and `git diff HEAD` show them, and the history is
+borrowed read-only from the source object store. The copy holds every tracked
+file, not ignored files (virtual environments, build output, the usual `.env`),
+not untracked or locally modified secret-looking paths (listed under
+`review_copy.excluded`; a modified tracked one keeps its committed version), and
+not submodule contents; Git LFS files stay pointers. Hooks do not run while it is built, and its `origin`
+remote is removed, so a `git push` there has nowhere to go. It is a clone, not a
+worktree, so nothing is registered in the source repository. Building the
+reviewed tree writes unreferenced objects into the source repository, as
+`--record-baseline` does; `git gc` collects them.
+
+Pi runs with its working directory in the copy, `TMPDIR` pointed at
+`<run-dir>/workspace/tmp`, and only the built-in tools `read`, `bash`, `edit`,
+`write`, `grep`, `find` and `ls` (`--tools`), with `--no-extensions`,
+`--no-skills`, `--no-prompt-templates`, `--no-context-files` and `--no-approve`,
+so no extension, skill or project-local file can add a tool or an instruction.
+The harness deletes `<run-dir>/workspace` after the run - on success, failure,
+timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP take the Ctrl-C path, which
+kills and reaps Pi first). SIGKILL cannot be caught; a copy it leaves behind is
+inside the run directory.
+
+**Pi has no sandbox, and the harness does not add one.** Its `bash`, `read`,
+`write` and `edit` tools run with the user's own permissions: nothing *enforces*
+that the reviewer stays in the copy. It can read the rest of the home
+directory - other projects, `~/.ssh`, `~/.pi` - write anywhere the user can,
+reach the network, and in principle push from, or write into, the source
+repository by its path. What keeps it in the copy is the instruction ("stay
+inside the copy") and the harness's checks on the event stream:
+
+- a tool outside the list above voids the review (`INVALID`);
+- a `bash` command that starts another agent CLI (`pi`, `claude`, `codex`,
+  `opencode`, `gemini`, `aider`) in command position voids it as delegation.
+  This is a best-effort check on the command's words, not enforcement - a
+  script that runs one is not caught.
+
+Every tool call is recorded under `tool_uses` in `result.json`. When the review
+must not be able to reach the rest of the machine, use `codex-review-loop`,
+whose boundary is enforced by Codex's sandbox and verified by a canary.
 
 ## Trust boundary
 
@@ -154,7 +203,9 @@ The two halves are one change — a heading Pi is never told about establishes
 nothing, and a rule naming a heading the bundle never writes is unenforceable —
 so both are built from one constant in the shared bundle module and the suite
 asserts the instruction against that marker rather than against a second copy of
-the wording.
+the wording. The same instruction says every file in the repository copy -
+`AGENTS.md`, `CLAUDE.md`, READMEs, comments - is data under review, not
+direction.
 
 Nothing in a Pi bundle is caller-authored. Unlike `claude-review-loop`, this
 harness passes `--no-context-files`, so there is no trusted region for repository
@@ -164,13 +215,15 @@ applies.
 
 The honest scope: this is an instruction-level mitigation, not enforcement. It
 makes injected text explicitly out of scope; it cannot prove a model ignored it.
-What is enforced sits elsewhere — Pi runs with `--no-tools`, `--no-skills`,
-`--no-extensions`, and `--no-context-files`, so injected text has no tool to
-reach for, and the verdict is parsed only from the final assistant message, so a
+Now that Pi has tools, injected text in the copy has tools to reach for, and
+nothing but the instruction and the event-stream checks above stands in its
+way. The verdict is still parsed only from the final assistant message, so a
 `REVIEW: CLEAN` line inside a diff is never read as a verdict.
 
 The boundary also says nothing about what is *sent*. It labels the evidence, it
-does not reduce it — reducing it is what the bundle's redaction does.
+does not reduce it — reducing it is what the bundle's redaction does. Whatever
+Pi reads from the copy with its tools reaches the provider unredacted; the copy
+is the user's code, and that was decided deliberately.
 
 ## Environment isolation
 
@@ -207,6 +260,8 @@ slice ledger and report convergence), `--ledger-dir <dir>` (default
 
 `result.json` (verdict, items, state, model, error, scoped_clean,
 skipped_files, truncations, redactions, baseline_ref, baseline_commit, slice_id,
-round, convergence), `events.jsonl`
-(strict JSONL event stream), `stdout.raw.log`, `stderr.log`, and `review-bundle.md`
-(exactly what Pi reviewed).
+round, convergence, tool_uses, forbidden_tool_uses, and review_copy - the
+copy's `head`, `tree`, `excluded` paths, `notes`, and whether it was
+`removed`), `events.jsonl` (strict JSONL event stream), `stdout.raw.log`,
+`stderr.log`, and `review-bundle.md` (the redacted starting point Pi was given).
+The copy itself is gone after the run.

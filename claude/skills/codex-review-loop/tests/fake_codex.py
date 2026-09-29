@@ -57,6 +57,24 @@ def main():
         json.dump(sys.argv[1:], fh)
     with open(os.path.join(home, "last-env.json"), "w") as fh:
         json.dump(dict(os.environ), fh)
+    copy = arg_after("-C")
+    if copy and os.path.isdir(copy):
+        # What the reviewer found in its copy, then a write of its own that
+        # must never reach the source worktree.
+        listing = sorted(os.path.relpath(os.path.join(d, f), copy)
+                         for d, dirs, files in os.walk(copy)
+                         if ".git" not in os.path.relpath(d, copy).split(os.sep)
+                         for f in files)
+        contents = {}
+        for rel in listing:
+            with open(os.path.join(copy, rel), errors="replace") as fh:
+                contents[rel] = fh.read()
+        with open(os.path.join(home, "last-copy.json"), "w") as fh:
+            json.dump({"path": copy, "files": contents}, fh)
+        with open(os.path.join(copy, "a.py"), "w") as fh:
+            fh.write("REVIEWER_WROTE = 1\n")
+        with open(os.path.join(copy, "reviewer-scratch.txt"), "w") as fh:
+            fh.write("scratch\n")
     out_path = arg_after("-o")
     # Report the effort the harness asked for, as Codex does; wrong_effort
     # reports another one.

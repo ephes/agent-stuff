@@ -1,6 +1,6 @@
 ---
 name: claude-review-loop
-description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model and strict read-only isolation. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive fix and re-review rounds under the value-driven stopping rules in cross-agent-review-cycle, never an unbounded loop toward CLEAN.
+description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model, working in a sandboxed throwaway copy of the repository. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive fix and re-review rounds under the value-driven stopping rules in cross-agent-review-cycle, never an unbounded loop toward CLEAN.
 ---
 
 # Claude Review Loop
@@ -23,27 +23,85 @@ or newer because they use the NUL-delimited `--pathspec-from-file` interface.
 The harness runs direct `claude -p` and supplies the review prompt from a prompt
 file on stdin. Claude runs with `--safe-mode`, an empty setting-source list, a
 strict empty MCP configuration, `--permission-mode dontAsk`, and only the
-built-in `Read`, `Grep`, and `Glob` tools. Those tools can inspect only the new,
-harness-owned run directory containing the redacted bundle and prompt; the raw
-repository and all other paths are outside the read sandbox. Bash, editing,
-delegation, skills, web, and MCP tools are forbidden. An OS sandbox denies all
-filesystem writes,
-disables the unsandboxed-command escape hatch, and fails closed if isolation is
-unavailable. Do not add `--max-budget-usd`, permission bypass, or other ad hoc
+built-in `Read`, `Grep`, `Glob`, `Bash`, `Edit`, and `Write` tools, in a
+throwaway copy of the repository at the reviewed state (see **Repository copy
+and boundary**). It can read, search, run git and tests, and write there; it
+cannot reach the source worktree or the rest of the home directory. Delegation
+(`Agent`/`Task`), skills, web, notebook, background-monitor, and MCP tools are
+forbidden. Do not add `--max-budget-usd`, permission bypass, or other ad hoc
 launch flags; the harness owns lifecycle limits and safety settings.
+
+## Repository copy and boundary
+
+Before Claude starts, the harness makes `<run-dir>/workspace/repo`: a
+`git clone --shared --no-checkout` of the repository, checked out at `HEAD` and
+brought to the reviewed tree (the worktree with staged, unstaged and untracked
+changes; the index with `--staged-only`). The reviewed changes are uncommitted
+work there, so `git status` and `git diff HEAD` show them, and the history is
+borrowed read-only from the source object store through
+`objects/info/alternates`. The copy holds every tracked file, not ignored files
+(virtual environments, build output, the usual `.env`), not untracked or locally
+modified secret-looking paths (listed under `review_copy.excluded`; a modified
+tracked one keeps its committed version), and not submodule contents; Git LFS files stay pointers. Hooks do
+not run while it is built, and its `origin` remote is removed, so a `git push`
+there has nowhere to go. It is a clone, not a worktree, so nothing is registered
+in the source repository; `git worktree list` never shows it. Building the
+reviewed tree writes unreferenced objects into the source repository, as
+`--record-baseline` does; `git gc` collects them. The same shared module builds
+the copy for `codex-review-loop` and `pi-review-loop`.
+
+The harness deletes `<run-dir>/workspace` after the run - on success, failure,
+timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP take the Ctrl-C path, which
+kills and reaps Claude first). SIGKILL cannot be caught; a copy it leaves
+behind is inside the run directory.
+
+What confines the reviewer, verified by the canary under **Verification**:
+
+- **Bash** runs in Claude Code's OS sandbox (`failIfUnavailable`, no unsandboxed
+  retry, `autoAllowBashIfSandboxed`). Reads are denied for the user's home,
+  `/private/var/folders` (the per-user `TMPDIR`), every entry of `/private/tmp`
+  present at launch, and every entry of Claude's own temporary directory
+  `/private/tmp/claude-<uid>` present at launch - the other Claude sessions'
+  scratch space - and re-opened for `<run-dir>/workspace` and the source object
+  store. Writes are allowed in `<run-dir>/workspace` and, because Claude's Bash
+  tool keeps its working-directory state there and cannot run without it, in
+  Claude's own temporary directory, except the entries present at launch that
+  do not hold the workspace. Network is open (`allowedDomains: ["*"]`), so a
+  test run can fetch dependencies. System and toolchain paths such as `/usr`
+  and `/opt/homebrew` stay readable, so git, `python3` and `uv` run. Claude's
+  sandbox also refuses some writes inside `.git`, even in the copy (observed:
+  `git init` copying hook templates into `.git/hooks`).
+- The reviewer's process gets `GIT_CONFIG_GLOBAL` and the XDG configuration,
+  cache, data and state directories pointed into `<run-dir>/workspace/home`:
+  the real home is unreadable, and git refuses to run when it cannot read its
+  global configuration. `HOME` itself stays, because Claude needs its
+  credentials.
+- **Read, Grep, Glob, Edit, Write** are not sandboxed by Claude; `dontAsk`
+  permission rules allow `Read` and `Edit` (which also governs `Write`) only
+  under `<run-dir>/workspace`, so a call outside is refused. The harness also
+  checks every file-tool target itself (see below).
+
+What is **not** closed: a directory created under `/private/tmp` or Claude's
+temporary directory after launch is not in the deny lists; the reviewer can
+create new files in Claude's temporary directory; and the network is open, so
+anything the reviewer reads could leave the machine. The copy is the user's
+code and was deliberately made readable; the bundle stays redacted.
 
 Verdicts use Claude Code's `--json-schema` structured output. Claude Code emits
 an internal `StructuredOutput` transport event for that schema; it is not a
-repository capability and is the sole non-inspection tool event allowed. The harness rejects
+repository capability and the only allowed tool beyond the six above. The harness rejects
 missing or inconsistent structured output and automatically changes the result
-to `INVALID` if Claude emits any forbidden tool use. An inspection call that
-targets something outside the canonical review directory is held until Claude
+to `INVALID` if Claude emits any forbidden tool use. A `Read`, `Grep`, `Glob`,
+`Edit` or `Write` call that targets something outside `<run-dir>/workspace` is
+held until Claude
 answers it: when the answer is exactly Claude's `dontAsk` permission-denial
 text for that tool (one text result, nothing else), no data came back, so the call is recorded in `denied_tool_uses`, the summary prints a
 `denied:` line, and the review continues. Any other answer (data, a
 non-permission error, a reworded denial) or a verdict that arrives before the answer turns the
-result `INVALID`. The review instruction names the review root and asks for
-relative paths, so such calls should be rare. Git diff collection always
+result `INVALID`. The review instruction names the working directory and asks
+for relative paths, so such calls should be rare. `Bash` targets are not
+checked by the monitor - a command line has no reliable target - and rely on
+the OS sandbox. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
 recorded and make a clean verdict scoped. Read the `redactions` manifest and
@@ -191,7 +249,7 @@ are not allowed. Separate harness invocations may run concurrently.
    it is never silently omitted or replacement-decoded.
 
    `--run-dir` must be new or empty so no unrelated local content can enter the
-   reviewer's read sandbox. Every concurrent invocation must use a distinct
+   reviewer's workspace. Every concurrent invocation must use a distinct
    path; the harness enforces this with an atomic marker directory before
    writing any artifact. The command is foreground and returns a structured
    result. Do NOT background one invocation and poll it; independent agents may
@@ -346,28 +404,31 @@ bundle headings and context-redaction manifest entries.
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
 `forbidden_tool_uses`, `denied_tool_uses`, `skipped_files`, `truncations`, `redactions`,
 `baseline_ref`, `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
-and `scoped_clean`), `events.jsonl` (strict JSONL event
-stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
-`review-bundle.md` (the exact redacted repository content Claude reviewed).
+`review_copy` - the copy's `head`, `tree`, `excluded` paths, `notes`, and
+whether it was `removed` - and `scoped_clean`), `events.jsonl` (strict JSONL
+event stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
+`review-bundle.md` (the redacted starting point Claude was given). The copy
+itself is gone after the run.
 
 ## Verification
 
 The normal unit suite skips the subscription-backed installed-CLI isolation
-canary. Run it explicitly when changing Claude flags or sandbox/permission
-settings:
+canary. Run it explicitly when changing Claude flags, sandbox or permission
+settings, or the copy builder:
 
 ```bash
 cd ~/projects/agent-stuff/codex/skills/claude-review-loop
 CLAUDE_REVIEW_RUN_CLAUDE_CANARY=1 CLAUDE_REVIEW_CANARY_MODEL=haiku \
   python3 -m unittest \
-  tests.test_cli.TestClaudeCmd.test_installed_claude_enforces_read_boundaries -v
+  tests.test_cli.TestClaudeCmd.test_installed_claude_confines_the_reviewer_to_its_copy -v
 ```
 
-The canary drives the production command builder. It must observe denied
-streamed results for an out-of-review-root path, a raw-repository path, lowercase
-and uppercase secret-looking review-root paths, and a Grep directed at a secret
-path; it also verifies one permitted public artifact read and ensures planted
-denied markers never appear in model output. Secret-path permission rules cover
-explicit `Read`, `Grep`, and `Glob` paths as defense in depth. Directory-scoped
-Grep/Glob operations rely on the primary OS read sandbox, whose only allowance
-is the new harness-owned directory containing redacted review artifacts.
+The canary builds a production copy and drives the production command and
+environment with a prompt that asks the model to try every path. Inside the
+copy it requires a read, `git log`, a Bash write, a `Write`-tool write, a
+network fetch and a `python3` run to work. Outside it requires every attempt -
+a file in the home directory, the source worktree's ignored file and `.env`, a
+file directly under `/private/tmp`, a Bash write and a `Write`-tool write into
+the source worktree, a `Read` of the source worktree - to be recorded and to
+return nothing: no planted marker may appear in the output, and neither write
+may land. Verified with Claude Code 2.1.284 on macOS.

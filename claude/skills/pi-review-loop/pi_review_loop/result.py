@@ -20,6 +20,9 @@ class ReviewResult:
     slice_id: str | None = None
     round: int | None = None
     convergence: dict | None = None
+    review_copy: dict | None = None
+    tool_uses: list = field(default_factory=list)
+    forbidden_tool_uses: list = field(default_factory=list)
     error: str | None = None
     raw_verdict_line: str | None = None
 

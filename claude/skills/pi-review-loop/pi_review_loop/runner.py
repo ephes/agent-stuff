@@ -126,7 +126,8 @@ class _Streams:
 
 
 def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
-               global_deadline, poll_interval=0.5, env=None, on_spawn=None):
+               global_deadline, poll_interval=0.5, env=None, on_spawn=None,
+               cwd=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
         "raw": "stdout.raw.log", "events": "events.jsonl",
@@ -149,7 +150,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
     try:
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, env=sub_env, bufsize=0,
+            start_new_session=True, env=sub_env, bufsize=0, cwd=cwd,
         )
         try:
             pgid = os.getpgid(proc.pid)  # cache immediately, before any exit
@@ -206,8 +207,10 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
                 except OSError:
                     pass
 
-    if monitor.provider_error and not error:
-        error = monitor.provider_error
+    if not error:
+        # A forbidden tool is the stronger local safety signal; keep it ahead
+        # of a provider failure seen in the same stream.
+        error = monitor.invalid_error or monitor.provider_error
     if error is None and state == CRASHED:
         try:
             with open(paths["stderr"]) as fh:
@@ -220,6 +223,8 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             state=state, items=monitor.verdict_items, model=model, cost=None,
             started_at=started, ended_at=_now(), error=error,
             raw_verdict_line=monitor.verdict_text,
+            tool_uses=monitor.tool_uses,
+            forbidden_tool_uses=monitor.forbidden_tool_uses,
         )
         result.write(paths["result"])
     except Exception:

@@ -1,8 +1,8 @@
 """Copy caller-selected files into the review root as untrusted evidence.
 
-The reviewer can read nothing outside its review root, so it cannot open the
-unchanged code around a diff or the backend a change depends on. An evidence
-file puts one such file in front of it - redacted with the same rules as the
+The reviewer can read its copy of the repository under review, but nothing
+outside it - not the backend a client change mirrors, not another project. An
+evidence file puts one such file in front of it - redacted with the same rules as the
 bundle, refused outright under a secret-looking name, and labelled as
 repository data rather than instructions. Unlike `--context-file`, which is the
 caller's own trusted text, evidence is always untrusted.

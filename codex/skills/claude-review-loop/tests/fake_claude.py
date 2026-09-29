@@ -7,15 +7,19 @@
   crash_whitespace -> write only whitespace to stderr then exit 1
   posthang   -> emit a CLEAN result then sleep forever (exit hang)
   provider_error -> emit an error result then exit 1
-  forbidden_tool -> emit a forbidden Bash tool event before a CLEAN result
-  forbidden_provider_error -> emit forbidden Bash and a provider error together
+  forbidden_tool -> emit a forbidden Agent tool event before a CLEAN result
+  forbidden_provider_error -> emit forbidden Agent and a provider error together
   out_of_scope_read -> read /etc/hosts (not denied) before returning CLEAN
   out_of_scope_denied -> request /etc/hosts, get a permission denial, return CLEAN
   missing_structured -> emit a success result without structured output
   stdin_empty -> return CLEAN only when stdin is empty
   stdin_prompt -> return CLEAN only when stdin contains "review prompt"
+
+With FAKE_CLAUDE_OUT set, it first records what it finds in its working
+directory (the repository copy) there, then writes into that copy.
 """
 import json
+import os
 import sys
 import time
 
@@ -54,6 +58,23 @@ def result(text):
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "clean"
+    out = os.environ.get("FAKE_CLAUDE_OUT")
+    if out:
+        cwd = os.getcwd()
+        files = {}
+        for d, _, names in os.walk(cwd):
+            if ".git" in os.path.relpath(d, cwd).split(os.sep):
+                continue
+            for name in names:
+                rel = os.path.relpath(os.path.join(d, name), cwd)
+                with open(os.path.join(cwd, rel), errors="replace") as fh:
+                    files[rel] = fh.read()
+        with open(out, "w") as fh:
+            json.dump({"cwd": cwd, "files": files,
+                       "git_config_global": os.environ.get("GIT_CONFIG_GLOBAL")},
+                      fh)
+        with open(os.path.join(cwd, "a.py"), "w") as fh:
+            fh.write("REVIEWER_WROTE = 1\n")
     emit({"type": "system", "subtype": "init"})
     if mode == "clean":
         emit(assistant("REVIEW: CLEAN"))
@@ -88,12 +109,12 @@ def main():
     elif mode == "forbidden_tool":
         emit(assistant("checking"))
         emit({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}}
+            {"type": "tool_use", "name": "Agent", "input": {"prompt": "review"}}
         ]}})
         emit(result("REVIEW: CLEAN"))
     elif mode == "forbidden_provider_error":
         emit({"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}}
+            {"type": "tool_use", "name": "Agent", "input": {"prompt": "review"}}
         ]}})
         emit({
             "type": "result", "subtype": "error", "is_error": True,

@@ -1,7 +1,8 @@
 """Pi's review bundle is the shared bundle from `claude-review-loop`.
 
-Pi runs with `--no-tools`, so the bundle is the entire review surface: whatever
-it omits, no reviewer can recover. That is the same contract the sibling
+The bundle is Pi's starting point and the only part of the review that is
+redacted: whatever it omits, the reviewer can only recover by finding it in its
+repository copy. That is the same contract the sibling
 harness's bundle already implements, and this module used to be a copy of an
 older version of it - one that predated secret redaction, the external-diff and
 textconv guards, the non-regular-file checks, and byte-exact decoding. A copy

@@ -78,8 +78,8 @@ class TestRunner(unittest.TestCase):
     def test_forbidden_tool_is_invalid_and_recorded(self):
         r = self._run("forbidden_tool")
         self.assertEqual(r.state, INVALID)
-        self.assertIn("Bash", r.error or "")
-        self.assertEqual(r.forbidden_tool_uses[0]["tool"], "Bash")
+        self.assertIn("Agent", r.error or "")
+        self.assertEqual(r.forbidden_tool_uses[0]["tool"], "Agent")
 
     def test_out_of_scope_allowed_tool_is_invalid_and_recorded(self):
         r = self._run("out_of_scope_read", cwd=self.run_dir)
@@ -98,9 +98,9 @@ class TestRunner(unittest.TestCase):
     def test_forbidden_tool_error_precedes_provider_error(self):
         r = self._run("forbidden_provider_error")
         self.assertEqual(r.state, INVALID)
-        self.assertIn("forbidden Claude tool use: Bash", r.error or "")
+        self.assertIn("forbidden Claude tool use: Agent", r.error or "")
         self.assertIn("529 overloaded", r.error or "")
-        self.assertLess(r.error.index("Bash"), r.error.index("529"))
+        self.assertLess(r.error.index("Agent"), r.error.index("529"))
 
     def test_missing_structured_output_error_reaches_result(self):
         r = self._run("missing_structured")

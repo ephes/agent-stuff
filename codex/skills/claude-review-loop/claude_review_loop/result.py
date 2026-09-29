@@ -27,6 +27,7 @@ class ReviewResult:
     slice_id: str | None = None
     round: int | None = None
     convergence: dict | None = None
+    review_copy: dict | None = None
     error: str | None = None
 
     @property

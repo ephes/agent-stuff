@@ -43,9 +43,11 @@ report the blocked gate.
    bundle's trusted `Review context:` section, so write it yourself: never paste
    repository text or earlier reviewer output there.
 
-   The reviewer cannot open the repository (see **Read boundary**). When it
-   needs unchanged code the diff depends on — the caller of a changed function,
-   the backend rule a client mirrors — pass that file with
+   The reviewer works in a throwaway copy of the repository at the reviewed
+   state (see **Boundary**), so it can find callers, read unchanged code, check
+   history and run the tests itself. It cannot read anything outside that copy
+   and the review root. When it needs a file from elsewhere — the backend rule
+   a client in another repository mirrors — pass that file with
    `--evidence-file <path>` (repeatable). It is copied, redacted, into the
    review root under `evidence/` and labelled as untrusted repository data.
    A secret-looking name, a non-regular, binary, non-UTF-8, or oversized
@@ -60,8 +62,9 @@ report the blocked gate.
      --slice-id "<slice>" --record-baseline --baseline-ref "$baseline_commit"
    ```
 
-   The bundle then holds only the repair delta and the instruction tells the
-   reviewer this is a re-review. State the unchanged invariants around the
+   The bundle then holds only the repair delta, the instruction tells the
+   reviewer this is a re-review, and the prompt names the previous round's
+   tree so `git diff <tree>` in the copy shows the same delta. State the unchanged invariants around the
    repair in a context file: a reviewer shown only a delta infers bypasses that
    the unchanged guard above it prevents.
 
@@ -134,42 +137,75 @@ native binary behind the `codex` found on `PATH` and reads no variable that
 replaces it. The fake used
 by the tests is injected only through `tests/harness_entry.py`.
 
-## Read boundary
+## Boundary
 
-Demonstrated against Codex 0.156.1 on macOS with `gpt-6-sol` by
-`tests/test_canary.py`, which asks the model to read files outside its root and
-then checks Codex's session record — which holds every command's output — for
-the planted markers. The canary drives the production command builder and
-runner with a canary instruction, because the review instruction tells a
-compliant model not to try.
+Demonstrated against Codex 0.158.0 on macOS with `gpt-6-sol` by
+`tests/test_canary.py`, which builds a production copy, asks the model to run
+commands inside and outside it, and then checks Codex's session record — which
+holds every command's output — and the filesystem. The canary drives the
+production copy builder, command builder and runner with a canary instruction,
+because the review instruction tells a compliant model not to try.
 
-The harness does not use `--sandbox read-only`: that mode restricts writes,
-not reads - a marker file outside the working directory was readable under it -
-so it would leave every repository and the user's home open to the reviewer.
-It selects a named Codex permission profile instead, with the filesystem
-entries `:minimal = read`, `/tmp`, `/private/tmp`, `/private/var/folders` =
-deny, and the harness-owned review root = read. Network is disabled.
+**The repository copy.** Before Codex starts, the harness makes
+`<run-dir>/workspace/repo`: a `git clone --shared --no-checkout` of the
+repository, checked out at `HEAD` and brought to the reviewed tree (the
+worktree with staged, unstaged and untracked changes; the index with
+`--staged-only`). The reviewed changes are uncommitted work there, so
+`git status` and `git diff HEAD` show them; the history is borrowed read-only
+from the source object store through `objects/info/alternates`. It holds every
+tracked file, not ignored files (virtual environments, build output, the usual
+`.env`), not untracked or locally modified secret-looking paths (listed under
+`review_copy.excluded`; a modified tracked one keeps its committed version),
+and not submodule contents; Git LFS files stay pointers. Hooks do not run while it is built, and its
+`origin` remote is removed. It is a clone, not a worktree, so nothing is
+registered in the source repository. Building the reviewed tree writes
+unreferenced objects into the source repository, as `--record-baseline` does;
+`git gc` collects them. The harness deletes `<run-dir>/workspace` after the
+run — on success, failure, timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP are
+turned into the Ctrl-C path, which kills and reaps Codex first). SIGKILL
+cannot be caught; a copy it leaves behind is inside the run directory and
+nothing in the source repository refers to it.
 
-**The reviewer can read:**
+The harness does not use `--sandbox`. It selects a named Codex permission
+profile with the filesystem entries `:minimal` = read; `/tmp`, `/private/tmp`,
+`/private/var/folders` = deny; the toolchain prefixes that exist
+(`/opt/homebrew`, `/usr/local`, `/nix`, `/Library/Developer/CommandLineTools`)
+= read; the review root = read; the source repository's object store = read;
+and `<run-dir>/workspace` (the copy, a scratch `home/` and a scratch `tmp/`) =
+write. Network is enabled. The reviewer's commands run with `HOME` and
+`TMPDIR` pointed at the scratch `home/` and `tmp/`.
 
-- the review root: `review-bundle.md` and any `evidence/` files — the redacted
-  material the harness put there, nothing else;
-- what Codex's `:minimal` platform profile admits on macOS — system locations
-  such as `/usr/bin`, `/etc`, `/Library/Preferences`, `/Applications`,
-  `/private/var/db`. These hold no repository or user data, but they are not
-  empty, and the harness does not narrow them further;
+**The reviewer can:**
+
+- read, write, delete and run anything in `<run-dir>/workspace`: grep the
+  copy, run `git log`/`git blame`/`git diff`, commit or branch there (it has
+  its own refs), install dependencies and run tests (the canary runs `python3`
+  and `uv` there);
+- read the review root: `review-bundle.md` and any `evidence/` files;
+- read the source repository's object store — the history, which the copy
+  already shows;
+- read what `:minimal` admits on macOS (system locations such as `/usr/bin`,
+  `/etc`, `/Library/Preferences`, `/Applications`) and the toolchain prefixes
+  above. These hold installed software, not repository or user data, but they
+  are not empty;
+- reach the network, so it can fetch packages — and could send what it reads
+  anywhere. The copy is the user's code; that was decided deliberately;
 - in its model context, not through tools: the review instruction, the stdin
   prompt, Codex's own environment note (cwd, shell, date), and the user's
   global `~/.codex/AGENTS.md`, which Codex injects even with
   `--ignore-user-config` and `project_doc_max_bytes=0`. Keep secrets out of that
-  file.
+  file. The repository's own `AGENTS.md` is not injected.
 
-**The reviewer cannot read** (each observed as `Operation not permitted`): the
-repository — tracked files, untracked files such as `.env`, and `.git`, so
-`git log` fails; anything else in the user's home, including `~/.codex`,
-`~/.ssh`, and other projects; `/tmp`, `/private/tmp`, and `$TMPDIR`
-(`/private/var/folders/...`), even though the run directory itself may live
-there.
+**The reviewer cannot** (each observed as `Operation not permitted`): read the
+source worktree itself, including its ignored and untracked files such as
+`.env`; write to it or to its `.git`; read anything else in the user's home —
+other projects, `~/.ssh`, `~/.codex`, `~/.gitconfig`; read `/tmp`,
+`/private/tmp`, or the rest of `$TMPDIR` (`/private/var/folders/...`), even
+though the run directory itself may live there.
+
+Nothing the reviewer does reaches the user's worktree: its writes land in the
+copy and its scratch space, its commits and refs in the copy's own `.git`, and
+the copy has no remote to push to.
 
 **It cannot read the caller's environment.** Codex starts from an allowlist -
 `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TMPDIR`, `TERM`, locale, proxy and
@@ -178,20 +214,17 @@ CA-bundle variables, and the pinned `CODEX_HOME` - and its commands run with
 caller's environment and one in Codex's own, has the model run `env` and
 `printenv`, and requires both to be absent from the session record.
 
-**It cannot write** (shell redirection and `apply_patch` both refused), cannot
-reach the network (DNS fails), and cannot delegate: `agents.enabled=false`
-removes the collaboration tools, and the account-bound app tools, plugins,
-browser, computer use, image generation, and web search are disabled
-explicitly — `--ignore-user-config` alone does not remove them.
-
-Consequence: this reviewer sees less than a `codex exec` run in the
-repository. It reviews the diff, the caller's context, and the evidence files
-you choose. Supply the unchanged code a finding would depend on; a review
-without it is scoped to what was sent.
+**It cannot delegate:** `agents.enabled=false` removes the collaboration tools,
+and the account-bound app tools, plugins, browser, computer use, image
+generation, and web search are disabled explicitly — `--ignore-user-config`
+alone does not remove them. The session-record audit refuses any tool beyond
+the shell and plan tools. Starting another `codex` from the shell would find no
+credentials: `~/.codex` is unreadable.
 
 The boundary is Codex's enforcement, verified by the canary for this Codex
 version. It is not something the harness can re-prove on every run. Re-run the
-canary after a Codex upgrade or any change to `command.py`:
+canary after a Codex upgrade or any change to `command.py` or the copy
+builder:
 
 ```bash
 cd ~/projects/agent-stuff/claude/skills/codex-review-loop
@@ -233,7 +266,8 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
   them requested, so one run started with `--max-concurrent 1` serializes
   everyone until it ends; lower it only for deliberate serialization.
 - Never add `--dangerously-bypass-approvals-and-sandbox`, `--sandbox`, or a
-  wider permission profile to get a review through.
+  wider permission profile to get a review through, and never point the
+  reviewer at the real worktree instead of its copy.
 
 ## Useful flags
 
@@ -253,8 +287,10 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
 `scoped_clean` — plus `failure_kind`, `thread_id`, `session_record`,
 `observed_models`, `observed_efforts`, `tool_uses`, `forbidden_tool_uses`,
-`evidence_files`, `structured_output`), `review-root/` (exactly what the
-reviewer could read), `review-prompt.txt` (stdin), `output-schema.json`,
+`evidence_files`, `review_copy` — the copy's `head`, `tree`, `excluded`
+paths, `notes` and whether it was `removed` — and `structured_output`),
+`review-root/` (the bundle and evidence the reviewer started from),
+`review-prompt.txt` (stdin), `output-schema.json`,
 `last-message.json`, `events.jsonl`, `stdout.raw.log`, `stderr.log`, and
 `session.jsonl` (the copied session record).
 
@@ -270,6 +306,9 @@ wrong model or effort, a reroute, a missing record, delegation in the record or
 the stream, an unlisted tool, capacity, an error exit, a crash, a non-zero exit
 after a completed turn, a silent hang, a busy hang past the deadline, a
 post-turn hang, an orphaned child, and malformed final messages. It records the
-environment it was given, so the allowlist is tested too. The fake refuses to
+environment it was given, so the allowlist is tested too, and what it found in
+its working directory before writing into it, so the tests prove the copy is
+the reviewed state, that its writes never reach the source worktree, and that it
+is removed after a clean run, a killed run and a SIGTERM to the harness. The fake refuses to
 run against the real `~/.codex`, and it reaches the CLI only through
 `tests/harness_entry.py`.

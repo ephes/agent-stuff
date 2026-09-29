@@ -2,18 +2,31 @@ import os
 import tempfile
 import tomllib
 import unittest
+from types import SimpleNamespace
 
 from codex_review_loop import command
+
+
+def json_key(path):
+    return command.toml_string(os.path.realpath(path)) + "="
 
 
 class TestCommand(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = os.path.join(self.tmp.name, "review-root")
+        base = os.path.realpath(self.tmp.name)
+        self.root = os.path.join(base, "review-root")
         os.mkdir(self.root)
+        workspace = os.path.join(base, "workspace")
+        self.copy = SimpleNamespace(
+            root=workspace, path=os.path.join(workspace, "repo"),
+            home=os.path.join(workspace, "home"),
+            tmp=os.path.join(workspace, "tmp"),
+            source_objects="/src/.git/objects")
         self.cmd = command.codex_cmd(
-            codex_bin="codex", review_root=self.root, schema_path="/s.json",
-            last_message_path="/m.json", instruction='Say "hi"\nthen \\ stop')
+            codex_bin="codex", review_root=self.root, copy=self.copy,
+            schema_path="/s.json", last_message_path="/m.json",
+            instruction='Say "hi"\nthen \\ stop', toolchain=["/opt/tools"])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -31,14 +44,33 @@ class TestCommand(unittest.TestCase):
                                 if o.startswith("developer_instructions=")][0])
         self.assertEqual(parsed["developer_instructions"], 'Say "hi"\nthen \\ stop')
 
-    def test_filesystem_grants_only_the_review_root(self):
+    def test_filesystem_grants_the_copy_the_root_and_the_history(self):
         text = [o for o in self.overrides() if ".filesystem=" in o][0]
         fs = tomllib.loads(text)["permissions"][command.PROFILE_NAME]["filesystem"]
         self.assertEqual(fs, {
             ":minimal": "read",
             "/tmp": "deny", "/private/tmp": "deny", "/private/var/folders": "deny",
-            os.path.realpath(self.root): "read",
+            "/opt/tools": "read",
+            self.root: "read",
+            "/src/.git/objects": "read",
+            self.copy.root: "write",
         })
+        self.assertNotIn(os.path.expanduser("~"), fs)
+
+    def test_reviewer_starts_in_the_copy_with_a_scratch_home(self):
+        c = self.cmd
+        self.assertEqual(c[c.index("-C") + 1], self.copy.path)
+        self.assertIn(f'shell_environment_policy.set.HOME="{self.copy.home}"',
+                      self.overrides())
+        self.assertIn(f'shell_environment_policy.set.TMPDIR="{self.copy.tmp}"',
+                      self.overrides())
+
+    def test_only_existing_toolchain_prefixes_are_granted(self):
+        profile = command.filesystem_profile(
+            review_root=self.root, workspace_root=self.copy.root,
+            source_objects="/o", toolchain=None)
+        for path in command.TOOLCHAIN_READ_PATHS:
+            self.assertEqual(json_key(path) in profile, os.path.isdir(path))
 
     def test_pins_model_effort_profile_and_stdin(self):
         c = self.cmd
@@ -47,7 +79,7 @@ class TestCommand(unittest.TestCase):
         self.assertEqual(c[-1], "-")
         self.assertIn('model_reasoning_effort="medium"', self.overrides())
         self.assertIn(f'default_permissions="{command.PROFILE_NAME}"', self.overrides())
-        self.assertIn(f"permissions.{command.PROFILE_NAME}.network.enabled=false",
+        self.assertIn(f"permissions.{command.PROFILE_NAME}.network.enabled=true",
                       self.overrides())
         self.assertIn("agents.enabled=false", self.overrides())
         self.assertIn('shell_environment_policy.inherit="core"', self.overrides())
@@ -57,7 +89,8 @@ class TestCommand(unittest.TestCase):
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", c)
 
     def test_effort_is_selectable_but_only_from_the_list(self):
-        kw = dict(codex_bin="codex", review_root=self.root, schema_path="s.json",
+        kw = dict(codex_bin="codex", review_root=self.root, copy=self.copy,
+                  schema_path="s.json",
                   last_message_path="m.json", instruction="x")
         cmd = command.codex_cmd(effort="medium", **kw)
         self.assertIn('model_reasoning_effort="medium"', cmd)
