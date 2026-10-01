@@ -1235,7 +1235,6 @@ the unmutated tree before mutating.
 
 Promotion: promoted - cross-agent-review-cycle, "Judging the evidence a repair offers".
 
-
 ## 2026-09-24 — Behavior slices drew a docs Warning when docs were planned last
 
 In an emerge frontend series where the user put docs and the single changelog
@@ -1282,3 +1281,45 @@ was sent a bounded repair with a presentation regression test. Existing
 cross-agent-review-cycle instructions already require checking actual edits
 and independently rerunning checks; no additional rule is needed.
 Promotion: incident
+
+## 2026-09-27 — Shared feed caches need a final response boundary
+
+An endpoint plan keyed the origin cache by active language but left downstream
+language negotiation ambiguous. Review led to fixed rendering locale/timezone.
+The repair's no-store fallback then lacked a mechanism for headers added after
+the view; a delta review caught it. Name the actual response-finalization hook
+when promising post-middleware safety, including insertion timing and 304s.
+The plan now specifies an opt-in outermost hook and explicit full-site-cache
+incompatibility. Review closed with advisory clarifications, not a CLEAN verdict.
+
+The earlier apparent Claude logout was limited to the restricted calling
+session: normal-terminal authentication worked, and restoring session access
+made the same CLI authentication visible without another login.
+
+Promotion: incident — these are recorded endpoint contracts and environment
+diagnostics; existing scoped-review and evidence rules were sufficient.
+
+## 2026-09-27 — Recover an interrupted implementation from disk, not its report
+
+A Claude implementation stopped after a provider DNS failure with source and
+tests already saved. Its full-suite log exposed a LocaleMiddleware test-state
+leak that focused checks had missed. A bounded fresh Claude invocation repaired
+the fixture; independent full validation and a different-family review then
+closed the slice. The review harness also required the project's modern Python,
+not the older system interpreter. No failed invocation counted as a verdict.
+
+Promotion: incident — existing implementer supervision, independent verification
+and fail-closed review rules already prescribe these recovery steps.
+
+## 2026-09-27 — Verify a reviewer's framework premise before changing behavior
+
+A feed repair review claimed Django ignored If-Unmodified-Since without a
+Last-Modified value. The implementer challenged it; inspecting the installed
+helper and exercising the public middleware stack across supported dependency
+bounds proved the premise false. Kept the correct behavior, clarified its
+documentation and supplied the framework source to the final delta reviewer.
+The four earlier HTTP/cache findings were independently verified as repaired.
+
+Promotion: incident — the existing finding-adjudication and primary-evidence
+rules apply; a valid reviewer verdict is evidence to assess, not an instruction
+to change correct behavior.
