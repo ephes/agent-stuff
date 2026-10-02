@@ -1323,3 +1323,26 @@ The four earlier HTTP/cache findings were independently verified as repaired.
 Promotion: incident — the existing finding-adjudication and primary-evidence
 rules apply; a valid reviewer verdict is evidence to assess, not an instruction
 to change correct behavior.
+
+## 2026-10-02 — CGMES retry-backoff review
+
+Expected: the read-count regression executes a listing before testing retry admission. Actual: the first test setup omitted the runtime issue clock, so the worker failed before the counted listing. Fixed the setup with the existing IssueMarkClock and reran against unchanged production code; the repeated-read assertion then reproduced the bug. Opus 5.5 suggested long-TTL and queued-ownership evidence; both added and the repair review closed clean. No new workflow rule is needed: the existing requirement to prove an injected failure executed covers this case.
+
+Promotion: incident.
+
+## 2026-10-02 — Shared backlog staging during CGMES closeout
+
+Expected: staging the closeout files includes only this task. Actual: another session edited the shared backlog while acceptance ran, and a whole-file add captured two unrelated rows. The independent reviewer caught the scope leak before commit. Rebuilt the backlog index entry from HEAD with only this task row removed, preserving unrelated working-tree hunks, then reviewed the exact repaired staged snapshot in an isolated clone. Existing commit-workflow scope rules cover this; checking staged hunks is the required application.
+
+Promotion: incident.
+
+## 2026-10-02 — Plan reviews need a concrete review input
+
+Expected: a context-only plan review over a clean implementation worktree. Actual: the Claude harness correctly refused an empty change bundle. Impact: no valid review occurred. Resolution: placed the plan as a diff in a private repository copy, then used the usual whole-plan and repair-delta gates without putting tooling artifacts in the product repository. Status: resolved.
+Promotion: incident; the harness already documents the non-empty-change requirement.
+
+## 2026-10-02 — Authentication integration review scope and UI timing
+
+Expected: scoped repair reviews and complete integration checks cover only the authored slice while shared user work remains separate. Actual: a root review included a pre-existing empty runtime lock and flagged it as part of the repair; isolated docs delta review could not combine staged-only with a prior baseline. Kept the user file outside the index/commits, adjudicated the false scope finding with Git evidence, and reviewed the exact shared documentation index in a private clone. Full-suite integration also exposed lightweight CGMES supervisor lookup and stale progress recipes missed by focused suites; repaired them and obtained an independent clean review. Unchanged result-view timing/layout cases passed in isolation and the final rebased full gate. Status: resolved; no accepted required finding remains.
+
+Promotion: incident; existing exact-scope, isolated-review and full-integration rules cover the failures.
