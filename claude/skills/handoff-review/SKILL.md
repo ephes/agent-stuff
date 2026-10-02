@@ -17,6 +17,48 @@ Do not perform the review — only generate the prompt unless the user explicitl
 - During iterative review cycles: after addressing review feedback, to request re-review of specific changes.
 - When the user wants to hand off any set of changes for independent review.
 
+## Review behavior to carry into every prompt
+
+Read the canonical [cross-agent-review-cycle](../../../codex/skills/cross-agent-review-cycle/SKILL.md)
+when drafting; resolve installed symlinks to the source before following the link.
+Include its resolved path in required reading, but also carry the applicable
+instructions below into the generated prompt so a fresh session can act without
+reconstructing policy. This is one independent review round; the driver owns
+adjudication, repairs, further rounds, and commit authorization.
+
+- Continue only while review/repair has substantial risk-reduction value; no
+  fixed round cap, mandatory second pass, or loop merely to obtain `CLEAN`.
+  Accepted material findings need repair, required checks, and fresh independent
+  scoped re-review. Low-value/advisory closure needs explicit disposition and
+  rationale; never relabel unresolved findings or advisory closure `CLEAN`.
+- For follow-up or resumed context, carry the accepted finding baseline, each
+  finding's severity/status/evidence and fixed/rejected/deferred rationale,
+  reviewed revision or snapshot, repair delta, unchanged invariants, reviewer
+  selection, and pending checks. Do not infer closure from a clean current diff
+  or a narrower `CLEAN`; unresolved earlier Critical/Warning findings survive.
+- For Claude/Pi repair rounds, the driver preserves `--record-baseline`, uses
+  the returned snapshot as `--baseline-ref`, reuses the slice id, and starts
+  a fresh run directory; prompt wording alone does not scope the bundle.
+  Re-review the accepted findings plus repair delta. Classify new findings as
+  repair-caused, directly coupled, or pre-existing/unrelated. Expand the gate
+  for every Critical, repair-caused/coupled Warning, or finding invalidating
+  acceptance criteria, safety boundaries, persisted evidence, or the claimed
+  fix. Record other concerns as follow-up rather than recursive scope growth;
+  an unresolved Warning still needs owner acceptance before commit, and a
+  Critical cannot be deferred by the agent. Record why any whole-slice reopening
+  is necessary.
+- Carry explicit reviewer/model/effort choices; otherwise use canonical
+  selection. Claude uses the installed `claude-review-loop` harness, default
+  `claude-opus-5-5` at medium; Pi must use `openai-codex/gpt-6-sol` through its
+  installed harness. If a required reviewer, model, or authentication is
+  unavailable (including a harness that rejects that model), report the blocked
+  gate without substitution. Failed/invalid attempts are not valid reviews.
+- Report this round's evidence and findings separately from cumulative cycle
+  status. State unresolved items, advisory dispositions, limits, and why another
+  round would or would not reduce demonstrated risk; the driver applies the
+  canonical commit gate. For a harness context, preserve its strict schema:
+  the driver records cycle dispositions outside the reviewer verdict.
+
 ## Workflow
 
 ### Step 1 — Inspect Current State
@@ -116,7 +158,7 @@ You are performing an independent code review. This is a review task, not an imp
 
 ## Review Cycle Context
 
-[If applicable: what previous review feedback was addressed, what was intentionally not changed and why. Name the prior findings that should be verified as resolved. Include the review round number or label when known, and state whether this review should close the cycle if clean. If this is the first review, omit this section.]
+[If applicable: what previous review feedback was addressed, what was intentionally not changed and why. Name the prior findings that should be verified as resolved. Include the review round number or label when known, and carry the accepted baseline, repair delta, unchanged invariants, and unresolved dispositions. If this is the first review, omit this section.]
 
 ## Focus Areas
 
@@ -145,7 +187,7 @@ Verify that documentation and release notes are updated when behavior, workflow,
 
 If this repo documents workflow-learning or session-capture requirements for reviews, verify that the implementer can record the needed summary-safe review outcome through the project's documented capture commands, or can list it in the report when direct recording is not available. Include review round/scope metadata when known so per-round and cumulative metrics are not mixed. Do not ask for or include prompts, transcript bodies, tool output, secrets, credentials, or sensitive personal data.
 
-If this is a clean second review or later and no relevant scope changed, say explicitly whether another review pass is warranted. Prefer stopping the review cycle after a clean second review unless risk, scope, or implementation changed enough to justify more review.
+Apply the review behavior above: recommend continuation only for demonstrated risk reduction, and report advisory closure and unresolved findings truthfully.
 
 If anything in this context is unclear or you need additional information to review effectively, ask before proceeding.
 
@@ -170,7 +212,7 @@ Structure your output as follows:
 - Keep the prompt under 400 lines to preserve context window space in the receiving session.
 - For re-reviews, explicitly state what changed since the last review and name the prior findings that should be verified — do not ask the reviewer to re-review everything.
 - When the user is in an iterative review cycle, include that explicitly and carry forward the prior findings or review targets.
-- For follow-up reviews, ask whether the review is clean enough to close the cycle; after a clean second review, do not request another pass unless scope or risk changed.
+- Carry the review behavior above into the prompt and assess closure against the cumulative finding state, not the round number.
 - Include the instruction for the reviewer to ask if unclear — the receiving agent should not guess.
 - Do not include raw file contents or full diffs in the prompt. The receiving agent can read files itself.
 - If the change is mostly tests, emphasize behavior preservation, helper design quality, and accidental semantics changes.

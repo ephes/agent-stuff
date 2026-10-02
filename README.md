@@ -113,6 +113,22 @@ exception is `cross-agent-review-cycle`: it is agent-neutral policy, and keeping
 two copies let them drift into contradictory stopping rules, so every agent
 symlinks the single copy under `codex/skills/`.
 
+## Handoff review consistency
+
+Implementation and review handoffs carry the canonical value-driven stopping
+policy, cumulative finding dispositions, and scoped repair context into fresh
+sessions. Implementation-only workers leave review to the independent driver;
+explicit end-to-end ownership permits installed review harnesses. Advisory
+closure is reported as advisory, and failed attempts never count as reviews.
+Synthetic behavioral forward checks are in
+[docs/fixtures/handoff-review/requests.md](docs/fixtures/handoff-review/requests.md).
+
+The canonical policy and handoffs require Pi `openai-codex/gpt-6-sol`, preserving
+the owner's current instruction. The existing Pi harness and its inventory entry
+still describe/permit `gpt-6.1-sol`; this slice does not migrate executable harness
+model defaults. A required Pi gate is blocked until that mismatch is deliberately
+resolved, without a model/provider substitution. Codex CLI defaults are unchanged.
+
 ## Workflow lessons
 
 Reusable agent/process lessons live in `docs/review-cycle-log.md`. Use it for

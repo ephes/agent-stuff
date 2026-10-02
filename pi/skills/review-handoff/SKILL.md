@@ -18,6 +18,48 @@ Use `/skill:review-handoff` or ask naturally ("write me a review prompt",
 "handoff to reviewer", etc.). Arguments after the command are treated as
 additional instructions for the generated prompt.
 
+## Review behavior to carry into every prompt
+
+Read the canonical [cross-agent-review-cycle](../../../codex/skills/cross-agent-review-cycle/SKILL.md)
+when drafting; resolve installed symlinks to the source before following the link.
+Include its resolved path in required reading, but also carry the applicable
+instructions below into the generated prompt so a fresh session can act without
+reconstructing policy. This is one independent review round; the driver owns
+adjudication, repairs, further rounds, and commit authorization.
+
+- Continue only while review/repair has substantial risk-reduction value; no
+  fixed round cap, mandatory second pass, or loop merely to obtain `CLEAN`.
+  Accepted material findings need repair, required checks, and fresh independent
+  scoped re-review. Low-value/advisory closure needs explicit disposition and
+  rationale; never relabel unresolved findings or advisory closure `CLEAN`.
+- For follow-up or resumed context, carry the accepted finding baseline, each
+  finding's severity/status/evidence and fixed/rejected/deferred rationale,
+  reviewed revision or snapshot, repair delta, unchanged invariants, reviewer
+  selection, and pending checks. Do not infer closure from a clean current diff
+  or a narrower `CLEAN`; unresolved earlier Critical/Warning findings survive.
+- For Claude/Pi repair rounds, the driver preserves `--record-baseline`, uses
+  the returned snapshot as `--baseline-ref`, reuses the slice id, and starts
+  a fresh run directory; prompt wording alone does not scope the bundle.
+  Re-review the accepted findings plus repair delta. Classify new findings as
+  repair-caused, directly coupled, or pre-existing/unrelated. Expand the gate
+  for every Critical, repair-caused/coupled Warning, or finding invalidating
+  acceptance criteria, safety boundaries, persisted evidence, or the claimed
+  fix. Record other concerns as follow-up rather than recursive scope growth;
+  an unresolved Warning still needs owner acceptance before commit, and a
+  Critical cannot be deferred by the agent. Record why any whole-slice reopening
+  is necessary.
+- Carry explicit reviewer/model/effort choices; otherwise use canonical
+  selection. Claude uses the installed `claude-review-loop` harness, default
+  `claude-opus-5-5` at medium; Pi must use `openai-codex/gpt-6-sol` through its
+  installed harness. If a required reviewer, model, or authentication is
+  unavailable (including a harness that rejects that model), report the blocked
+  gate without substitution. Failed/invalid attempts are not valid reviews.
+- Report this round's evidence and findings separately from cumulative cycle
+  status. State unresolved items, advisory dispositions, limits, and why another
+  round would or would not reduce demonstrated risk; the driver applies the
+  canonical commit gate. For a harness context, preserve its strict schema:
+  the driver records cycle dispositions outside the reviewer verdict.
+
 ## Workflow
 
 1. **Gather changes** across all relevant repos.
@@ -32,7 +74,9 @@ additional instructions for the generated prompt.
    extra repo paths passed as arguments. Use the `read` tool for targeted file
    inspection - never `cat` or `sed`.
 
-2. **Infer scope** from the actual diff.
+2. **Determine scope** from the user request, prior findings and decisions,
+   relevant specs, then the diff as evidence and file discovery. A resumed
+   review must retain earlier unresolved findings even when the diff is empty.
 
    Capture:
    - what changed (code, tests, docs, specs, or mixed)
@@ -104,9 +148,8 @@ Tell the reviewer to:
 - Run targeted tests if useful (headless via `QT_QPA_PLATFORM=offscreen` for
   PySide UI tests).
 - Report findings first, ordered by severity, with file and line references.
-- Say whether another review pass is warranted when this is a clean second
-  review or later. Prefer stopping after a clean second review unless scope,
-  risk, or implementation changed.
+- Carry the review behavior above into the prompt; assess further review by
+  demonstrated risk reduction and cumulative unresolved findings.
 
 ## Output Contract
 
@@ -134,9 +177,8 @@ The reviewer prompt must instruct the reviewer to produce:
 - Do not ask the reviewer to inspect the entire repository unless the diff
   genuinely requires it.
 - Prefer concrete touched files over broad module lists.
-- For follow-up reviews, ask whether the review is clean enough to close the
-  cycle; after a clean second review, do not request another pass unless scope
-  or risk changed.
+- Carry the accepted finding baseline and repair delta into follow-up reviews;
+  do not reopen a whole-slice audit without a recorded reason.
 - When `specs/` files are relevant, include specific paths in the prompt.
 - If the change is mostly tests, emphasize behavior preservation, helper
   design quality, and accidental semantics changes.

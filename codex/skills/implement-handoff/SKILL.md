@@ -19,6 +19,43 @@ Use this skill when the user asks for things like:
 - "draft an implementation prompt"
 - "prepare a second-agent prompt for the next slice"
 
+## Review ownership in generated handoffs
+
+Read the canonical [cross-agent-review-cycle](../../../codex/skills/cross-agent-review-cycle/SKILL.md)
+when drafting (resolve installed symlinks first). Carry review expectations into
+every handoff, not only when the target repo documents them. Preserve the user's
+chosen role: by default this is an implementation-only worker and the independent
+driver runs reviews; when the user explicitly assigns end-to-end ownership,
+replace the blanket reviewer-command ban with permission to invoke the installed
+review harnesses, while keeping self-review distinct from independent review.
+Never grant extra implementers or unrelated external actions implicitly.
+
+Include this review contract in the prompt and report requirements:
+
+- The driver follows canonical value-driven cycles through diminishing returns,
+  with no fixed round cap or requirement to reach `CLEAN`. Repair accepted
+  material findings, rerun required checks, and obtain fresh independent scoped
+  re-review; stop on low-value/advisory closure with explicit dispositions and
+  rationale. Unresolved findings and advisory closure must never be called
+  `CLEAN`; failed/invalid reviews are not completed reviews.
+- For repair/resumed work, carry the accepted findings' severity, status,
+  evidence and disposition, reviewed revision/snapshot, repair delta, unchanged
+  invariants, required reviewer/model/effort, and pending checks. Freeze the
+  accepted baseline and contain re-review to it plus the repair delta under the
+  canonical expansion rules; do not recursively repair unrelated discoveries.
+- The driver follows canonical different-family reviewer selection: Claude
+  implementers default to Codex `gpt-6.1-sol` through `codex-review-loop`;
+  Codex/Pi implementers default to Claude. Use installed harnesses (Claude Opus 5.5,
+  `claude-opus-5-5`, medium; Pi only `openai-codex/gpt-6-sol`) and fail closed
+  on an unavailable required reviewer/model/authentication, without fallback.
+  Carry explicit owner choices instead of silently changing model or effort.
+- Report implementation verification separately from independent review status:
+  not run, blocked/invalid, completed with findings, advisory closure, or clean
+  within stated scope. Preserve outstanding Critical/Warning findings across
+  narrower clean reviews. Stopping does not release the commit gate: unresolved
+  Warning needs explicit owner acceptance and Critical needs explicit override.
+  An implementation-only worker reports readiness for the driver, not a verdict.
+
 ## Workflow
 
 1. Inspect the current repo context and the current session context before drafting the prompt.
@@ -69,9 +106,9 @@ Use this skill when the user asks for things like:
 
 - a one-line implementation task statement
 - an explicit statement that this is an implementation task, not a review task
-- an explicit ban on invoking any coding agent or reviewer command, and a
-  statement that a self-produced verdict will be discarded (an implementer with
-  shell access has run an unsolicited review and cited it as the gate)
+- explicit review ownership and the review contract above; for an
+  implementation-only worker, ban agent/reviewer commands and discard self-
+  produced verdicts; adapt that ban only for explicit end-to-end authorization
 - a short statement of the implementation scope and why that is the scope now
 - the primary repo or subdirectory scope
 - context files or docs to load first
@@ -85,7 +122,8 @@ Use this skill when the user asks for things like:
 - concrete implementation expectations
 - exact verification commands when they are known
 - documentation and release-note expectations when behavior, workflow, or user-facing usage changed
-- workflow-capture or review-cycle expectations when the target repo documents them.
+- review-cycle expectations and ownership in every prompt; workflow capture
+  when the target repo documents it.
   Never put a fixed review round, cycle, or retry count in the prompt, even when
   the target repo's AGENTS.md or CLAUDE.md states one: say to continue review
   cycles until diminishing returns under `cross-agent-review-cycle`. A cap the
@@ -114,6 +152,7 @@ The generated prompt should follow this structure. Adapt the content to the actu
 ```text
 You are implementing the work described below. This is an implementation task, not a review task. Read this context before writing code. Inspect the actual code before choosing an approach or design.
 
+[Implementation-only worker wording; replace with installed-harness authorization when the user explicitly assigns end-to-end review ownership.]
 Do not invoke any coding agent or reviewer command — no `pi`, `claude`, `codex`, no yolo wrappers, no review-loop harness, no review skill. Review is orchestrated separately and independently. If you believe this work needs review, say so in your report and stop; a verdict you produce yourself does not count and will be discarded.
 
 ## Goal
@@ -170,6 +209,10 @@ The implementation is complete when:
 1. [Specific requirement]
 2. [Specific requirement]
 
+## Independent Review Ownership and Status
+
+[Carry the review contract above, the driver/worker role, canonical policy path, and known cumulative finding state. Do not treat passing tests as independent review.]
+
 ## Verification
 
 [Exact commands the implementer should run when they are known.]
@@ -193,6 +236,7 @@ When done, report:
 6. Workflow capture - summary-safe workflow/session events recorded or an explicit statement that none were needed.
 7. Summary - concise explanation of what was implemented.
 8. Follow-up risks - remaining risks, cleanup, or next best action.
+9. Independent review - status, scope/revision, cumulative outstanding findings and dispositions, pending checks, and review owner; passing tests do not establish review completion.
 ```
 
 ## Rules
