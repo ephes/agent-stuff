@@ -9,6 +9,7 @@ Skills for the Pi coding agent.
 | `commit-ready` | Assess commit readiness without creating a commit |
 | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | `review-handoff` | Generate a code review prompt for a second agent (includes `scripts/gather-changes.sh`) |
+| `work-ledger` (shared) | Read and update the private work ledger, loaded from `../codex/skills/work-ledger` |
 
 ## Install note
 

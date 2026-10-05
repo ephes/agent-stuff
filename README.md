@@ -9,6 +9,7 @@ chezmoi symlinks.
 |-------|-------|---------|
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | Codex, Claude | `cross-agent-review-cycle` | Canonical value-driven different-family review loop; owns the continuation, stopping, containment, and commit-gate rules. One shared copy under `codex/skills/`, symlinked for both agents |
+| Codex, Claude, Pi | `work-ledger` | How coordinators read and update the private work ledger (stage ladder, verify-before-write, owner questions). Agent-neutral like `cross-agent-review-cycle`: one copy under `codex/skills/`, symlinked for every agent |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
 | Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default), working in a sandboxed throwaway copy of the repository; default reviewer for Codex and Pi implementers |
@@ -43,6 +44,7 @@ agent-stuff/
       claude-review-loop/
       opus-review-loop/  # legacy compatibility shim
       review-handoff/
+      work-ledger/       # shared by Codex, Claude and Pi
   claude/
     README.md
     skills/
@@ -111,7 +113,8 @@ Similar skills across agents are intentionally kept separate so each version
 can be tuned to its agent's model, tool names, and interaction patterns. The
 exception is `cross-agent-review-cycle`: it is agent-neutral policy, and keeping
 two copies let them drift into contradictory stopping rules, so every agent
-symlinks the single copy under `codex/skills/`.
+symlinks the single copy under `codex/skills/`. `work-ledger` follows the same
+rule: it describes a shared data contract, not agent mechanics.
 
 ## Handoff review consistency
 
