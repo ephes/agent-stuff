@@ -111,9 +111,9 @@ This skill is for goal tracking and continuation, not full implementation contex
      review-loop gate when available: for Codex-authored work, prefer the
      configured Claude reviewer through `claude-review-loop`; for Claude-authored
      work, use the fixed `gpt-6.1-sol` reviewer through `codex-review-loop`
-     (or `openai-codex/gpt-6-sol` through `pi-review-loop` when Pi is
-     requested). Do not substitute another model or provider. If the installed
-     Pi harness rejects the required model, report the blocked gate. No commit
+     (or `openai-codex/gpt-6.1-sol` through `pi-review-loop` when Pi is
+     requested). Do not substitute another model or provider. If Pi's OpenAI Codex
+     login or that model is unavailable, report the blocked gate. No commit
      may be made until the applicable loop's commit gate in
      `cross-agent-review-cycle` is satisfied - which a fully adjudicated
      Suggestion-only result can satisfy; do not demand a literal `CLEAN`, since

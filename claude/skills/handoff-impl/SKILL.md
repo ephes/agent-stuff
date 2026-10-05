@@ -44,7 +44,7 @@ Include this review contract in the prompt and report requirements:
 - The driver follows canonical different-family reviewer selection: Claude
   implementers default to Codex `gpt-6.1-sol` through `codex-review-loop`;
   Codex/Pi implementers default to Claude. Use installed harnesses (Claude Opus 5.5,
-  `claude-opus-5-5`, medium; Pi only `openai-codex/gpt-6-sol`) and fail closed
+  `claude-opus-5-5`, medium; Pi only `openai-codex/gpt-6.1-sol`) and fail closed
   on an unavailable required reviewer/model/authentication, without fallback.
   Carry explicit owner choices instead of silently changing model or effort.
 - Report implementation verification separately from independent review status:

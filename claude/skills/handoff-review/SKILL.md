@@ -49,7 +49,7 @@ adjudication, repairs, further rounds, and commit authorization.
   is necessary.
 - Carry explicit reviewer/model/effort choices; otherwise use canonical
   selection. Claude uses the installed `claude-review-loop` harness, default
-  `claude-opus-5-5` at medium; Pi must use `openai-codex/gpt-6-sol` through its
+  `claude-opus-5-5` at medium; Pi must use `openai-codex/gpt-6.1-sol` through its
   installed harness. If a required reviewer, model, or authentication is
   unavailable (including a harness that rejects that model), report the blocked
   gate without substitution. Failed/invalid attempts are not valid reviews.

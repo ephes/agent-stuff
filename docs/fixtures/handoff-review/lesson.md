@@ -16,3 +16,10 @@ project or session data. The shared review-cycle log was deliberately untouched.
 Promotion: promoted — implement-handoff / handoff-impl, Review ownership in
 generated handoffs; review-handoff / handoff-review, Review behavior to carry
 into every prompt. Canonical stopping policy itself remains unchanged.
+
+Superseded 2026-10-05: the `gpt-6-sol` Pi instruction came from a global agent
+file written on 2026-09-23, before both harnesses were pinned to `gpt-6.1-sol`
+on 2026-09-30, so it was stale rather than newer. Canonical policy and handoffs
+now match the harness (`openai-codex/gpt-6.1-sol`); the remaining Pi blocker is
+the expired OpenAI Codex login. Lesson: compare dates before treating a
+conflicting instruction as the current one.

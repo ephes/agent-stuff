@@ -29,9 +29,11 @@ choice overrides this default; record same-family reviews accurately.
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
   output, lifecycle supervision, and fail-closed verdicts.
-- Every Pi review must use `openai-codex/gpt-6-sol`. If the installed
-  harness permits only a different model, this gate is blocked; do not use its
-  default as a substitute. Never ask Pi to run a
+- Every Pi review must use `openai-codex/gpt-6.1-sol`, the model
+  `pi-review-loop` pins. It needs Pi's OpenAI Codex subscription login
+  (`/login` → OpenAI Codex); a ChatGPT sign-in on the `openai` provider is a
+  different provider and does not satisfy it. If that login or model is
+  unavailable, this gate is blocked. Never ask Pi to run a
   Claude/Anthropic model, a local model such as Qwen/Ollama/LM Studio, an
   OpenRouter model, or any other provider. Claude models run only through
   Claude Code and `claude-review-loop`.
@@ -57,7 +59,7 @@ where the work is mechanical.
 |------|---------|----------------------|
 | Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
 | Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
-| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex) / `openai-codex/gpt-6-sol` (Pi) | not by default; this verdict already runs on the primary reviewer |
+| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
 
 `REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
@@ -333,7 +335,7 @@ correctly and it hung only at exit.
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
      --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
-     --model openai-codex/gpt-6-sol
+     --model openai-codex/gpt-6.1-sol
    ```
 
    Pi uses the shared redacted bundle as its starting point and works in a

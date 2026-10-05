@@ -123,11 +123,11 @@ closure is reported as advisory, and failed attempts never count as reviews.
 Synthetic behavioral forward checks are in
 [docs/fixtures/handoff-review/requests.md](docs/fixtures/handoff-review/requests.md).
 
-The canonical policy and handoffs require Pi `openai-codex/gpt-6-sol`, preserving
-the owner's current instruction. The existing Pi harness and its inventory entry
-still describe/permit `gpt-6.1-sol`; this slice does not migrate executable harness
-model defaults. A required Pi gate is blocked until that mismatch is deliberately
-resolved, without a model/provider substitution. Codex CLI defaults are unchanged.
+The canonical policy, handoffs and `pi-review-loop` all require Pi
+`openai-codex/gpt-6.1-sol`, the model pinned for both review harnesses on
+2026-09-30. A required Pi gate needs Pi's OpenAI Codex subscription login; when
+that login or the model is unavailable the gate is blocked, without a
+model/provider substitution. The implementer tier keeps `gpt-6-sol`.
 
 ## Workflow lessons
 
