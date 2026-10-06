@@ -1,34 +1,55 @@
 ---
 name: work-ledger
-description: Use when coordinating multi-project agent work through the owner's private work ledger (github.com/ephes/work-ledger) - reading what is in flight or waiting on the owner, or recording a stage change, owner question, blocker or evidence after verifying it. Provider-neutral; shared by Claude, Codex and Pi coordinators.
+description: Use when coordinating multi-project agent work through the owner's work app (https://work.home.xn--wersdrfer-47a.de, repo github.com/ephes/work-ledger) - reading what is in flight or waiting on the owner, recording a stage change, asking the owner something, picking up the owner's answers, or reporting subscription usage. Provider-neutral; shared by Claude, Codex and Pi coordinators.
 ---
 
 # Work Ledger
 
-The private repository `ephes/work-ledger` (normally `~/projects/work-ledger`)
-is the source of truth for multi-project agent work. Chat history, worker
-reports and hosted dashboards are not. Its `README.md` is authoritative for the
-schema; this skill is the working summary.
+The work app at `https://work.home.xn--wersdrfer-47a.de` is the source of truth
+for multi-project agent work. Chat history, worker reports and old dashboards
+are not. Coordinators use it through the `work` CLI in `~/projects/work-ledger`
+(a thin client for the token API under `/api/`). The repository `README.md`
+documents the API; this skill is the working summary.
+
+The YAML files in `ledger/items/` are frozen history (imported once); do not
+edit them. `receipts/` holds campaign receipts that evidence links point to.
+
+## Setup
+
+The shared `coordinator` token and URL live in `~/.config/work/env` (mode 600).
+Never print, copy or commit the token. Load it into the environment per command:
+
+```sh
+cd ~/projects/work-ledger && git pull --ff-only
+bash -c 'set -a && . ~/.config/work/env && set +a && uv run work items'
+```
 
 ## When to use
 
-- **Read** before choosing, resuming or reporting on cross-project work, and when
-  the owner asks what is in flight or what waits on them.
-- **Update** when an item changes stage, gains or loses an owner question,
-  becomes blocked, or new evidence (commit, receipt, install) exists.
-- Workers inside one project slice do not edit the ledger; their coordinator
+- **Read** (`work items`, `work show <slug>`) before choosing, resuming or
+  reporting on cross-project work, and when the owner asks what is in flight or
+  what waits on them.
+- **Update** (`work upsert <slug> ...`) when an item changes stage, owner or
+  next action, becomes blocked, or new evidence (commit, receipt, install)
+  exists.
+- **Ask** (`work ask <slug> "<text>" --kind question|approval|acceptance`) when
+  only the owner can decide or check something.
+- **Pick up answers** (`work responses`) at the start of a coordination turn;
+  act on each one, then `work consume <id>`.
+- **Report usage** (`work usage report ...`, `work usage collect-codex`) when
+  checking in; readings a few hours old are fine.
+- Workers inside one project slice do not write to the app; their coordinator
   does, after verifying the report.
 
 ## Items
 
-One file per item: `ledger/items/<id>.yaml`, where `id` equals the file name.
-Required: `id`, `title`, `project`, `stage`, `owner`, `needs_owner`,
-`next_action`, `updated_at`. Optional: `repo` (network URL, never a local path),
-`worktree`, `branch`, `commit` (quoted), `owner_question` (required when
-`needs_owner: true`), `blocked_reason` (required for `blocked`), `evidence`
-(repository-relative paths that exist, or http(s) URLs), `notes`.
+Slug: lowercase words with hyphens. Fields: `title`, `project`, `stage`,
+`owner`, `next_action`, `checked_at` (required on every update), optional
+`repo_url` (network URL, never a local path), `branch`, `commit`, `worktree`,
+`blocked_reason` (required for `blocked`), `notes`, `evidence` (http(s) links;
+`--evidence` replaces the list). Fields not given stay unchanged.
 
-`owner` is who acts next: `claude-subagent`, `codex`, `herdr:<workspace label>`,
+`owner` is who acts next: `claude`, `codex`, `herdr:<workspace label>`,
 `jochen`.
 
 ## Stage ladder
@@ -51,6 +72,7 @@ verified, not the one you expect.
 | `blocked` / `parked` / `dropped` | cannot move / paused or finished at a checkpoint / abandoned |
 
 Reviewed is not merged, merged is not installed, installed is not accepted.
+Items with history cannot be deleted; retire them as `dropped`.
 
 ## Rules
 
@@ -58,31 +80,22 @@ Reviewed is not merged, merged is not installed, installed is not accepted.
   --is-ancestor`, `status`), herdr, CI or device state yourself. Worker reports
   and receipts are claims; record what you observed, and say in `notes` what
   you could not verify.
-- **`updated_at` is when the facts were checked**, in UTC
-  (`2026-10-05T15:40:00Z`), not when the file was edited. Do not bump it on a
-  wording edit, and never set it to now for facts you did not re-check.
-- **Owner questions** are one concrete, answerable question each
-  (`Merge f26cc99 into main?`), set `needs_owner: true` with `owner: jochen`.
-  When answered, record the decision in `notes`, clear `needs_owner`, and
-  update `next_action`. Do not re-ask a question the ledger shows answered.
+- **`checked_at` is when the facts were checked** (`--checked-at now` only if
+  you just re-verified them), not when you edited the item.
+- **Owner requests** are one concrete, answerable question each
+  (`Merge f26cc99 into main?`). Check `work show <slug>` first and do not
+  re-ask something already open or answered; withdraw requests that became
+  moot (`work withdraw <id>`).
+- **Owner responses are decisions, not commands to the app.** The app executes
+  nothing. Act on a response in your own session, within the permissions the
+  owner gave, record the outcome on the item, then consume the response.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
-- **One item per file; touch only the items you verified.** Other coordinators
-  edit the same repository: pull first, and on a conflict re-read their change
-  instead of overwriting it.
 
-## Workflow
+## Example
 
 ```sh
-cd ~/projects/work-ledger && git pull --ff-only
-# edit ledger/items/<id>.yaml; add receipts under receipts/<campaign>/ if needed
-just validate
-just build          # optional local look at dashboard/dist/index.html
-git add ledger receipts
-git commit -m "ledger: <id> pushed at 8f205eb"
-git push
+bash -c 'set -a && . ~/.config/work/env && set +a && uv run work upsert podcast-main-integration \
+  --stage merged --commit f26cc99 --next-action "Owner hands-on check" \
+  --evidence "Commit=https://github.com/ephes/podcast/commit/f26cc99" --checked-at now'
 ```
-
-Commit messages name the item and the change (`ledger: podcast-main-integration
-needs owner merge decision`). The dashboard is built with `just build`;
-`dashboard/dist/` is build output and is never committed.
