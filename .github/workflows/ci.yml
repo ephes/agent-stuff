@@ -1,0 +1,81 @@
+name: CI
+
+# Hermetic suites only. The harness tests drive fake codex/claude/pi binaries;
+# the live boundary canaries skip unless CODEX_REVIEW_RUN_CANARY=1 or
+# CLAUDE_REVIEW_RUN_CLAUDE_CANARY=1 is set, and neither is set here. Never set
+# them in CI: they spend a real model run and need the owner's logins.
+#
+# macOS runner: the harnesses and workspace-gc target the Studio, and two tests
+# depend on macOS behavior (lsof output handling, directory-to-link swaps).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'supersedable' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  test:
+    name: ${{ matrix.suite.name }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: claude-review-loop
+            dir: codex/skills/claude-review-loop
+            args: discover -s tests
+          - name: codex-review-loop
+            dir: claude/skills/codex-review-loop
+            args: discover -s tests
+          - name: pi-review-loop
+            dir: claude/skills/pi-review-loop
+            args: discover -s tests
+          - name: workspace-gc
+            dir: tools/workspace-gc
+            args: discover -s tests -t .
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Configure git identity for test repositories
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+      - name: Run suite
+        working-directory: ${{ matrix.suite.dir }}
+        run: python3 -m unittest ${{ matrix.suite.args }}
+
+  skills:
+    name: Skill frontmatter
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Install PyYAML
+        run: python3 -m pip install --disable-pip-version-check pyyaml==6.0.3
+      - name: Check SKILL.md frontmatter
+        run: python3 .github/scripts/check_skill_frontmatter.py

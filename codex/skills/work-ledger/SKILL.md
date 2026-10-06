@@ -17,11 +17,24 @@ edit them. `receipts/` holds campaign receipts that evidence links point to.
 ## Setup
 
 The shared `coordinator` token and URL live in `~/.config/work/env` (mode 600).
-Never print, copy or commit the token. Load it into the environment per command:
+Never print, copy or commit the token.
+
+On the Studio, run the CLI through the `work` command on PATH
+(`~/.local/bin/work`, managed by chezmoi). It loads the env file into its own
+process without echoing it, runs `uv run --project ~/projects/work-ledger work`
+with your arguments, works from any directory, and exits with a clear error if
+the env file, the checkout or `uv` is missing:
 
 ```sh
-cd ~/projects/work-ledger && git pull --ff-only
-bash -c 'set -a && . ~/.config/work/env && set +a && uv run work items'
+git -C ~/projects/work-ledger pull --ff-only
+work items
+```
+
+Fallback where the wrapper is not installed: load the env per command in a
+subshell, never with `set -x` or `env`/`printenv` in the same command:
+
+```sh
+bash -c 'cd ~/projects/work-ledger && set -a && . ~/.config/work/env && set +a && uv run work items'
 ```
 
 ## When to use
@@ -123,7 +136,7 @@ Items with history cannot be deleted; retire them as `dropped`.
 ## Example
 
 ```sh
-bash -c 'set -a && . ~/.config/work/env && set +a && uv run work upsert podcast-main-integration \
+work upsert podcast-main-integration \
   --stage merged --commit f26cc99 --next-action "Owner hands-on check" \
-  --evidence "Commit=https://github.com/ephes/podcast/commit/f26cc99" --checked-at now'
+  --evidence "Commit=https://github.com/ephes/podcast/commit/f26cc99" --checked-at now
 ```
