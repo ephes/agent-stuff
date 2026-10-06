@@ -10,6 +10,7 @@ chezmoi symlinks.
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | Codex, Claude | `cross-agent-review-cycle` | Canonical value-driven different-family review loop; owns the continuation, stopping, containment, and commit-gate rules. One shared copy under `codex/skills/`, symlinked for both agents |
 | Codex, Claude, Pi | `work-ledger` | How coordinators read and update the work app through its `work` CLI/API (stage ladder, verify-before-write, owner requests and responses, usage reports). Agent-neutral like `cross-agent-review-cycle`: one copy under `codex/skills/`, symlinked for every agent |
+| Codex, Claude, Pi | `multi-agent-coordination` | How a coordinator runs many workers: roles (coordinator, clerk, scouts), worker brief checklist, quota pacing, owner-load reduction, infrastructure and cleanup safety. Agent-neutral; one copy under `codex/skills/`, symlinked for every agent |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
 | Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default), working in a sandboxed throwaway copy of the repository; default reviewer for Codex and Pi implementers |
@@ -51,6 +52,7 @@ agent-stuff/
       opus-review-loop/  # legacy compatibility shim
       review-handoff/
       work-ledger/       # shared by Codex, Claude and Pi
+      multi-agent-coordination/  # shared by Codex, Claude and Pi
   claude/
     README.md
     skills/
@@ -122,7 +124,8 @@ can be tuned to its agent's model, tool names, and interaction patterns. The
 exception is `cross-agent-review-cycle`: it is agent-neutral policy, and keeping
 two copies let them drift into contradictory stopping rules, so every agent
 symlinks the single copy under `codex/skills/`. `work-ledger` follows the same
-rule: it describes a shared data contract, not agent mechanics.
+rule: it describes a shared data contract, not agent mechanics, and so does
+`multi-agent-coordination`, which is coordination policy.
 
 ## Handoff review consistency
 

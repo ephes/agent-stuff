@@ -13,6 +13,7 @@ Skills and command prompts for Claude Code.
 | `pi-review-loop` | Fail-closed Pi review gate using only `openai-codex/gpt-6.1-sol` at medium thinking; no provider or local-model fallback. Pi works in an unsandboxed throwaway copy of the repository. Builds its bundle and slice ledger with the shared modules from `claude-review-loop` |
 | `codex-review-loop` | Default reviewer for Claude implementers. Fail-closed Codex review gate using only `gpt-6.1-sol` at high reasoning (medium on request); no model, provider or reviewer fallback. The reviewer works in a sandboxed throwaway copy of the repository at the reviewed state, and the model is proven from Codex's session record. Uses the shared bundle, slot pool and slice ledger from `claude-review-loop` |
 | `work-ledger` (shared) | Read and update the work app via its CLI/API, loaded from `../codex/skills/work-ledger` |
+| `multi-agent-coordination` (shared) | Coordinator playbook for running many workers, loaded from `../codex/skills/multi-agent-coordination` |
 | `claude-review-loop` (shared dependency) | Supervised Claude gate loaded from `../codex/skills/claude-review-loop` |
 
 ## Commands

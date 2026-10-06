@@ -13,6 +13,7 @@ Skills for the Codex coding agent.
 | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default) |
 | `review-handoff` | Generate a code review prompt for a second agent |
 | `work-ledger` | Read and update the work app via its CLI/API; one agent-neutral copy shared with Claude and Pi |
+| `multi-agent-coordination` | Coordinator playbook for running many workers; one agent-neutral copy shared with Claude and Pi |
 
 `opus-review-loop` remains in the repository as an uninstalled compatibility
 shim for older CLI callers. New skill references must use `claude-review-loop`.

@@ -10,6 +10,7 @@ Skills for the Pi coding agent.
 | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | `review-handoff` | Generate a code review prompt for a second agent (includes `scripts/gather-changes.sh`) |
 | `work-ledger` (shared) | Read and update the work app via its CLI/API, loaded from `../codex/skills/work-ledger` |
+| `multi-agent-coordination` (shared) | Coordinator playbook for running many workers, loaded from `../codex/skills/multi-agent-coordination` |
 
 ## Install note
 
