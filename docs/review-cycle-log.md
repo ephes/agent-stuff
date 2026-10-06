@@ -1346,3 +1346,41 @@ Promotion: incident; the harness already documents the non-empty-change requirem
 Expected: scoped repair reviews and complete integration checks cover only the authored slice while shared user work remains separate. Actual: a root review included a pre-existing empty runtime lock and flagged it as part of the repair; isolated docs delta review could not combine staged-only with a prior baseline. Kept the user file outside the index/commits, adjudicated the false scope finding with Git evidence, and reviewed the exact shared documentation index in a private clone. Full-suite integration also exposed lightweight CGMES supervisor lookup and stale progress recipes missed by focused suites; repaired them and obtained an independent clean review. Unchanged result-view timing/layout cases passed in isolation and the final rebased full gate. Status: resolved; no accepted required finding remains.
 
 Promotion: incident; existing exact-scope, isolated-review and full-integration rules cover the failures.
+
+## 2026-10-02 — Results-spinner full-suite validation
+
+Expected: the full frontend gate validates the reviewed spinner fix. Actual: two sixteen-worker runs each timed out in a different existing Model Improvement permission test while awaiting its initial catalogue; the file passed in isolation. Impact: the full gate remained incomplete despite clean review and passing spinner regressions. Resolution: retained the full test selection and coverage thresholds, reran with eight workers, and obtained a complete passing gate. No change was made to the permission tests or default concurrency. Status: resolved for this slice; these results alone do not establish the catalogue timeout's cause.
+
+Promotion: incident — existing rules require full validation and evidence before declaring a failure unrelated; no new default concurrency rule is justified.
+
+## 2026-10-03 — Configuration opening progress review
+
+Expected: replacing a blocking wait cursor with the shared Qt loading modal preserves browser lifetime and replay ordering. Actual: the first passing full gate missed owner deletion during the nested event loop, cancellation recording an unpublished browser, prerequisite replay openings, and stale workflow documentation. Independent Sol review reproduced these paths; guarded cleanup, outcome-aware recording, serialization of all browser-opening actions, and complete documentation corrections resolved them. Repair regressions were independently shown to fail against the earlier implementation. The scoped cycle closed clean. Status: resolved.
+
+Promotion: incident — existing independent review, production-caller regression and documentation-sync rules cover these omissions; no new skill rule is required.
+
+## 2026-10-03 — Sandbox scale integration: cached fit ownership
+
+Expected: returning to an earlier scale preserves opening-size ownership for a later new scale. Actual: cached results geometry restored the window without updating its fit marker, so the next scale change skipped the fit. Independent Sol HIGH review found the mismatch; Sol LOW repair synchronized the marker through the shared restoration hook. A fresh125 comparison after100→150→100→125 fails against the old tree and passes after repair; independent scoped review closed CLEAN. Existing caller and grip guards stayed intact. Narrow test selection initially named a nonexistent module and was corrected before accepting evidence. Status: resolved.
+
+Promotion: incident — existing state-ownership review, meaningful regression and exact validation-selection rules cover this; no new skill rule needed.
+
+## 2026-10-04 — Integration staging failure caught before push
+
+A merge had already staged a deletion. Explicitly adding all HEAD-diff paths failed on that absent, already-staged file; a shell without fail-fast then continued to commit the earlier index. Committed-tree equality caught omitted final metadata before push. Preserved the true merge and added a reviewed metadata commit, with final tree equality verified. Use fail-fast around stage/tree/commit and stage only remaining worktree deltas in an already-staged merge. No history rewrite or unreviewed tree was pushed.
+
+## 2026-10-04 — Shared documentation remote advanced during integration
+
+A task-only reviewed docs commit could not fast-forward remote main after a disjoint committed plan update arrived. Merged remote main without rewriting history or staging the existing unrelated dirty plan. Compared the staged task-doc patch byte-for-byte with the reviewed commit and verified all other committed files matched remote main, rebuilt docs, then pushed only task commit and its reconciliation merge. Remote refresh before docs publication avoids an unnecessary rejected push.
+
+## 2026-10-04 — Catalogue rebuilds must preserve shown validation
+
+The full sandbox review reproduced a delayed operation catalogue rebuilding an already-marked edit selector without restoring its error mark. The same Process catalogue path reproduced the loss. Narrow held-response regressions failed before the repair; rechecking shown errors after both catalogue applications restored the marks, and independent Sol HIGH delta review closed CLEAN. The size gate also required one controller to own new field-error presentation; the old path was removed and the allowance lowered by the tool. Composition measurements initially missed an untracked helper and one archive invocation used a subdirectory-relative path; corrected snapshots included the staged helper and an explicit root archive before reporting package deltas.
+
+Promotion: incident — existing state-ownership, async regression, size and exact-evidence rules cover these events; no new skill rule needed.
+
+## 2026-10-06 — Review run directories in a scratchpad shared by parallel agents
+
+Expected: a run directory named after the round (`review/r1`) is fresh. Actual: several subagents share one session scratchpad; another agent's `review/r1` already existed, so the harness refused it ("run directory must be new or empty") and a context file written next to it vanished before the retry. No review ran against wrong content and no foreign result was read; the retry used a slice-named subdirectory. Use a directory unique to the slice (or `mktemp -d`) for both context files and run directories when agents share a scratchpad.
+
+Promotion: incident — the skill already says to create a fresh run directory with `mktemp -d`; following it avoids this.
