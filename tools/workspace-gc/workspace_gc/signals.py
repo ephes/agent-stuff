@@ -24,6 +24,10 @@ from dataclasses import dataclass, field
 # work-ledger skill's closeout rule). Every other stage keeps it.
 CLOSED_STAGES = frozenset({"merged", "installed", "accepted", "dropped"})
 
+# Work API servers from before paging return at most this many list rows and
+# do not say whether more exist.
+LEGACY_LIST_CAP = 500
+
 _TOKENISH = re.compile(r"[A-Za-z0-9_\-]{24,}")
 
 
@@ -152,6 +156,35 @@ def work_available(env_file: str, ledger_dir: str) -> SourceStatus | None:
     return None
 
 
+def work_list_gap(data: dict, rows: int) -> str:
+    """Why a `work items --json` result may be missing items, or "" if it is complete.
+
+    Servers before paging cap every list at LEGACY_LIST_CAP rows without saying
+    so. Paging servers report `count` (all matching rows), `truncated` and
+    `next_cursor`; a paging-aware `work` CLI follows every page and prints the
+    combined list with `next_cursor: null`. An older CLI against a paging
+    server prints only the first page. Anything that does not prove the list
+    complete counts as incomplete.
+    """
+    has_count = "count" in data
+    count = data.get("count")
+    truncated = data.get("truncated", False)
+    cursor = data.get("next_cursor")
+    if has_count and (not isinstance(count, int) or isinstance(count, bool) or count < 0):
+        return f"work items: unexpected count {str(count)[:20]!r}; list may be incomplete"
+    if not isinstance(truncated, bool):
+        return f"work items: unexpected truncated {str(truncated)[:20]!r}; list may be incomplete"
+    total = f"{rows} of {count}" if has_count else f"{rows} of more"
+    if truncated or cursor not in (None, ""):
+        return f"work items truncated: showing {total}; list may be incomplete"
+    if has_count and count > rows:
+        return f"work items truncated: showing {total}; list may be incomplete"
+    if not has_count and rows >= LEGACY_LIST_CAP:
+        return (f"work items: {rows} rows and no count (server caps lists at "
+                f"{LEGACY_LIST_CAP}); list may be incomplete")
+    return ""
+
+
 def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], SourceStatus]:
     unavailable = work_available(env_file, ledger_dir)
     if unavailable:
@@ -160,9 +193,14 @@ def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], Sour
     if code != 0:
         return [], SourceStatus("error", f"work items exit {code}: {err}")
     try:
-        slugs = [i["slug"] for i in json.loads(stdout)["items"]]
+        data = json.loads(stdout)
+        rows = data["items"]
+        if not isinstance(rows, list):
+            raise TypeError
+        slugs = [i["slug"] for i in rows]
     except (ValueError, KeyError, TypeError):
         return [], SourceStatus("error", "unexpected work items output")
+    gap = work_list_gap(data, len(slugs))
 
     def show(slug: str):
         c, o, e = run_work(env_file, ledger_dir, ["show", "--json", slug])
@@ -180,6 +218,11 @@ def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], Sour
                     refs.append(WorkRef(item["slug"], item.get("stage", ""), n))
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:
         return [], SourceStatus("error", _sanitize(str(exc)))
+    if gap:
+        # Keep the refs that did arrive (they still protect their worktrees),
+        # but the error status blocks --apply and makes every checkout without
+        # a listed active item class D (see inventory.apply_signals).
+        return refs, SourceStatus("error", f"{gap}; {len(refs)} listed with worktree")
     return refs, SourceStatus("ok", f"{len(slugs)} items, {len(refs)} with worktree")
 
 

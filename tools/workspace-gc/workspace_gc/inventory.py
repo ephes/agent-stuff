@@ -91,6 +91,7 @@ class Checkout:
     payloads: list[dict] = field(default_factory=list)
     in_use: list[str] = field(default_factory=list)
     work_items: list[dict] = field(default_factory=list)
+    work_unknown: str = ""      # why the work item list cannot rule out an active item
     size_kb: int = 0
     last_activity: str = ""     # newest of last commit, git-dir files, checkout dir
     idle_hours: float = -1.0
@@ -691,6 +692,11 @@ def apply_signals(co: Checkout, sig: Signals) -> None:
     for ref in sig.work_refs:
         if _is_under(co.path, ref.worktree) or _is_under(ref.worktree, co.path):
             co.work_items.append({"slug": ref.slug, "stage": ref.stage, "active": ref.active})
+    work = sig.status.get("work")
+    if work is not None and work.status == "error":
+        # The item list is incomplete or unreadable: any checkout could belong
+        # to an active item that did not arrive.
+        co.work_unknown = work.detail or "work items unreadable"
 
 
 def classify(co: Checkout, min_idle_hours: float = 0) -> None:
@@ -713,6 +719,9 @@ def classify(co: Checkout, min_idle_hours: float = 0) -> None:
     active = [w["slug"] for w in co.work_items if w["active"]]
     if active:
         d_reasons.append("active work item: " + ", ".join(active))
+    elif co.work_unknown:
+        d_reasons.append("work item list incomplete, may belong to an unlisted active item ("
+                         + co.work_unknown + ")")
     if min_idle_hours > 0 and 0 <= co.idle_hours < min_idle_hours:
         d_reasons.append(f"recently active ({co.last_activity}, idle {co.idle_hours:g}h "
                          f"< {min_idle_hours:g}h)")

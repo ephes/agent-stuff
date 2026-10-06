@@ -56,7 +56,16 @@ followed), it records:
   (`lsof`) anywhere in the checkout's top-level workspace directory;
 - work-app items whose `worktree` field covers the path (`work items --json` /
   `work show --json`, with `~/.config/work/env`; skipped if that file does not
-  exist);
+  exist). The item list must be provably complete. Servers before paging cap
+  every list at 500 rows without saying so, so 500 rows without a `count` is
+  treated as incomplete. With a paging server the `work` CLI follows every
+  page; the result is incomplete if it says `truncated`, still carries a
+  `next_cursor` (an older CLI that printed only the first page), has a `count`
+  larger than the rows it returned, or has malformed (non-integer or negative) `count`/`truncated`
+  fields. An incomplete list is reported as `work error (work items
+  truncated: showing N of M ...)`, blocks `--apply`, and makes every checkout
+  without a listed active item class D ("work item list incomplete"); the
+  same holds when the work source fails outright;
 - size (`du`), regenerable payloads with sizes (`build`, `.build`,
   `DerivedData`, `.venv`, `node_modules`, `target`, `dist`, ...), device
   backups (`.cache/device-db-backups`, `device-preservation-*`), and ignored
@@ -70,7 +79,7 @@ followed), it records:
 | A | removable | clean, nothing unique, every commit on the network remote, idle |
 | B | removable after push | like A, but some commits are on no network branch or tag; they are listed |
 | C | needs owner | dirty, stash, device backups, non-regenerable ignored files, hidden index flags, submodules, grafts, read-only or unreadable parts, no or unreachable network remote, containment unknown, keep-listed, not inspectable |
-| D | keep | in use, referenced by an active work item, recently active (default 48h, `--min-idle-hours`), owns linked worktrees, objects borrowed by another repository, main checkout |
+| D | keep | in use, referenced by an active work item, work item list incomplete or unreadable, recently active (default 48h, `--min-idle-hours`), owns linked worktrees, objects borrowed by another repository, main checkout |
 
 A work item counts as active unless its stage is `merged`, `installed`,
 `accepted` or `dropped`. A closed item's worktree is reported as a note.
@@ -115,7 +124,8 @@ symlinks. After removals, `git worktree prune` runs on the repositories that
 own the inventoried worktrees and on the clones under the roots.
 
 `--apply` refuses to run when an in-use source (herdr, processes, work app)
-failed, returned partial results (`lsof` exiting non-zero), or was turned off
+failed, returned partial results (`lsof` exiting non-zero, a truncated work
+item list), or was turned off
 with `--no-*`. A source that does not exist on this
 machine (no herdr, no work env file) is tolerated.
 
@@ -138,4 +148,5 @@ The tests build temporary repositories. A private `GIT_CONFIG_GLOBAL` rewrites
 `git@net.test:` to local bare repositories, so the "network" remote,
 `ls-remote`, clone and push all work offline. They cover the classes, the
 local-origin chain and alternates handling, tag containment, missing remote
-tips, the keep-list, and every removal guard under changed facts.
+tips, the keep-list, every removal guard under changed facts, and the
+complete, capped, truncated and paged shapes of the work item list.
