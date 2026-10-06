@@ -110,27 +110,92 @@ class ReviewCopy:
         return self.removed
 
 
+_DIR_FLAGS = (os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+              | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+
+
+def _restore_entry(dir_fd, name):
+    """Give the owner full access to the directory `name` under `dir_fd` and
+    to every directory below it.
+
+    Every step names one path component relative to a descriptor this walk
+    opened and verified, never a path, so nothing - not even a process the
+    reviewer left behind that swaps a directory for a symbolic link while the
+    walk runs - can steer it outside the tree: the permission change does not
+    follow a link (at worst it changes the link itself), the open refuses a
+    link, and a directory that is not the one just checked is skipped."""
+    try:
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        return
+    if not stat.S_ISDIR(st.st_mode):
+        return
+    if stat.S_IMODE(st.st_mode) & stat.S_IRWXU != stat.S_IRWXU:
+        try:
+            os.chmod(name, stat.S_IRWXU, dir_fd=dir_fd, follow_symlinks=False)
+        except (OSError, NotImplementedError):
+            return
+    try:
+        fd = os.open(name, _DIR_FLAGS, dir_fd=dir_fd)
+    except OSError:
+        return
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (st.st_dev, st.st_ino):
+            return
+        with os.scandir(fd) as entries:
+            children = [e.name for e in entries if e.is_dir(follow_symlinks=False)]
+        for child in children:
+            _restore_entry(fd, child)
+    except (OSError, RecursionError):
+        return
+    finally:
+        os.close(fd)
+
+
+def _restore_permissions(path):
+    """Undo what a reviewer may have done to its copy - a directory left with
+    mode 000 can be neither listed nor emptied - inside `path` only. Errors
+    are skipped; the removal that follows reports what is left."""
+    path = os.path.abspath(path)
+    try:
+        parent_fd = os.open(os.path.dirname(path), _DIR_FLAGS & ~getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return
+    try:
+        _restore_entry(parent_fd, os.path.basename(path))
+    finally:
+        os.close(parent_fd)
+
+
 def remove_tree(path):
     """Delete `path` and everything under it; True when nothing is left.
+
+    Never raises an ordinary exception: a copy that cannot be removed is
+    reported by the return value, so the caller still records the review's
+    outcome. Permissions are restored inside `path` only, and no symbolic
+    link is followed; `shutil.rmtree` then deletes through descriptors as
+    well.
 
     Callers remove the copy's root by path, not through the `ReviewCopy`, so
     an interrupt that arrives before `create_copy` returns cannot leave it
     behind."""
-    def _make_writable_and_retry(func, target, _exc):
-        try:
-            parent = os.path.dirname(target)
-            os.chmod(parent, stat.S_IRWXU)
-            if not os.path.islink(target):
-                os.chmod(target, stat.S_IRWXU)
-            func(target)
-        except OSError:
-            pass
-    if os.path.lexists(path):
-        if sys.version_info >= (3, 12):
-            shutil.rmtree(path, onexc=_make_writable_and_retry)
-        else:  # pragma: no cover - older interpreters
-            shutil.rmtree(path, onerror=lambda f, t, _e:
-                          _make_writable_and_retry(f, t, None))
+    def _ignore(*_args):
+        pass
+    try:
+        for _attempt in range(2):
+            if not os.path.lexists(path):
+                break
+            if os.path.islink(path) or not os.path.isdir(path):
+                os.unlink(path)
+                continue
+            _restore_permissions(path)
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_ignore)
+            else:  # pragma: no cover - older interpreters
+                shutil.rmtree(path, onerror=_ignore)
+    except Exception:  # noqa: BLE001 - cleanup must never hide the outcome
+        pass
     return not os.path.lexists(path)
 
 

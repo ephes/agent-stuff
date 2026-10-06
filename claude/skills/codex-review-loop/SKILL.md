@@ -132,6 +132,17 @@ A verdict is accepted only when all of these hold; otherwise the result is
 deliberately; an inherited `CODEX_HOME` is ignored), so the account that runs
 the review and the record the harness audits are the same.
 
+**The user's Codex configuration is not written.** The copy is declared an
+untrusted project for the one invocation (`-c projects={"<copy>"={trust_level=
+"untrusted"}}`). Without that declaration Codex 0.160 persists
+`trust_level = "trusted"` for every writable working directory into
+`$CODEX_HOME/config.toml`, so each review used to leave a stale
+`[projects."<run-dir>/workspace/repo"]` entry behind; entries left by earlier
+versions of this harness are safe to delete. Untrusted also means Codex never
+loads the reviewed repository's own `.codex/config.toml` — its MCP servers,
+hooks and exec policies — which is repository data under review. The canary
+checks both.
+
 Nothing can swap the reviewer: the installed `bin/codex-review-loop` runs the
 native binary behind the `codex` found on `PATH` and reads no variable that
 replaces it. The fake used
@@ -165,6 +176,15 @@ run — on success, failure, timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP are
 turned into the Ctrl-C path, which kills and reaps Codex first). SIGKILL
 cannot be caught; a copy it leaves behind is inside the run directory and
 nothing in the source repository refers to it.
+
+Before deleting it, the harness gives the owner access to every directory
+inside it again, so a reviewer that left a directory with mode 000 behind does
+not keep it alive. That walk works through directory descriptors, one path
+component at a time: it never follows a symbolic link and skips a directory
+that changed under it, so even a process the reviewer left running cannot steer
+it outside the copy. A copy that still cannot be deleted is reported on stderr
+and as `review_copy.removed: false` in `result.json`; the verdict and the slice
+ledger round are recorded either way.
 
 The harness does not use `--sandbox`. It selects a named Codex permission
 profile with the filesystem entries `:minimal` = read; `/tmp`, `/private/tmp`,
@@ -309,6 +329,8 @@ post-turn hang, an orphaned child, and malformed final messages. It records the
 environment it was given, so the allowlist is tested too, and what it found in
 its working directory before writing into it, so the tests prove the copy is
 the reviewed state, that its writes never reach the source worktree, and that it
-is removed after a clean run, a killed run and a SIGTERM to the harness. The fake refuses to
+is removed after a clean run, a killed run, a SIGTERM to the harness and a
+reviewer that left a directory with mode 000 in it (that round is still
+recorded in the slice ledger). The fake refuses to
 run against the real `~/.codex`, and it reaches the CLI only through
 `tests/harness_entry.py`.

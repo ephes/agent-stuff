@@ -226,8 +226,7 @@ def _upsert_item(a, inv, out_dir: str) -> str:
     ours = [r for r in requests if r.get("status") == "open" and r.get("kind") == "approval"
             and "workspace-gc" in (r.get("text") or "")]
     if removable and not ours:
-        gb = t["A"]["kb"] / 1024 / 1024
-        text = (f"Remove the {removable} class-A checkouts ({gb:.1f} GB) listed in "
+        text = (f"Remove the {removable} class-A checkouts ({rep.human_kb(t['A']['kb'])}) listed in "
                 f"{report_path} with workspace-gc --apply?")
         code, _, err = sig_mod.run_work(a.work_env, a.work_ledger,
                                         ["ask", a.work_item, text, "--kind", "approval"])

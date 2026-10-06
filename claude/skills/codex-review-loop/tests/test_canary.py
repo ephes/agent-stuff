@@ -69,6 +69,13 @@ class TestLiveBoundary(unittest.TestCase):
             fh.write("ignored.txt\n")
         with open(os.path.join(self.repo, "committed.txt"), "w") as fh:
             fh.write(self.allowed["committed"] + "\n")
+        # The reviewed repository's own Codex configuration must stay data:
+        # the copy is an untrusted project, so this MCP server never starts.
+        self.project_mcp_marker = os.path.join(base, "project-mcp-ran")
+        os.makedirs(os.path.join(self.repo, ".codex"))
+        with open(os.path.join(self.repo, ".codex", "config.toml"), "w") as fh:
+            fh.write("[mcp_servers.canary]\ncommand = \"/usr/bin/touch\"\n"
+                     f"args = [{command.toml_string(self.project_mcp_marker)}]\n")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", self.allowed["history"])
         self.outside = {
@@ -165,6 +172,13 @@ class TestLiveBoundary(unittest.TestCase):
         self.assertFalse(os.path.exists(self.source_write))
         self.assertIn("Operation not permitted", record)
         self.assertIn("printenv", calls, "canary inconclusive: no env read recorded")
+        # The run neither loaded the copy's project configuration nor left a
+        # trust entry for the copy in the user's Codex configuration.
+        self.assertFalse(os.path.exists(self.project_mcp_marker))
+        user_config = os.path.join(runner.codex_home(env), "config.toml")
+        if os.path.exists(user_config):
+            with open(user_config) as fh:
+                self.assertNotIn(os.path.realpath(self.copy.path), fh.read())
         final = result.raw_verdict_line or ""
         for name, marker in self.denied.items():
             with self.subTest(leaked=name):

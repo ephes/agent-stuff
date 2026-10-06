@@ -17,6 +17,10 @@ only, no dependencies.
 `DIR/latest.json` and, with `--work-item`, upserts that work-app item. It has no
 `--apply`.
 
+Sizes in the text report, the summary line and the work-app request are
+human-readable like `du -h` (`512K`, `27M`, `1.3G`); `--json` keeps the raw
+`kb` numbers.
+
 ## What each run looks at
 
 Every run takes a fresh inventory. No saved report is reused. For every git

@@ -174,6 +174,15 @@ timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP take the Ctrl-C path, which
 kills and reaps Pi first). SIGKILL cannot be caught; a copy it leaves behind is
 inside the run directory.
 
+Before deleting it, the harness gives the owner access to every directory
+inside it again, so a reviewer that left a directory with mode 000 behind does
+not keep it alive. That walk works through directory descriptors, one path
+component at a time: it never follows a symbolic link and skips a directory
+that changed under it, so even a process the reviewer left running cannot steer
+it outside the copy. A copy that still cannot be deleted is reported on stderr
+and as `review_copy.removed: false` in `result.json`; the verdict and the slice
+ledger round are recorded either way.
+
 **Pi has no sandbox, and the harness does not add one.** Its `bash`, `read`,
 `write` and `edit` tools run with the user's own permissions: nothing *enforces*
 that the reviewer stays in the copy. It can read the rest of the home

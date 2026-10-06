@@ -27,6 +27,17 @@ the installed Codex (0.158.0) rather than assumed:
   the code-mode `exec` tool, and a review without it could not read anything.
 - `unbounded_connection_retries` is disabled so a capacity failure ends the
   turn instead of retrying forever inside the deadline.
+- The copy is declared an untrusted project for this one invocation. Codex
+  persists `trust_level = "trusted"` for the working directory into
+  `$CODEX_HOME/config.toml` whenever a run may write there and the directory
+  is not already declared - with `--ignore-user-config` it never is, so every
+  review used to leave an entry for its throwaway copy in the user's config.
+  An explicit level in the session's own configuration stops the write
+  (checked against Codex 0.160.0; a dotted `projects."<path>".trust_level`
+  override does not, only a `projects` table does). Untrusted rather than
+  trusted, because a trusted project loads the reviewed repository's own
+  `.codex/config.toml` - its MCP servers, hooks and exec policies - which is
+  repository data under review, never configuration for the reviewer.
 """
 import json
 import os
@@ -82,6 +93,13 @@ def filesystem_profile(*, review_root, workspace_root, source_objects,
     return "{" + body + "}"
 
 
+def project_trust(path):
+    """The `-c` override that declares `path` an untrusted project, so Codex
+    neither loads its project configuration nor persists trust for it."""
+    key = toml_string(os.path.realpath(path))
+    return f'projects={{{key}={{trust_level="untrusted"}}}}'
+
+
 def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
               instruction, effort=REVIEW_EFFORT, toolchain=None):
     """`copy` is the prepared `workspace.ReviewCopy`; the reviewer starts in
@@ -110,6 +128,7 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
               + toml_string(os.path.realpath(copy.home)),
         "-c", "shell_environment_policy.set.TMPDIR="
               + toml_string(os.path.realpath(copy.tmp)),
+        "-c", project_trust(copy.path),
         "-c", "project_doc_max_bytes=0",
         "-c", "skills.include_instructions=false",
         "-c", "include_apps_instructions=false",

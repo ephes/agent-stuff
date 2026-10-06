@@ -65,6 +65,20 @@ class TestCommand(unittest.TestCase):
         self.assertIn(f'shell_environment_policy.set.TMPDIR="{self.copy.tmp}"',
                       self.overrides())
 
+    def test_the_copy_is_declared_an_untrusted_project(self):
+        # Declared for this invocation only, as a `projects` table: Codex
+        # persists trust for an undeclared writable working directory into
+        # the user's config, and a dotted override does not stop that.
+        tables = [tomllib.loads(o) for o in self.overrides()
+                  if o.startswith("projects=")]
+        self.assertEqual(tables, [{"projects": {
+            os.path.realpath(self.copy.path): {"trust_level": "untrusted"}}}])
+
+    def test_project_trust_quotes_awkward_paths(self):
+        override = command.project_trust('/x/a b"c]=.d')
+        self.assertEqual(tomllib.loads(override),
+                         {"projects": {'/x/a b"c]=.d': {"trust_level": "untrusted"}}})
+
     def test_only_existing_toolchain_prefixes_are_granted(self):
         profile = command.filesystem_profile(
             review_root=self.root, workspace_root=self.copy.root,

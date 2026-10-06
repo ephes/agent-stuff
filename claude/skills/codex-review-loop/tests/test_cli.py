@@ -8,6 +8,7 @@ import time
 import unittest
 
 from codex_review_loop import env as env_mod
+from codex_review_loop._shared import ledger as ledger_mod
 from tests.helpers import BIN, FAKE, RepoFixture
 
 
@@ -230,7 +231,7 @@ class TestCliFailsClosed(unittest.TestCase):
     def test_failed_round_is_not_recorded_in_the_ledger(self):
         self.assertFailed("wrong_model", "INVALID", "model_mismatch",
                           "--slice-id", "s1", "--record-baseline")
-        self.assertFalse(os.path.exists(os.path.join(self.fx.ledger, "s1.jsonl")))
+        self.assertFalse(os.path.exists(ledger_mod.path_for(self.fx.ledger, "s1")))
 
 
 class TestCliLifecycle(unittest.TestCase):
@@ -534,6 +535,19 @@ class TestCliRounds(unittest.TestCase):
 
     def tearDown(self):
         self.fx.cleanup()
+
+    @unittest.skipIf(os.geteuid() == 0, "mode 000 does not deny root")
+    def test_a_copy_left_unreadable_is_removed_and_the_round_recorded(self):
+        proc, result, run_dir = self.fx.run(
+            "issues", "--slice-id", "s1",
+            env_extra={"FAKE_CODEX_SEAL_COPY": "1"})
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(result["state"], "ISSUES")
+        self.assertEqual(result["round"], 1)
+        self.assertTrue(result["review_copy"]["removed"])
+        self.assertFalse(os.path.lexists(os.path.join(run_dir, "workspace")))
+        with open(result["convergence"]["ledger"]) as fh:
+            self.assertEqual(len(fh.read().splitlines()), 1)
 
     def test_baseline_and_ledger_across_rounds(self):
         proc, first, _ = self.fx.run("issues", "--slice-id", "s1",

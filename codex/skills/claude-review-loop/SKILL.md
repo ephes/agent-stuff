@@ -55,6 +55,15 @@ timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP take the Ctrl-C path, which
 kills and reaps Claude first). SIGKILL cannot be caught; a copy it leaves
 behind is inside the run directory.
 
+Before deleting it, the harness gives the owner access to every directory
+inside it again, so a reviewer that left a directory with mode 000 behind does
+not keep it alive. That walk works through directory descriptors, one path
+component at a time: it never follows a symbolic link and skips a directory
+that changed under it, so even a process the reviewer left running cannot steer
+it outside the copy. A copy that still cannot be deleted is reported on stderr
+and as `review_copy.removed: false` in `result.json`; the verdict and the slice
+ledger round are recorded either way.
+
 What confines the reviewer, verified by the canary under **Verification**:
 
 - **Bash** runs in Claude Code's OS sandbox (`failIfUnavailable`, no unsandboxed

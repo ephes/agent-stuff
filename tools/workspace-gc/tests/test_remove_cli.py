@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import unittest
 
 from tests.helpers import NET, GitFixture, SourceStatus, ok_signals, sh
 from workspace_gc import cli
@@ -295,7 +296,13 @@ class TestReport(GitFixture):
         kinds = [c[0] for c in self.calls]
         self.assertEqual(kinds, ["upsert", "show", "ask"])
         upsert = self.calls[0]
-        self.assertIn("1 removable (0.0 GB), 0 removable after push, 0 need you", upsert)
+        summary = [a for a in upsert if a.startswith("1 removable")]
+        self.assertEqual(len(summary), 1, upsert)
+        self.assertRegex(summary[0], r"^1 removable \(\d+(K|M)\), 0 removable after push, "
+                                     r"0 need you")
+        ask = " ".join(self.calls[2])
+        self.assertRegex(ask, r"class-A checkouts \(\d+(K|M)\) listed in")
+        self.assertNotIn("GB", ask)
         self.assertEqual(upsert[upsert.index("--owner") + 1], "jochen")
         self.assertNotIn("not-used-in-tests", " ".join(sum(self.calls, [])))
 
@@ -679,3 +686,12 @@ class TestReviewRound2(GitFixture):
         with self.assertRaises(rm_mod.Refused):
             rm_mod.remove_checkout(co, [self.ws], [self.projects], [])
         self.assertTrue(os.path.isdir(cand))
+
+
+class TestHumanSizes(unittest.TestCase):
+    def test_sizes_use_the_largest_fitting_unit(self):
+        from workspace_gc import report as rep
+        self.assertEqual(rep.human_kb(0), "0K")
+        self.assertEqual(rep.human_kb(512), "512K")
+        self.assertEqual(rep.human_kb(27 * 1024), "27M")
+        self.assertEqual(rep.human_kb(1024 * 1024 + 300 * 1024), "1.3G")

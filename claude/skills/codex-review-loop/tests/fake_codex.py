@@ -23,6 +23,9 @@ way Codex does. The mode comes from FAKE_CODEX_MODE:
   exit_143_after_turn      the same with status 143, which looks like SIGTERM
   bad_json, clean_with_findings, issues_without_findings
                            complete a turn with a malformed final message
+
+FAKE_CODEX_SEAL_COPY=1 additionally leaves a directory with mode 000, holding
+a file, inside the copy, as a reviewer once did.
 """
 import json
 import os
@@ -75,6 +78,12 @@ def main():
             fh.write("REVIEWER_WROTE = 1\n")
         with open(os.path.join(copy, "reviewer-scratch.txt"), "w") as fh:
             fh.write("scratch\n")
+        if os.environ.get("FAKE_CODEX_SEAL_COPY") == "1":
+            sealed = os.path.join(copy, "sealed")
+            os.mkdir(sealed)
+            with open(os.path.join(sealed, "f"), "w") as fh:
+                fh.write("x\n")
+            os.chmod(sealed, 0)
     out_path = arg_after("-o")
     # Report the effort the harness asked for, as Codex does; wrong_effort
     # reports another one.

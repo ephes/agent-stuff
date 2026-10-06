@@ -4,6 +4,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from claude_review_loop import workspace
 
@@ -161,6 +162,87 @@ class TestReviewCopy(unittest.TestCase):
         self.assertTrue(copy.remove())
         self.assertFalse(os.path.lexists(self.root))
         self.assertTrue(copy.summary()["removed"])
+
+    @unittest.skipIf(os.geteuid() == 0, "mode 000 does not deny root")
+    def test_remove_deletes_a_directory_left_with_mode_000(self):
+        copy = workspace.create_copy(self.repo, self.root)
+        sealed = os.path.join(copy.path, "sealed")
+        os.makedirs(os.path.join(sealed, "inner"))
+        self.write("sealed/inner/f", "x", repo=copy.path)
+        os.chmod(os.path.join(sealed, "inner"), 0)
+        os.chmod(sealed, 0)
+        self.assertTrue(copy.remove())
+        self.assertFalse(os.path.lexists(self.root))
+
+    @unittest.skipIf(os.geteuid() == 0, "mode 000 does not deny root")
+    def test_remove_never_follows_a_link_out_of_the_copy(self):
+        outside = os.path.join(self.tmp.name, "outside")
+        os.makedirs(os.path.join(outside, "keep"))
+        with open(os.path.join(outside, "keep", "f"), "w") as fh:
+            fh.write("keep\n")
+        os.chmod(outside, 0o500)
+        copy = workspace.create_copy(self.repo, self.root)
+        os.symlink(outside, os.path.join(copy.path, "link-dir"))
+        os.symlink(os.path.join(outside, "keep", "f"),
+                   os.path.join(copy.path, "link-file"))
+        os.chmod(copy.path, 0)
+        self.assertTrue(copy.remove())
+        self.assertFalse(os.path.lexists(self.root))
+        self.assertEqual(stat.S_IMODE(os.stat(outside).st_mode), 0o500)
+        self.assertTrue(os.path.exists(os.path.join(outside, "keep", "f")))
+
+    def _swap_for_link_during(self, step):
+        """Run remove_tree while `step` (an os function the walk calls) swaps
+        the sealed directory for a link to an outside directory right after
+        the walk checked it - what a process the reviewer left behind could
+        do. The outside directory must come through untouched."""
+        outside = os.path.join(self.tmp.name, "outside")
+        os.makedirs(os.path.join(outside, "keep"))
+        with open(os.path.join(outside, "keep", "f"), "w") as fh:
+            fh.write("keep\n")
+        os.chmod(os.path.join(outside, "keep"), 0o500)
+        os.chmod(outside, 0o500)
+        copy = workspace.create_copy(self.repo, self.root)
+        sealed = os.path.join(copy.path, "sealed")
+        os.mkdir(sealed)
+        os.chmod(sealed, 0)
+        real = getattr(workspace.os, step)
+        swapped = []
+
+        def racing(target, *args, **kwargs):
+            out = real(target, *args, **kwargs)
+            if os.path.basename(str(target)) == "sealed" and not swapped:
+                swapped.append(True)
+                os.chmod(sealed, 0o700)
+                os.rename(sealed, os.path.join(copy.path, "moved-away"))
+                os.symlink(outside, sealed)
+            return out
+        with mock.patch.object(workspace.os, step, racing):
+            removed = workspace.remove_tree(copy.root)
+        self.assertTrue(swapped, f"the walk never called os.{step} on the entry")
+        self.assertTrue(removed)
+        self.assertFalse(os.path.lexists(self.root))
+        self.assertEqual(stat.S_IMODE(os.stat(outside).st_mode), 0o500)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(outside, "keep")).st_mode), 0o500)
+        self.assertTrue(os.path.exists(os.path.join(outside, "keep", "f")))
+
+    @unittest.skipIf(os.geteuid() == 0, "mode 000 does not deny root")
+    def test_a_directory_swapped_for_a_link_after_its_check_is_not_followed(self):
+        self._swap_for_link_during("stat")
+
+    @unittest.skipIf(os.geteuid() == 0, "mode 000 does not deny root")
+    def test_a_directory_swapped_for_a_link_after_its_chmod_is_not_followed(self):
+        self._swap_for_link_during("chmod")
+
+    def test_remove_reports_failure_instead_of_raising(self):
+        copy = workspace.create_copy(self.repo, self.root)
+        self.addCleanup(workspace.remove_tree, self.root)
+
+        def boom(*_args, **_kwargs):
+            raise TypeError("rmtree broke")
+        with mock.patch.object(workspace.shutil, "rmtree", boom):
+            self.assertFalse(workspace.remove_tree(copy.root))
+        self.assertTrue(workspace.remove_tree(copy.root))
 
     def test_failed_build_leaves_nothing_behind(self):
         empty = os.path.join(self.tmp.name, "empty")

@@ -16,6 +16,7 @@ def short(path: str) -> str:
 
 
 def human_kb(kb: int) -> str:
+    """A `du -h`-style size: 512K, 27M, 1.3G."""
     if kb >= 1024 * 1024:
         return f"{kb / 1024 / 1024:.1f}G"
     if kb >= 1024:
@@ -34,8 +35,7 @@ def totals(inv: Inventory) -> dict[str, dict[str, int]]:
 
 def summary_line(inv: Inventory) -> str:
     t = totals(inv)
-    gb = t["A"]["kb"] / 1024 / 1024
-    return (f"{t['A']['count']} removable ({gb:.1f} GB), "
+    return (f"{t['A']['count']} removable ({human_kb(t['A']['kb'])}), "
             f"{t['B']['count']} removable after push, {t['C']['count']} need you")
 
 
