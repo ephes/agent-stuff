@@ -200,3 +200,115 @@ class TestRedact(unittest.TestCase):
         self.assertIn("\x0c", scrubbed)
         self.assertIn("\r\n", scrubbed)
         self.assertEqual(paths, ["config.txt"])
+
+
+# Obviously fake fixtures, assembled at runtime so no secret-shaped literal
+# sits in the source.
+_FAKE_AGE_KEY = "AGE-SECRET-KEY-" + "1" + "FAKEFAKEFAKE" * 5
+_FAKE_TOKEN = "0123456789abcdef" * 2 + "fake"
+_FAKE_BASIC = "ZmFrZS11c2VyOmZha2UtcGFzcw=="  # base64 of fake-user:fake-pass
+_FAKE_SLACK_PATH = "T00000FAKE/B00000FAKE/" + "FAKEFAKEFAKE" * 2
+_FAKE_MAILGUN = "key-" + "0f" * 16
+
+
+class TestNewSecretShapes(unittest.TestCase):
+    CASES = (
+        ("age", f"export SOPS_AGE_KEY={_FAKE_AGE_KEY}", _FAKE_AGE_KEY[16:]),
+        ("age-keyfile", f"{_FAKE_AGE_KEY}", _FAKE_AGE_KEY[16:]),
+        ("token-header", f"Authorization: Token {_FAKE_TOKEN}", _FAKE_TOKEN),
+        ("basic-header", f"authorization: basic {_FAKE_BASIC}", _FAKE_BASIC),
+        ("token-dict",
+         f'headers = {{"Authorization": "Token {_FAKE_TOKEN}"}}', _FAKE_TOKEN),
+        ("basic-curl", f"curl -H 'Authorization: Basic {_FAKE_BASIC}' x",
+         _FAKE_BASIC),
+        ("basic-shortest", "Authorization: Basic YTpi", "YTpi"),
+        ("basic-short-padded", "Authorization: Basic YWI6Yw==", "YWI6Yw=="),
+        ("bearer-dict",
+         f'{{"Authorization": "Bearer {_FAKE_TOKEN}"}}', _FAKE_TOKEN),
+        ("slack-webhook",
+         "url = https://hooks.slack.com/services/" + _FAKE_SLACK_PATH,
+         _FAKE_SLACK_PATH),
+        ("mailgun", f"mg = Client({_FAKE_MAILGUN!r})", _FAKE_MAILGUN),
+    )
+
+    def test_new_shapes_are_redacted_in_text(self):
+        for name, line, sensitive in self.CASES:
+            with self.subTest(name):
+                scrubbed, changed = redact.redact_text(f"before\n{line}\nafter")
+                self.assertTrue(changed)
+                self.assertNotIn(sensitive, scrubbed)
+                self.assertIn("[redacted: secret value]", scrubbed)
+
+    def test_new_shapes_are_redacted_in_diff(self):
+        for name, line, sensitive in self.CASES:
+            with self.subTest(name):
+                diff = (
+                    "diff --git a/app.py b/app.py\n"
+                    "--- a/app.py\n"
+                    "+++ b/app.py\n"
+                    "@@ -1,2 +1,2 @@\n"
+                    f"-{line}\n"
+                    f"+{line}\n"
+                    " unchanged = 1\n"
+                )
+                scrubbed, paths = redact.redact_diff(diff)
+                self.assertNotIn(sensitive, scrubbed)
+                self.assertEqual(paths, ["app.py"])
+
+    def test_header_scheme_survives_redaction(self):
+        scrubbed, _ = redact.redact_text(f"Authorization: Token {_FAKE_TOKEN}")
+        self.assertEqual(scrubbed, "Authorization: Token [redacted: secret value]")
+        scrubbed, _ = redact.redact_text(
+            "https://hooks.slack.com/services/" + _FAKE_SLACK_PATH)
+        self.assertEqual(
+            scrubbed, "https://hooks.slack.com/services/[redacted: secret value]")
+
+    def test_ordinary_code_and_prose_are_not_redacted(self):
+        for text in (
+            "Send the Token header; Basic auth is disabled.",
+            "Authorization: Token <token>",
+            "Authorization: Basic {credentials}",
+            'headers["Authorization"] = f"Token {token}"',
+            "Authorization: Token abc",
+            "Authorization: Basic YTp",
+            "AGE-SECRET-KEY-1 identities live in keys.txt",
+            "AGE-SECRET-KEY-1" + "lowercase" * 6,
+            "a key-value store with key-" + "0f" * 8,
+            "monkey-" + "0f" * 16,
+            "see hooks.slack.com/services/ for setup",
+            "token_type = 'Bearer'",
+        ):
+            with self.subTest(text):
+                self.assertEqual(redact.redact_text(text), (text, False))
+
+    def test_new_secret_paths(self):
+        for path in (
+            ".git-credentials", "home/.pgpass", ".npmrc", "keys.txt",
+            "sops/age/keys.txt", "certs/client.pfx", "vault/Passwords.kdbx",
+            "credentials.json", "gcp/credentials.json",
+        ):
+            with self.subTest(path):
+                self.assertTrue(redact.is_secret_path(path))
+        for path in (
+            "keys.py", "src/keys.txt.md", "keys_test.txt", "pgpass.py",
+            "credentials.py", "docs/credentials.md", "npmrc.example",
+            "git-credentials.md", "my-keys.txt",
+        ):
+            with self.subTest(path):
+                self.assertFalse(redact.is_secret_path(path))
+
+    def test_new_secret_paths_are_withheld_from_diff(self):
+        for path in (".git-credentials", ".pgpass", "keys.txt"):
+            with self.subTest(path):
+                diff = (
+                    f"diff --git a/{path} b/{path}\n"
+                    "new file mode 100644\n"
+                    "--- /dev/null\n"
+                    f"+++ b/{path}\n"
+                    "@@ -0,0 +1 @@\n"
+                    "+fake-host:5432:db:fake-user:fake-password-value\n"
+                )
+                scrubbed, paths = redact.redact_diff(diff)
+                self.assertNotIn("fake-password-value", scrubbed)
+                self.assertIn("[redacted: secret-looking file not sent]", scrubbed)
+                self.assertEqual(paths, [path])

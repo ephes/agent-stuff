@@ -90,6 +90,23 @@ class TestReviewCopy(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(copy.path, "ignored.txt")))
         self.assertIn(".env", copy.excluded)
 
+    def test_untracked_credential_files_stay_out(self):
+        fakes = {
+            ".pgpass": "fake-host:5432:db:fake-user:fake-pass\n",
+            ".git-credentials": "https://fake-user:fake-pass@example.invalid\n",
+            "sops/age/keys.txt": "# fake age identity\n",
+            "client.pfx": "fake\n",
+        }
+        for path, content in fakes.items():
+            self.write(path, content)
+        copy = workspace.create_copy(self.repo, self.root)
+        self.addCleanup(copy.remove)
+        for path in fakes:
+            with self.subTest(path):
+                self.assertFalse(os.path.exists(os.path.join(copy.path, path)))
+                self.assertIn(path, copy.excluded)
+        self.assertEqual(self.read("new/untracked.py", copy.path), "NEW = 1\n")
+
     def test_modified_tracked_secret_keeps_its_committed_version(self):
         self.write("service.key", "key: committed\n")
         git(self.repo, "add", "service.key")

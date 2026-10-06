@@ -113,7 +113,18 @@ checked by the monitor - a command line has no reliable target - and rely on
 the OS sandbox. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
-recorded and make a clean verdict scoped. Read the `redactions` manifest and
+recorded and make a clean verdict scoped. The rules live in
+`claude_review_loop/redact.py`. Secret-looking files are matched by basename:
+`.env`, `.env.*`, `*.env`, `.envrc`, `.netrc`, `.pypirc`, `.npmrc`,
+`.git-credentials`, `.pgpass`, `credentials.json`, `keys.txt` (the age identity
+file), `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.kdbx` and `id_rsa`/`id_ed25519`/
+`id_ecdsa`/`id_dsa`. Their diff is withheld, and an untracked or locally
+modified one stays out of the reviewer's repository copy. Token patterns cover
+private-key blocks, AWS/GitHub/GitLab/Slack/Anthropic/OpenAI/Stripe/Google/npm/
+PyPI/Mailgun keys, age secret keys (`AGE-SECRET-KEY-1...`), JWTs,
+`Authorization: Bearer|Token|Basic` header values, Slack webhook URLs, URL
+passwords and long values assigned to secret-named keys. Token patterns apply
+to the bundle only; the repository copy is not value-redacted. Read the `redactions` manifest and
 confirm each entry is genuinely a secret: locals named `token` in issuance code
 have been redacted as credentials, leaving holes in unchanged code. Rename the
 innocent local rather than loosening the pattern - a redaction false positive is

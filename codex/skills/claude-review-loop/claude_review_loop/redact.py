@@ -9,7 +9,10 @@ import shlex
 SECRET_PATH_PATTERNS = (
     ".env", ".env.*", ".envrc", ".netrc", ".pypirc", "*.env",
     "*.pem", "*.key", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
-    "*.p12",
+    "*.p12", "*.pfx", "*.kdbx",
+    ".git-credentials", ".pgpass", ".npmrc", "credentials.json",
+    # age identity file (SOPS with age recipients keeps it as keys.txt).
+    "keys.txt",
 )
 
 SECRET_VALUE_PATTERNS = (
@@ -26,7 +29,17 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"(?<![A-Za-z0-9_])npm_[A-Za-z0-9]{36}"),
     re.compile(r"(?<![A-Za-z0-9_])pypi-[A-Za-z0-9_-]{16,}"),
     re.compile(r"eyJ[A-Za-z0-9_=-]{10,}\.eyJ[A-Za-z0-9_=-]{10,}\.[A-Za-z0-9_=-]{8,}"),
-    re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
+    re.compile(r"(?<![A-Za-z0-9_])AGE-SECRET-KEY-1[0-9A-Z]{50,}"),
+    re.compile(r"(?<![A-Za-z0-9_])key-[0-9a-f]{32}(?![0-9a-f])"),
+    re.compile(r"(?i)(hooks\.slack\.com/(?:services|workflows|triggers)/)"
+               r"[A-Za-z0-9_/-]{16,}"),
+    re.compile(r"(?i)(Authorization['\"]?\s*[:=]\s*['\"]?Bearer\s+)"
+               r"[A-Za-z0-9._~+/=-]{16,}"),
+    re.compile(r"(?i)(Authorization['\"]?\s*[:=]\s*['\"]?Token\s+)"
+               r"[A-Za-z0-9._~+/=-]{8,}"),
+    # Base64 of the shortest user:pass ("a:b") is four characters.
+    re.compile(r"(?i)(Authorization['\"]?\s*[:=]\s*['\"]?Basic\s+)"
+               r"[A-Za-z0-9._~+/=-]{4,}"),
     re.compile(r"([a-z][a-z0-9+.-]*://[^\s:/@]*:)[^\s:/@]+(?=@)"),
 )
 

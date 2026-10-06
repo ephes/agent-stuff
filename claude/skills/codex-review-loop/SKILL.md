@@ -165,8 +165,10 @@ worktree with staged, unstaged and untracked changes; the index with
 `git status` and `git diff HEAD` show them; the history is borrowed read-only
 from the source object store through `objects/info/alternates`. It holds every
 tracked file, not ignored files (virtual environments, build output, the usual
-`.env`), not untracked or locally modified secret-looking paths (listed under
-`review_copy.excluded`; a modified tracked one keeps its committed version),
+`.env`), not untracked or locally modified secret-looking paths (`.env`,
+`.git-credentials`, `.pgpass`, `keys.txt`, `*.pem` and the rest of the list in
+`claude-review-loop`'s SKILL.md; listed under `review_copy.excluded`; a modified
+tracked one keeps its committed version),
 and not submodule contents; Git LFS files stay pointers. Hooks do not run while it is built, and its
 `origin` remote is removed. It is a clone, not a worktree, so nothing is
 registered in the source repository. Building the reviewed tree writes

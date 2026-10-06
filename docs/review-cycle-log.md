@@ -2,6 +2,19 @@
 
 Status: active log
 
+## 2026-10-06 — Redact age keys, Token/Basic auth and credential files
+
+A probe of the shared redaction (`claude_review_loop/redact.py`, used by all
+three review harnesses) showed that age secret keys, `Authorization: Token` and
+`Authorization: Basic` header values, Slack webhook URLs and Mailgun keys
+reached the bundle unchanged. Files such as `.git-credentials`, `.pgpass`,
+`.npmrc`, `keys.txt`, `credentials.json`, `*.pfx` and `*.kdbx` were not treated
+as secret, so the diff showed them and the reviewer's repository copy included
+them when untracked. The value patterns and the path list now cover these
+shapes, with negative tests so prose such as "the Token header" is left alone.
+
+Promotion: promoted - `claude-review-loop` redaction; documented in the three harness SKILL.md files
+
 ## 2026-09-23 — Let Claude's own denial settle an out-of-scope reviewer read
 
 Session traces from July to September show about half of all `claude-review-loop`

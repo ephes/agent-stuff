@@ -37,8 +37,11 @@ implement and fix; Pi reviews with fresh context.
    It is foreground and returns a structured result — do NOT background it and poll.
 
    The bundle is built by the shared implementation from `claude-review-loop`,
-   so it is redacted: secret-looking files, private-key blocks and
-   high-confidence token patterns are removed, and the `redactions` manifest
+   so it is redacted: secret-looking files (`.env`, `.git-credentials`,
+   `.pgpass`, age `keys.txt`, ...), private-key blocks and high-confidence
+   token patterns (including age secret keys, `Authorization: Bearer|Token|Basic`
+   values and Slack webhook URLs) are removed - the full list is in
+   `claude-review-loop`'s SKILL.md - and the `redactions` manifest
    makes a clean verdict scoped. It is Pi's starting point, not the whole review
    surface: Pi works in a throwaway copy of the repository at the reviewed state
    and can read, search, run git and tests there (see **Repository copy and
@@ -156,7 +159,9 @@ changes; the index with `--staged-only`). The reviewed changes are uncommitted
 work there, so `git status` and `git diff HEAD` show them, and the history is
 borrowed read-only from the source object store. The copy holds every tracked
 file, not ignored files (virtual environments, build output, the usual `.env`),
-not untracked or locally modified secret-looking paths (listed under
+not untracked or locally modified secret-looking paths (`.env`,
+`.git-credentials`, `.pgpass`, `keys.txt` and the rest of the list in
+`claude-review-loop`'s SKILL.md; listed under
 `review_copy.excluded`; a modified tracked one keeps its committed version), and
 not submodule contents; Git LFS files stay pointers. Hooks do not run while it is built, and its `origin`
 remote is removed, so a `git push` there has nowhere to go. It is a clone, not a
