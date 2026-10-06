@@ -25,6 +25,12 @@ chezmoi symlinks.
 | Pi | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | Pi | `review-handoff` | Generate a code review prompt for a second agent |
 
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| [`tools/workspace-gc`](tools/workspace-gc/README.md) | Live inventory of agent checkouts under `~/workspaces` (classes A removable / B after push / C needs owner / D keep), guarded removal of class A only (dry run by default), and the report behind the weekly Studio job. The `work-ledger` closeout step uses its single-path `remove` |
+
 ## Repo structure
 
 ```text
@@ -61,6 +67,8 @@ agent-stuff/
       commit-ready/
       commit-workflow/
       review-handoff/
+  tools/
+    workspace-gc/       # agent-neutral CLI, not a skill; run from this checkout
   README.md
 ```
 

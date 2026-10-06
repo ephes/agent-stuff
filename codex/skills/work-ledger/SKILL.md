@@ -92,6 +92,34 @@ Items with history cannot be deleted; retire them as `dropped`.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
 
+## Worktrees and closeout
+
+- Name a new worktree `ws-<item-slug>` under `~/workspaces` (for example
+  `~/workspaces/ws-podcast-main-integration/podcast`) and record that path in the
+  item's `worktree` field when you create or claim the item. The field is what
+  keeps the checkout out of `workspace-gc`'s removable set while the item is
+  active.
+- When an item reaches `merged`, `accepted` or `dropped`, the coordinator
+  removes that item's worktree. First verify that it is clean and pushed. Then
+  run the guarded single-path removal, which refuses anything that is not class
+  A (removable):
+
+  ```sh
+  ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc remove <path>          # dry run: class and reasons
+  ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc remove --apply <path>
+  ```
+
+  `git worktree remove <path>` without `--force` is the fallback. Never use
+  `--force` and never `rm -rf` a checkout. If removal is refused (dirty,
+  unpushed, stash, device backups, in use), leave the checkout and say why in
+  the item's `notes`, or ask the owner.
+- Record the removal on the item: clear `worktree` (`--worktree ""`) and note
+  `worktree removed <date>` in `notes`.
+- A weekly report-only job on the Studio writes
+  `~/.local/state/workspace-gc/latest.txt` and keeps the item
+  `workspace-gc-report` current. It never removes anything. Removing what it
+  lists needs the owner's approval and runs `workspace-gc --apply`.
+
 ## Example
 
 ```sh
