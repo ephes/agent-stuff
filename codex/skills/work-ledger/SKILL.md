@@ -82,7 +82,7 @@ verified, not the one you expect.
 | `merged` | the commit is on the remote default branch |
 | `installed` | running on the target device or host (version observed there) |
 | `accepted` | the owner answered the item's newest acceptance request (`work ask --kind acceptance`) with *tested OK*; the API rejects it with 400 otherwise |
-| `blocked` / `parked` / `dropped` | cannot move / paused or finished at a checkpoint / abandoned |
+| `blocked` / `parked` / `dropped` | cannot move / paused or finished at a checkpoint / abandoned (only the owner reopens it) |
 
 Reviewed is not merged, merged is not installed, installed is not accepted.
 Items with history cannot be deleted; retire them as `dropped`.
@@ -112,7 +112,13 @@ Items with history cannot be deleted; retire them as `dropped`.
   and `details.stage` says why (creating an item directly at `accepted` fails
   too). After a *problem* answer, fix it and ask a new acceptance request; a
   newer request supersedes an older *tested OK*. Re-sending `accepted` on an
-  already accepted item and every other stage change stay allowed.
+  already accepted item and every other stage change (except leaving
+  `dropped`) stay allowed.
+- **Only the owner reopens `dropped`.** A token cannot move an item out of
+  `dropped` (400). If a dropped item should come back, ask with
+  `work ask --kind approval` and wait for the owner to reopen it in the UI; an
+  approve answer does not reopen it. Tokens may still drop items and update
+  other fields of a dropped item.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
 
