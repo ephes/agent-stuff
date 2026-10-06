@@ -612,6 +612,8 @@ orchestration, or backlog shape did not work as expected.
 
 - Reusable agent/process lessons go in:
   `~/projects/agent-stuff/docs/review-cycle-log.md`
+  Append the lesson and commit+push it immediately in its own small commit
+  (fetch/rebase first); never leave the log uncommitted.
 - Project-specific execution lessons go in that project's own workflow log
   when one exists, for example:
   `docs/workflow/lessons.md`

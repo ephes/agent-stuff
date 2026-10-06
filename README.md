@@ -173,6 +173,9 @@ carries the rule, or `pending` with what is still missing. Promoting the lesson
 is part of closing the cycle, not a later cleanup pass:
 `grep '^- Promotion: pending' docs/review-cycle-log.md` is the backlog.
 
+Append the lesson and commit+push it immediately in its own small commit
+(fetch/rebase first); never leave the log uncommitted.
+
 Closed history lives in `docs/archive/`.
 
 ## Design decisions

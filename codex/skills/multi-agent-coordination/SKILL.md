@@ -88,6 +88,10 @@ Every brief states the item slug, goal, acceptance criteria, and:
   from another worktree only when their inputs (crates, project.yml) match.
 - **Closeout**: the worker's worktree is removed at item closeout
   (`work-ledger`, Worktrees and closeout).
+- **Lessons**: a worker or coordinator that appends a lesson to
+  `~/projects/agent-stuff/docs/review-cycle-log.md` commits and pushes it
+  immediately in its own small commit (fetch/rebase first); never leave the
+  log uncommitted, because a later shutdown strands it.
 
 ## Infrastructure and safety
 
