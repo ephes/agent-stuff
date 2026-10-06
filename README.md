@@ -18,7 +18,7 @@ chezmoi symlinks.
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
 | Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-6.1-sol` at medium thinking (high on request), working in an unsandboxed throwaway copy of the repository; shares the bundle and slice ledger with `claude-review-loop` |
-| Claude | `codex-review-loop` | Default reviewer for Claude implementers: fail-closed Codex gate using only `gpt-6.1-sol` at medium reasoning (high on request, `--effort high`); proves the model from Codex's session record, confines the reviewer to a sandboxed throwaway copy of the repository, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
+| Claude | `codex-review-loop` | Default reviewer for Claude implementers: fail-closed Codex gate using only `gpt-6.1-sol` at high reasoning (medium on request, `--effort medium`); proves the model from Codex's session record, confines the reviewer to a sandboxed throwaway copy of the repository, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
 | Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `cmsg` (command) | Commit with a clean message, no self-references |
 | Pi | `commit-ready` | Assess commit readiness without creating a commit |

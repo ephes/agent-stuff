@@ -32,9 +32,9 @@ import json
 import os
 
 REVIEW_MODEL = "gpt-6.1-sol"
-REVIEW_EFFORT = "medium"
+REVIEW_EFFORT = "high"
 #: The efforts a caller may ask for. The audit pins every turn to the one asked
-#: for, so a run at high is proven high exactly as the default is proven medium.
+#: for, so a run at medium is proven medium exactly as the default is proven high.
 REVIEW_EFFORTS = ("medium", "high")
 PROFILE_NAME = "codex_review_loop"
 

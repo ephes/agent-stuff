@@ -21,7 +21,7 @@ choice overrides this default; record same-family reviews accurately.
 - `REVIEWER_MODEL` may override the default model for the selected reviewer.
 - If `REVIEWER_AGENT` is unset or `auto`:
   - Claude-family implementer: use `codex` through the supervised
-    `codex-review-loop` harness, which runs `gpt-6.1-sol` at `medium` reasoning.
+    `codex-review-loop` harness, which runs `gpt-6.1-sol` at `high` reasoning.
   - Codex/GPT-family implementer, including Pi: use `claude` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-claude-opus-5-5}"` (Opus 5.5) at
     `medium` effort, the harness default for that model.

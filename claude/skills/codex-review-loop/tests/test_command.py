@@ -77,7 +77,7 @@ class TestCommand(unittest.TestCase):
         self.assertEqual(c[:4], ["codex", "-a", "never", "exec"])
         self.assertEqual(c[c.index("-m") + 1], "gpt-6.1-sol")
         self.assertEqual(c[-1], "-")
-        self.assertIn('model_reasoning_effort="medium"', self.overrides())
+        self.assertIn('model_reasoning_effort="high"', self.overrides())
         self.assertIn(f'default_permissions="{command.PROFILE_NAME}"', self.overrides())
         self.assertIn(f"permissions.{command.PROFILE_NAME}.network.enabled=true",
                       self.overrides())

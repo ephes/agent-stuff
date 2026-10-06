@@ -68,17 +68,17 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertIn("REVIEW: CLEAN", proc.stdout)
         self.assertEqual(result["state"], "CLEAN")
         self.assertEqual(result["observed_models"], ["gpt-6.1-sol"])
-        self.assertEqual(result["observed_efforts"], ["medium"])
+        self.assertEqual(result["observed_efforts"], ["high"])
         self.assertIsNone(result["failure_kind"])
 
-    def test_high_effort_is_passed_through_and_proven(self):
-        proc, result, _ = self.fx.run("clean", "--effort", "high")
+    def test_medium_effort_is_passed_through_and_proven(self):
+        proc, result, _ = self.fx.run("clean", "--effort", "medium")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("effort=high", proc.stdout)
+        self.assertIn("effort=medium", proc.stdout)
         with open(os.path.join(self.fx.home, "last-argv.json")) as fh:
-            self.assertIn('model_reasoning_effort="high"', json.load(fh))
-        self.assertEqual(result["effort"], "high")
-        self.assertEqual(result["observed_efforts"], ["high"])
+            self.assertIn('model_reasoning_effort="medium"', json.load(fh))
+        self.assertEqual(result["effort"], "medium")
+        self.assertEqual(result["observed_efforts"], ["medium"])
 
     def test_issues_exits_one_with_items(self):
         proc, result, _ = self.fx.run("issues")
