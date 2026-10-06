@@ -37,6 +37,10 @@ subshell, never with `set -x` or `env`/`printenv` in the same command:
 bash -c 'cd ~/projects/work-ledger && set -a && . ~/.config/work/env && set +a && uv run work items'
 ```
 
+Name yourself so the history reads `api:<token>/<agent>` instead of only the
+shared token: `export WORK_AGENT=<name>` (lowercase letters, digits, dashes,
+max 40) or `--agent <name>` on any command, which overrides it.
+
 ## When to use
 
 - **Read** (`work items`, `work show <slug>`) before choosing, resuming or
@@ -45,6 +49,8 @@ bash -c 'cd ~/projects/work-ledger && set -a && . ~/.config/work/env && set +a &
 - **Update** (`work upsert <slug> ...`) when an item changes stage, owner or
   next action, becomes blocked, or new evidence (commit, receipt, install)
   exists.
+- **Note progress** (`work note <slug> "<text>" [--link URL]`) to append to the
+  item's history without touching its fields; `work notes <slug>` lists them.
 - **Ask** (`work ask <slug> "<text>" --kind question|approval|acceptance`) when
   only the owner can decide or check something.
 - **Pick up answers** (`work responses`) at the start of a coordination turn;
@@ -60,7 +66,9 @@ Slug: lowercase words with hyphens. Fields: `title`, `project`, `stage`,
 `owner`, `next_action`, `checked_at` (required on every update), optional
 `repo_url` (network URL, never a local path), `branch`, `commit`, `worktree`,
 `blocked_reason` (required for `blocked`), `notes`, `evidence` (http(s) links;
-`--evidence` replaces the list). Fields not given stay unchanged.
+`--evidence` replaces the list). Fields not given stay unchanged. The `notes`
+field is the item's standing summary and `--notes` overwrites it; progress goes
+in `work note`.
 
 `owner` is who acts next: `claude`, `codex`, `herdr:<workspace label>`,
 `jochen`.
@@ -119,6 +127,12 @@ Items with history cannot be deleted; retire them as `dropped`.
   `work ask --kind approval` and wait for the owner to reopen it in the UI; an
   approve answer does not reopen it. Tokens may still drop items and update
   other fields of a dropped item.
+- **Avoid lost updates.** Many agents write the same items. Use `work note`
+  for progress (notes never conflict and do not change `updated_at`). When
+  changing fields an owner or another agent may have edited (`--notes`,
+  `--evidence`, `--owner`, `--next-action`), pass the `updated_at` from
+  `work show <slug> --json` as `--expect-updated-at <updated_at>`; on a
+  conflict (HTTP 409, exit 1) re-read, merge and retry.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
 
@@ -143,14 +157,16 @@ Items with history cannot be deleted; retire them as `dropped`.
   `--force` and never `rm -rf` a checkout. If removal is refused (dirty,
   unpushed, stash, device backups, in use), leave the checkout and say why in
   the item's `notes`, or ask the owner.
-- Record the removal on the item: clear `worktree` (`--worktree ""`) and note
-  `worktree removed <date>` in `notes`.
+- Record the removal on the item: clear `worktree` (`--worktree ""`) and add
+  `work note <slug> "worktree removed <date>"`.
 - A weekly report-only job on the Studio writes
   `~/.local/state/workspace-gc/latest.txt` and keeps the item
   `workspace-gc-report` current. It never removes anything. Removing what it
   lists needs the owner's approval and runs `workspace-gc --apply`.
 
 ## Example
+
+<!-- TODO: document `work items` paging once fix/api-list-truncation merges into work-ledger main. -->
 
 ```sh
 work upsert podcast-main-integration \

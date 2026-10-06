@@ -9,7 +9,7 @@ chezmoi symlinks.
 |-------|-------|---------|
 | Codex | `commit-workflow` | Inspect, validate, and commit changes with docs sync |
 | Codex, Claude | `cross-agent-review-cycle` | Canonical value-driven different-family review loop; owns the continuation, stopping, containment, and commit-gate rules. One shared copy under `codex/skills/`, symlinked for both agents |
-| Codex, Claude, Pi | `work-ledger` | How coordinators read and update the work app through its `work` CLI/API (on the Studio via the chezmoi-managed `work` command, which loads the token without echoing it) (stage ladder, verify-before-write, owner requests and responses, usage reports). Agent-neutral like `cross-agent-review-cycle`: one copy under `codex/skills/`, symlinked for every agent |
+| Codex, Claude, Pi | `work-ledger` | How coordinators read and update the work app through its `work` CLI/API (on the Studio via the chezmoi-managed `work` command, which loads the token without echoing it) (stage ladder, verify-before-write, progress notes, agent attribution and the lost-update guard, owner requests and responses, usage reports). Agent-neutral like `cross-agent-review-cycle`: one copy under `codex/skills/`, symlinked for every agent |
 | Codex, Claude, Pi | `multi-agent-coordination` | How a coordinator runs many workers: roles (coordinator, clerk, scouts), worker brief checklist, quota pacing, owner-load reduction, infrastructure and cleanup safety. Agent-neutral; one copy under `codex/skills/`, symlinked for every agent |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
