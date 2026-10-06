@@ -81,7 +81,7 @@ verified, not the one you expect.
 | `pushed` | `git ls-remote` shows the commit on a non-default branch |
 | `merged` | the commit is on the remote default branch |
 | `installed` | running on the target device or host (version observed there) |
-| `accepted` | the owner checked it hands-on and said yes |
+| `accepted` | the owner answered the item's newest acceptance request (`work ask --kind acceptance`) with *tested OK*; the API rejects it with 400 otherwise |
 | `blocked` / `parked` / `dropped` | cannot move / paused or finished at a checkpoint / abandoned |
 
 Reviewed is not merged, merged is not installed, installed is not accepted.
@@ -102,6 +102,17 @@ Items with history cannot be deleted; retire them as `dropped`.
 - **Owner responses are decisions, not commands to the app.** The app executes
   nothing. Act on a response in your own session, within the permissions the
   owner gave, record the outcome on the item, then consume the response.
+- **Only the owner signs off `accepted`.** Once an item is `installed` (or
+  otherwise ready for a hands-on check), ask with
+  `work ask <slug> "<what to test>" --kind acceptance`, wait for the answer
+  via `work responses`, and set `--stage accepted` only after the owner
+  answered *tested OK*. The API checks the item's newest acceptance request
+  that was not withdrawn: if there is none, it is still open, it was answered
+  *problem*, or it is a `question`/`approval` instead, the PUT fails with `400`
+  and `details.stage` says why (creating an item directly at `accepted` fails
+  too). After a *problem* answer, fix it and ask a new acceptance request; a
+  newer request supersedes an older *tested OK*. Re-sending `accepted` on an
+  already accepted item and every other stage change stay allowed.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
 
