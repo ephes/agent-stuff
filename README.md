@@ -31,6 +31,7 @@ chezmoi symlinks.
 | Tool | Purpose |
 |------|---------|
 | [`tools/workspace-gc`](tools/workspace-gc/README.md) | Live inventory of agent checkouts under `~/workspaces` (classes A removable / B after push / C needs owner / D keep), guarded removal of class A only (dry run by default), and the report behind the weekly Studio job. The `work-ledger` closeout step uses its single-path `remove` |
+| [`tools/guard-projects`](tools/guard-projects/README.md) | Opt-in Claude Code `PreToolUse` hook that keeps `~/projects` read-only for agents and blocks pushes outside `github.com/ephes/`, plus `check-push-remote` for pre-push checks |
 
 ## CI
 
@@ -38,7 +39,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main` and on
 pull requests, with no secrets:
 
 - the hermetic unittest suites of `claude-review-loop`, `codex-review-loop`,
-  `pi-review-loop` and `tools/workspace-gc`, on a macOS runner because the
+  `pi-review-loop`, `tools/workspace-gc` and `tools/guard-projects`, on a macOS runner because the
   harnesses target the Studio. The live model canaries stay skipped: never set
   `CODEX_REVIEW_RUN_CANARY` or `CLAUDE_REVIEW_RUN_CLAUDE_CANARY` in CI.
 - `.github/scripts/check_skill_frontmatter.py`: every `*/skills/*/SKILL.md`
@@ -89,6 +90,7 @@ agent-stuff/
       review-handoff/
   tools/
     workspace-gc/       # agent-neutral CLI, not a skill; run from this checkout
+    guard-projects/     # opt-in PreToolUse hook and pre-push owner check
   README.md
 ```
 

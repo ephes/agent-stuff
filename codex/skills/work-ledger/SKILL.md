@@ -144,7 +144,8 @@ Items with history cannot be deleted; retire them as `dropped`.
   keeps the checkout out of `workspace-gc`'s removable set while the item is
   active.
 - When an item reaches `merged`, `accepted` or `dropped`, the coordinator
-  removes that item's worktree. First verify that it is clean and pushed. Then
+  removes that item's worktree (a merge agent removes it itself once the merge
+  is verified on the remote). First verify that it is clean and pushed. Then
   run the guarded single-path removal, which refuses anything that is not class
   A (removable):
 

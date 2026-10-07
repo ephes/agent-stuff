@@ -154,6 +154,10 @@ earlier rounds.
 Do not continue merely because the verdict is not `CLEAN`, and do not stop
 merely because an arbitrary round count was reached.
 
+Exception for coordinated campaigns (`multi-agent-coordination`): after 2
+review rounds that are not clean, a worker parks the slice and reports to the
+owner instead of opening a third round.
+
 ### Re-review scope containment
 
 The first valid review may inspect the complete implementation slice. After
@@ -614,9 +618,10 @@ lessons when the goal prompt, review loop, validation, model pairing, tmux
 orchestration, or backlog shape did not work as expected.
 
 - Reusable agent/process lessons go in:
-  `~/projects/agent-stuff/docs/review-cycle-log.md`
-  Append the lesson and commit+push it immediately in its own small commit
-  (fetch/rebase first); never leave the log uncommitted.
+  agent-stuff's `docs/review-cycle-log.md`, edited in a fresh agent-stuff
+  worktree under `~/workspaces` (never in `~/projects`). Append the lesson and
+  commit, merge and push it immediately in its own small commit (fetch/rebase
+  first); never leave the log uncommitted.
 - Project-specific execution lessons go in that project's own workflow log
   when one exists, for example:
   `docs/workflow/lessons.md`

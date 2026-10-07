@@ -31,6 +31,11 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   SendMessage); Codex uses its collaboration agents or herdr panes (`herdr
   agent prompt`); Pi uses herdr panes. Workers never see the coordinator's
   conversation, so every brief is self-contained.
+- **Spawn workers directly** from the coordinator. A lead agent that spawns
+  its own sub-agents hands back early and loses track of them.
+- **Split work** roughly evenly between the Claude and Codex subscriptions.
+  Codex workers run `gpt-6.1-sol` at low effort; their review gate is
+  `claude-review-loop --model claude-opus-5-5 --effort high`.
 
 ## State and owner decisions
 
@@ -68,30 +73,45 @@ Every brief states the item slug, goal, acceptance criteria, and:
   `~/workspaces/ws-<slug>/` from the base the brief names: `origin/<default
   branch>` unless the slice is stacked on a predecessor branch (read the repo's
   `AGENTS.md`: the default branch is not always `main`, e.g. django-cast uses
-  `develop`). Never
-  work in the owner's main checkouts; they may hold uncommitted owner work.
+  `develop`). `~/projects` is read-only for agents: no builds, tests, stash,
+  pull, checkout, restore, commit or rm there (they may hold uncommitted owner
+  work); `git fetch` and `worktree add` from there are fine. The opt-in hook
+  `tools/guard-projects` enforces this.
 - **Scratch**: a unique `mktemp -d` directory per worker. Shared scratch paths
   get overwritten by other workers.
-- **Delivery**: feature branch, push, verify with `git ls-remote`. No merge,
+- **Delivery**: feature branch, push only after
+  `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
+  (origin under `github.com/ephes/`; otherwise report, never push), verify with
+  `git ls-remote`. No merge,
   deploy or install without owner approval (exception: fixes to the agent
   tooling in agent-stuff may be merged by the agent).
 - **Review**: independent gate via the installed harness per
-  `cross-agent-review-cycle`.
+  `cross-agent-review-cycle`. After 2 rounds that are not clean, park the
+  slice and ask the owner instead of looping. Use public APIs or allowlists,
+  not home-made HTTP, streaming or delete-safety layers.
+- **Unclear cases**: if a case does not clearly match the brief's rule, report
+  it instead of acting.
 - **Hygiene**: commit messages without AI or tool mentions; docs and changelog
   updated in the same change.
+- **Versions**: in repos with version chains (e.g. ops-library's
+  `galaxy.yml`), feature branches never bump the version or add a changelog
+  version header; write entries under "Unreleased". The merge agent assigns
+  the version at merge time, above origin's latest.
 - **Concurrent pushes**: before merging, fetch; if origin moved, rebase and
-  rerun the tests. Resolve version or changelog conflicts by bumping above
-  origin's version.
+  rerun the tests.
+- **Parallel test infra**: molecule or docker tests use instance and container
+  names unique to the worker (e.g. suffixed with the slug).
 - **Native/Xcode**: each worker creates its own simulator and derived-data
   path and deletes the simulator afterwards. Never a physical device without
   explicit owner approval. Prebuilt artifacts (e.g. FFI builds) may be copied
   from another worktree only when their inputs (crates, project.yml) match.
-- **Closeout**: the worker's worktree is removed at item closeout
-  (`work-ledger`, Worktrees and closeout).
+- **Closeout**: a merge agent removes the slice's worktree once the merge is
+  verified on the remote; otherwise at item closeout (`work-ledger`,
+  Worktrees and closeout).
 - **Lessons**: a worker or coordinator that appends a lesson to
-  `~/projects/agent-stuff/docs/review-cycle-log.md` commits and pushes it
-  immediately in its own small commit (fetch/rebase first); never leave the
-  log uncommitted, because a later shutdown strands it.
+  agent-stuff's `docs/review-cycle-log.md` does it in its own agent-stuff
+  worktree and merges and pushes it immediately in a small commit (fetch/rebase
+  first); never leave the log uncommitted, because a later shutdown strands it.
 
 ## Infrastructure and safety
 
