@@ -70,11 +70,14 @@ Never default to the top tier. Claude Fable and GPT Astra are opt-in per run,
 chosen deliberately and recorded - not the resting default for any role.
 
 Reasoning effort is a separate axis from model choice, and it follows the model
-generation rather than the price. The default reviewers - Opus 5.5 and GPT-6
-Sol - review at `medium`, as does GPT Astra; Opus 5 and GPT-5.6 review at `high`,
-and `xhigh` belongs to the Opus 4.x generation that needed it. Raise a default
-reviewer to `high` only when the user asks for it. Do not raise effort merely because a model is expensive, and do not
-let a request for a stronger model silently change effort as well.
+generation rather than the price. The default Codex reviewer, `gpt-6.1-sol`,
+reviews at `high` (the `codex-review-loop` default; `medium` only when the user
+asks for it). The default Claude reviewer, Opus 5.5, reviews at `medium`, as do
+GPT Astra and other GPT-6 models; Opus 5 and GPT-5.6 review at `high`, and
+`xhigh` belongs to the Opus 4.x generation that needed it. Raise a `medium`
+default to `high` only when the user asks for it. Do not raise effort merely
+because a model is expensive, and do not let a request for a stronger model
+silently change effort as well.
 
 A cheaper delta re-review is only safe on a round that is actually scoped -
 `--baseline-ref` for Claude/Pi, an explicit delta prompt for Codex. Keep the
@@ -396,7 +399,7 @@ correctly and it hung only at exit.
    set log_file $argv[2]
    set reviewer_model $argv[3]
    set reasoning_effort high
-   if string match -q -r 'astra|gpt-6' -- "$reviewer_model"
+   if string match -q -r 'astra|gpt-6' -- "$reviewer_model"; and not string match -q -- 'gpt-6.1-sol' "$reviewer_model"
        set reasoning_effort medium
    end
    codex -a never exec --sandbox read-only -m "$reviewer_model" \

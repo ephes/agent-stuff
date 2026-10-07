@@ -42,8 +42,10 @@ Include this review contract in the prompt and report requirements:
   accepted baseline and contain re-review to it plus the repair delta under the
   canonical expansion rules; do not recursively repair unrelated discoveries.
 - The driver follows canonical different-family reviewer selection: Claude
-  implementers default to Codex `gpt-6.1-sol` through `codex-review-loop`;
-  Codex/Pi implementers default to Claude. Use installed harnesses (Claude Opus 5.5,
+  implementers default to Codex `gpt-6.1-sol` at high reasoning through
+  `codex-review-loop` (medium only on the owner's request); Codex/Pi
+  implementers default to Claude. Name the reviewer, model and effort in the
+  generated prompt. Use installed harnesses (Claude Opus 5.5,
   `claude-opus-5-5`, medium; Pi only `openai-codex/gpt-6.1-sol`) and fail closed
   on an unavailable required reviewer/model/authentication, without fallback.
   Carry explicit owner choices instead of silently changing model or effort.
