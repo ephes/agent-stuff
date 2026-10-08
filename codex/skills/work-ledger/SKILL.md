@@ -55,8 +55,11 @@ max 40) or `--agent <name>` on any command, which overrides it.
   only the owner can decide or check something.
 - **Pick up answers** (`work responses`) at the start of a coordination turn;
   act on each one, then `work consume <id>`.
-- **Report usage** (`work usage report ...`, `work usage collect-codex`) when
-  checking in; readings a few hours old are fine.
+- **Report usage** (`work usage report --provider claude --window "Weekly ·
+  all models" --used <pct> --resets-at <iso> --observed-at now --source
+  "claude-desktop get_usage"`; `work usage collect-codex`) for the weekly
+  windows only, at session start, when handling results, and at least hourly
+  while a campaign runs; stale usage is a coordinator bug.
 - Workers inside one project slice do not write to the app; their coordinator
   does, after verifying the report.
 

@@ -61,9 +61,23 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   (Codex reviews of Claude workers spend Codex). Review-heavy workers burn the
   implementer's quota slowly, so scale parallelism to the target burn rate
   (roughly 10-12 Claude workers for ~3%/h of a weekly window).
-- Check usage regularly (Claude: the desktop app's usage tool; Codex:
-  `work usage collect-codex`) and report it to the work app. Scheduled checks
-  only fire while the coordinator is idle, so also report when handling results.
+- Usage reporting is mandatory. Keep the weekly windows fresh in the work app
+  (Claude "Weekly · all models", Codex weekly; only those) at session start,
+  whenever handling worker results, and on every periodic check (at least
+  hourly while a campaign runs). Claude: read the desktop app's usage tool
+  (`get_usage`), then `work usage report --provider claude --window "Weekly · all models" --used <pct> --resets-at <iso>
+  --observed-at now --source "claude-desktop get_usage"`. Codex: `work usage
+  collect-codex`. Stale usage in the work app is a coordinator bug.
+
+## Periodic checks
+
+- While a campaign runs, schedule a recurring check every 30-60 minutes
+  (Claude Code: CronCreate or `/loop`; Codex: its own scheduler or herdr). Each
+  check reads unconsumed owner responses and newly approved items, checks
+  running workers, reports usage, and dispatches the next approved or queued
+  work within the pacing budget.
+- Scheduled checks only fire while the coordinator is idle, so run the same
+  check whenever handling results. Remove the schedule when the campaign ends.
 
 ## Worker brief checklist
 
