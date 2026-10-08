@@ -1397,3 +1397,9 @@ Promotion: incident — existing state-ownership, async regression, size and exa
 Expected: a run directory named after the round (`review/r1`) is fresh. Actual: several subagents share one session scratchpad; another agent's `review/r1` already existed, so the harness refused it ("run directory must be new or empty") and a context file written next to it vanished before the retry. No review ran against wrong content and no foreign result was read; the retry used a slice-named subdirectory. Use a directory unique to the slice (or `mktemp -d`) for both context files and run directories when agents share a scratchpad.
 
 Promotion: incident — the skill already says to create a fresh run directory with `mktemp -d`; following it avoids this.
+
+## 2026-10-08 — Active permissions override the YOLO launcher expectation
+
+Expected: a session launched by the correctly configured `codex-yolo` wrapper can run SSH, write linked-worktree Git objects, and supervise Claude reviews. Actual: the active session switched to workspace-write with restricted network access; reviews failed before producing valid verdicts and infrastructure operations were blocked. Inspecting the wrapper did not fix the active session. The owner selected Full Access through `/permissions`, after which the same review harness, validation, and deployment commands succeeded. Treat the active permission profile as evidence; provider errors are not clean review results. Status: resolved.
+
+Promotion: incident — existing permission inspection and fail-closed review rules cover this; no launcher or skill change needed.
