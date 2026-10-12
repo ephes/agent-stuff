@@ -3,6 +3,14 @@ name: codex-review-loop
 description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6.1-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.1-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
+The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/codex-review-loop`
+(as in the commands below), even when the system `python3` is 3.9: the launcher
+re-execs with the newest working `python3.1x` on PATH (3.19 down to 3.10),
+preserving arguments. Install one of those interpreters if none is available;
+the launcher then reports a one-line prerequisite error. For the unittest
+suites, use Python 3.11+ (the Codex tests import `tomllib`), for example
+`python3.14 -m unittest discover -s tests` from the skill directory.
+
 # Codex Review Loop
 
 Run a bounded review cycle: hand the current diff to `gpt-6.1-sol` through the

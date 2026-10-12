@@ -47,8 +47,12 @@ pull requests, with no secrets:
   `description` (needs PyYAML).
 
 Run a suite locally the same way, e.g.
-`cd tools/workspace-gc && python3 -m unittest discover -s tests -t .` (the
-skill suites use `discover -s tests` from the skill directory).
+`cd tools/workspace-gc && python3.14 -m unittest discover -s tests -t .` (the
+skill suites use `discover -s tests` from the skill directory). Use Python
+3.11+ for the suites; CI uses 3.14. The three review CLI launchers accept
+`python3 <skill>/bin/<review-loop>` even with system Python 3.9: before
+importing the harness they select the newest working `python3.1x` on PATH
+(3.19 down to 3.10), or exit with a one-line prerequisite error.
 
 ## Repo structure
 
