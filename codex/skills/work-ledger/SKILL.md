@@ -46,6 +46,11 @@ max 40) or `--agent <name>` on any command, which overrides it.
 - **Read** (`work items`, `work show <slug>`) before choosing, resuming or
   reporting on cross-project work, and when the owner asks what is in flight or
   what waits on them.
+  `work items`, `work notes <slug>` and `work responses` fetch every page, so
+  the list is complete; with `--json` the output carries `count`, `truncated`
+  and `next_cursor: null`. Treat a stderr warning (`showing N of M`, or a
+  server that does not report totals) or `truncated: true` as an incomplete
+  read: run it again before concluding that an item or answer does not exist.
 - **Update** (`work upsert <slug> ...`) when an item changes stage, owner or
   next action, becomes blocked, or new evidence (commit, receipt, install)
   exists.
@@ -136,6 +141,12 @@ Items with history cannot be deleted; retire them as `dropped`.
   `--evidence`, `--owner`, `--next-action`), pass the `updated_at` from
   `work show <slug> --json` as `--expect-updated-at <updated_at>`; on a
   conflict (HTTP 409, exit 1) re-read, merge and retry.
+- **A failed read is not an empty ledger.** The CLI exits 1 with a one-line
+  `work: ...` message when the app cannot be reached or something other than
+  the API answers (`unexpected non-JSON response from <base> (HTTP <status>)`:
+  a proxy, login or maintenance page). Check `WORK_API_URL` and the app's
+  health, retry, and do not write items or report "nothing in flight" from a
+  failed command.
 - **Never record secrets**: no credentials, tokens, cookies, raw financial or
   résumé data, or raw terminal logs. Summarize and link a receipt instead.
 
@@ -169,8 +180,6 @@ Items with history cannot be deleted; retire them as `dropped`.
   lists needs the owner's approval and runs `workspace-gc --apply`.
 
 ## Example
-
-<!-- TODO: document `work items` paging once fix/api-list-truncation merges into work-ledger main. -->
 
 ```sh
 work upsert podcast-main-integration \
