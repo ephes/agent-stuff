@@ -19,8 +19,8 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 - **Clerk** (an optional bookkeeping agent acting for the coordinator, under
   the coordinator's `work-ledger` rules): verifies pushes itself with
   `git ls-remote` before recording them, updates work-app items, creates one
-  owner request per item, reports usage, and summarizes owner responses without
-  consuming them. The coordinator still owns the decisions.
+  request per decision (bulk acceptance may cover several items), reports usage,
+  and summarizes owner responses without consuming them. The coordinator still owns the decisions.
 - **Scouts** are read-only workers that find ready, valuable slices and return
   a ranked list; the coordinator (or clerk) records the chosen ones as `idea`
   items. Prefer security and data-loss bugs, broken CI, and well-specified
@@ -47,10 +47,15 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   (for example `grep -E 'SKIP|FAIL|ERROR'`) before closing an item; a summary or
   the tail of a log is not evidence.
 - Owner decisions arrive as work-app responses. Act on one through a worker,
-  record the outcome, then consume it. The app never executes anything.
+  record the outcome, then consume it. For bulk acceptance, the owner's
+  *Tested OK* already sets ticked items to `accepted`: read `items` and
+  `accepted_items`, handle any unticked items, then consume; no stage PUT.
+  Ask with `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`
+  (up to 200 items). The owner can also use *Accept selected* for installed
+  items in the UI.
 - Reduce owner load: bundle several branches of one repo into one integration
-  branch so the owner approves once. For stacked branches (for example security
-  fixes touching the same files), base each on the previous unmerged branch and
+  branch so any required owner approval covers the bundle. For stacked
+  branches (for example security fixes touching the same files), base each on the previous unmerged branch and
   state the merge order in the request.
 
 ## Quota pacing
@@ -96,9 +101,9 @@ Every brief states the item slug, goal, acceptance criteria, and:
 - **Delivery**: feature branch, push only after
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
   (origin under `github.com/ephes/`; otherwise report, never push), verify with
-  `git ls-remote`. No merge,
-  deploy or install without owner approval (exception: fixes to the agent
-  tooling in agent-stuff may be merged by the agent).
+  `git ls-remote`. Agents may merge and push a slice themselves once the
+  cross-family review is clean and the tests pass. Deploys and installs still
+  need owner approval.
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean, park the
   slice and ask the owner instead of looping. Use public APIs or allowlists,
@@ -128,6 +133,10 @@ Every brief states the item slug, goal, acceptance criteria, and:
   first); never leave the log uncommitted, because a later shutdown strands it.
 
 ## Infrastructure and safety
+
+- On hosts, SSH as root only, never a user account plus sudo. Read-only checks
+  are fine; never make manual host changes. All changes go through
+  ops-library/ops-control.
 
 - Deploy a new service exactly like the existing ones (homelab: ops-library
   role + ops-control playbook, Traefik routing per
