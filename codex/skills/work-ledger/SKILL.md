@@ -46,6 +46,10 @@ max 40) or `--agent <name>` on any command, which overrides it.
 - **Read** (`work items`, `work show <slug>`) before choosing, resuming or
   reporting on cross-project work, and when the owner asks what is in flight or
   what waits on them.
+  Match repository state with `work items --commit <prefix>` (4-40 hex
+  characters, also matches stored abbreviated commits) or
+  `work items --branch <name>` (exact branch name); these search the item's
+  own fields, not notes, evidence or a request's CI target.
   `work items`, `work notes <slug>` and `work responses` fetch every page, so
   the list is complete; with `--json` the output carries `count`, `truncated`
   and `next_cursor: null`. Treat a stderr warning (`showing N of M`, or a
@@ -65,6 +69,18 @@ max 40) or `--agent <name>` on any command, which overrides it.
   "claude-desktop get_usage"`; `work usage collect-codex`) for the weekly
   windows only, at session start, when handling results, and at least hourly
   while a campaign runs; stale usage is a coordinator bug.
+  Check `work usage status [--max-age 3h] [--provider claude] [--json]`
+  before relying on usage numbers: exit 0 means all weekly windows are fresh,
+  2 means stale or no weekly readings, and 1 means the call failed. The default
+  threshold comes from the server (6 h unless configured); `--max-age` accepts
+  hours, minutes, days or seconds. Report fresh readings on exit 2.
+- **Report checkouts** with `work checkouts report [--projects-dir DIR]
+  [--no-fetch] [--host NAME] [--dry-run]` on the machine holding them. It scans
+  direct git checkouts under `$WORK_PROJECTS_DIR` (default `~/projects`),
+  fetches remotes and sends one snapshot per host of branches and counts
+  (dirty, ahead/behind, unpushed, fetch/scan failures). `--no-fetch` uses the
+  last fetch; `--dry-run` prints without sending and needs no token. No file
+  names, contents, remote URLs or absolute paths are sent; nothing schedules it.
 - Workers inside one project slice do not write to the app; their coordinator
   does, after verifying the report.
 
@@ -132,6 +148,13 @@ Items with history cannot be deleted; retire them as `dropped`.
   non-withdrawn acceptance request covering each item; missing, open,
   *problem* or unticked verdicts reject that transition with `400` and
   `details.stage`. Creating an item directly at `accepted` also fails.
+  Treat the answer as single-use after a later owner stage decision: if the
+  owner moves the item away from `accepted` in the UI or admin (for example,
+  reopens it), the old *Tested OK* no longer unlocks `accepted`. The API
+  returns `400` with `details.stage` saying to ask again; open a new acceptance
+  request and wait for a new answer. An owner-controlled import that changes
+  the stage also voids the answer. Re-sending `accepted` for an already
+  accepted item is allowed; token stage changes do not void the answer.
 - **Only the owner reopens `dropped`.** A token cannot move an item out of
   `dropped` (400). If a dropped item should come back, ask with
   `work ask --kind approval` and wait for the owner to reopen it in the UI; an
