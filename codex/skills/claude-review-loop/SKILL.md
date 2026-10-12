@@ -3,6 +3,14 @@ name: claude-review-loop
 description: Run a progress-driven, fail-closed Claude Code review gate over the current git worktree with a configurable Claude model, working in a sandboxed throwaway copy of the repository. Use for fresh-context different-family reviews before commit, including requests for Opus, Fable, Sonnet, or an explicitly selected Claude model; drive fix and re-review rounds under the value-driven stopping rules in cross-agent-review-cycle, never an unbounded loop toward CLEAN.
 ---
 
+The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/claude-review-loop`
+(as in the commands below), even when the system `python3` is 3.9: the launcher
+re-execs with the newest working `python3.1x` on PATH (3.19 down to 3.10),
+preserving arguments. Install one of those interpreters if none is available;
+the launcher then reports a one-line prerequisite error. For the unittest
+suites, use Python 3.11+ (the Codex tests import `tomllib`), for example
+`python3.14 -m unittest discover -s tests` from the skill directory.
+
 # Claude Review Loop
 
 Run a progress-driven review cycle: hand the current git worktree delta to the configured

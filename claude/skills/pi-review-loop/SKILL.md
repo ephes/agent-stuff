@@ -3,6 +3,14 @@ name: pi-review-loop
 description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-6 Sol model at medium (or, on request, high) reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
+The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/pi-review-loop`
+(as in the commands below), even when the system `python3` is 3.9: the launcher
+re-execs with the newest working `python3.1x` on PATH (3.19 down to 3.10),
+preserving arguments. Install one of those interpreters if none is available;
+the launcher then reports a one-line prerequisite error. For the unittest
+suites, use Python 3.11+ (the Codex tests import `tomllib`), for example
+`python3.14 -m unittest discover -s tests` from the skill directory.
+
 # Pi Review Loop
 
 Run a bounded review cycle: hand the current diff to Pi as a fresh-context reviewer
