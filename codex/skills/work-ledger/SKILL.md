@@ -97,7 +97,7 @@ verified, not the one you expect.
 | `pushed` | `git ls-remote` shows the commit on a non-default branch |
 | `merged` | the commit is on the remote default branch |
 | `installed` | running on the target device or host (version observed there) |
-| `accepted` | the owner answered the item's newest acceptance request (`work ask --kind acceptance`) with *tested OK*; the API rejects it with 400 otherwise |
+| `accepted` | the owner signed off via an acceptance request or directly in the UI; only the owner can sign off |
 | `blocked` / `parked` / `dropped` | cannot move / paused or finished at a checkpoint / abandoned (only the owner reopens it) |
 
 Reviewed is not merged, merged is not installed, installed is not accepted.
@@ -115,21 +115,23 @@ Items with history cannot be deleted; retire them as `dropped`.
   (`Merge f26cc99 into main?`). Check `work show <slug>` first and do not
   re-ask something already open or answered; withdraw requests that became
   moot (`work withdraw <id>`).
-- **Owner responses are decisions, not commands to the app.** The app executes
-  nothing. Act on a response in your own session, within the permissions the
+- **Owner responses are decisions, not commands to the app.** The app does not merge or deploy. Act on a response in your own session, within the permissions the
   owner gave, record the outcome on the item, then consume the response.
-- **Only the owner signs off `accepted`.** Once an item is `installed` (or
-  otherwise ready for a hands-on check), ask with
-  `work ask <slug> "<what to test>" --kind acceptance`, wait for the answer
-  via `work responses`, and set `--stage accepted` only after the owner
-  answered *tested OK*. The API checks the item's newest acceptance request
-  that was not withdrawn: if there is none, it is still open, it was answered
-  *problem*, or it is a `question`/`approval` instead, the PUT fails with `400`
-  and `details.stage` says why (creating an item directly at `accepted` fails
-  too). After a *problem* answer, fix it and ask a new acceptance request; a
-  newer request supersedes an older *tested OK*. Re-sending `accepted` on an
-  already accepted item and every other stage change (except leaving
-  `dropped`) stay allowed.
+- **Only the owner signs off `accepted`.** For a batch ready for hands-on
+  checks, use `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`.
+  `--also` is repeatable and comma-separated, only for acceptance; API field
+  `items`, up to 200 items total including `<slug>`. Requests and responses
+  carry `items` (all covered slugs, `<slug>` first) and `accepted_items` (the
+  slugs signed off; empty while open, after *problem* or withdrawal).
+  The owner's *Tested OK* sets all ticked items in a bulk request to `accepted`
+  directly: read `accepted_items`, act on the rest, then consume the response;
+  no PUT to `accepted` is needed. Unticked items stay unchanged; fix them and
+  ask again. The owner can also accept installed items directly in the UI with
+  *Accept selected*. A single-item request keeps the existing flow: wait for
+  *tested OK*, then set `--stage accepted`. The API checks the newest
+  non-withdrawn acceptance request covering each item; missing, open,
+  *problem* or unticked verdicts reject that transition with `400` and
+  `details.stage`. Creating an item directly at `accepted` also fails.
 - **Only the owner reopens `dropped`.** A token cannot move an item out of
   `dropped` (400). If a dropped item should come back, ask with
   `work ask --kind approval` and wait for the owner to reopen it in the UI; an
