@@ -199,10 +199,16 @@ Items with history cannot be deleted; retire them as `dropped`.
   the item's `notes`, or ask the owner.
 - Record the removal on the item: clear `worktree` (`--worktree ""`) and add
   `work note <slug> "worktree removed <date>"`.
-- A weekly report-only job on the Studio writes
-  `~/.local/state/workspace-gc/latest.txt` and keeps the item
-  `workspace-gc-report` current. It never removes anything. Removing what it
-  lists needs the owner's approval and runs `workspace-gc --apply`.
+- A daily job on the Studio (`workspace-gc report --apply`, 08:00) removes
+  class A checkouts itself: clean, every commit on the network remote, idle for
+  48 hours, not in use and not the `worktree` of an active item. It also
+  removes top-level workspace directories that have been empty for 6 hours. It
+  writes what it removed and what remains (B after a push, C needing the owner)
+  to `~/.local/state/workspace-gc/latest.txt` and keeps the item
+  `workspace-gc-report` current. It needs no approval and never touches classes
+  B, C or D. So a checkout you still need must have its path in an active
+  item's `worktree` field, or hold the unpushed or uncommitted work that makes
+  it B or C.
 
 ## Example
 

@@ -33,13 +33,27 @@ def totals(inv: Inventory) -> dict[str, dict[str, int]]:
     return t
 
 
+def _dirs(n: int) -> str:
+    return f"{n} empty director{'y' if n == 1 else 'ies'}"
+
+
 def summary_line(inv: Inventory) -> str:
     t = totals(inv)
-    return (f"{t['A']['count']} removable ({human_kb(t['A']['kb'])}), "
+    left = (f"{t['A']['count']} removable ({human_kb(t['A']['kb'])}), "
             f"{t['B']['count']} removable after push, {t['C']['count']} need you")
+    run = inv.run
+    if run is None:
+        n = sum(1 for e in inv.empty_dirs if e.removable)
+        return left + (f", {_dirs(n)} removable" if n else "")
+    if run.refused:
+        return "REFUSED, nothing removed (" + "; ".join(run.refused) + "); " + left
+    return (f"removed {len(run.removed)} checkout{'' if len(run.removed) == 1 else 's'} "
+            f"({human_kb(sum(c.size_kb for c in run.removed))}) and "
+            f"{_dirs(sum(1 for e in inv.empty_dirs if e.removed))}; left: {left}")
 
 
 def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
+    run = inv.run
     return {
         "generated_at": generated_at or now_iso(),
         "host": socket.gethostname(),
@@ -50,6 +64,11 @@ def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
         "apply_blockers": inv.signals.apply_blockers(),
         "checkouts": [co.to_dict() for co in sorted(inv.checkouts, key=lambda c: (c.cls, c.path))],
         "prune": inv.prune,
+        "empty_dirs": [e.to_dict() for e in inv.empty_dirs],
+        "mode": "dry-run" if run is None else "refused" if run.refused else "applied",
+        "removed": [co.to_dict() for co in run.removed] if run else [],
+        "removed_kb": sum(c.size_kb for c in run.removed) if run else 0,
+        "skipped": [o for o in run.outcomes if not o["outcome"].startswith("removed")] if run else [],
     }
 
 
@@ -57,18 +76,49 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _checkout_line(co) -> str:
+    bits = [co.kind]
+    if co.branch:
+        bits.append(co.branch)
+    if co.size_kb:
+        bits.append(human_kb(co.size_kb))
+    if co.last_commit:
+        bits.append(f"last commit {co.last_commit}")
+    return f"- {short(co.path)} [{', '.join(bits)}]"
+
+
 def to_text(inv: Inventory, generated_at: str | None = None) -> str:
     out = []
     w = out.append
-    w(f"workspace-gc dry run - {generated_at or now_iso()} on {socket.gethostname()}")
+    run = inv.run
+    applied = run is not None and not run.refused
+    mode = "dry run" if run is None else "run, removals applied" if applied \
+        else "run REFUSED, nothing removed"
+    w(f"workspace-gc {mode} - {generated_at or now_iso()} on {socket.gethostname()}")
     w("roots: " + ", ".join(short(r) for r in inv.roots))
     w("signals: " + "; ".join(f"{k} {v.status}{' (' + v.detail + ')' if v.detail else ''}"
                               for k, v in sorted(inv.signals.status.items())))
     blockers = inv.signals.apply_blockers()
     if blockers:
-        w("--apply would refuse: " + "; ".join(blockers))
+        w(("REFUSED, in-use signals incomplete: " if run else "--apply would refuse: ")
+          + "; ".join(blockers))
     w("")
     w("summary: " + summary_line(inv))
+    if applied:
+        gone = [e for e in inv.empty_dirs if e.removed]
+        w("")
+        w(f"## Removed in this run ({len(run.removed)} checkout"
+          f"{'' if len(run.removed) == 1 else 's'}, "
+          f"{human_kb(sum(c.size_kb for c in run.removed))}; {_dirs(len(gone))})")
+        w("")
+        for co in sorted(run.removed, key=lambda x: x.path):
+            w(_checkout_line(co))
+        for e in gone:
+            w(f"- {short(e.path)} [empty directory]")
+        if not run.removed and not gone:
+            w("- nothing")
+        w("")
+        w("## What remains")
     t = totals(inv)
     w("")
     w("| Class | Meaning | Count | Disk | of which regenerable payloads |")
@@ -84,14 +134,7 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
         w(f"## {c} - {CLASS_NAMES[c]} ({len(cos)})")
         w("")
         for co in cos:
-            bits = [co.kind]
-            if co.branch:
-                bits.append(co.branch)
-            if co.size_kb:
-                bits.append(human_kb(co.size_kb))
-            if co.last_commit:
-                bits.append(f"last commit {co.last_commit}")
-            w(f"- {short(co.path)} [{', '.join(bits)}]")
+            w(_checkout_line(co))
             for r in co.reasons:
                 w(f"  - {r}")
             for line in co.unpushed_commits if c in "BC" else []:
@@ -103,9 +146,17 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
                                                for p in sorted(co.payloads, key=lambda p: -p["kb"])))
             for n in co.notes:
                 w(f"  - note: {n}")
+    left = [e for e in inv.empty_dirs if not e.removed]
+    if left:
+        w("")
+        w(f"## Empty workspace directories ({sum(1 for e in left if e.removable)} removable, "
+          f"{sum(1 for e in left if not e.removable)} kept)")
+        w("")
+        for e in left:
+            w(f"- {short(e.path)}" + (f" - kept: {e.reason}" if e.reason else ""))
     if inv.prune:
         w("")
-        w("## Stale worktree entries")
+        w("## Stale worktree entries" + (" (pruned)" if applied else ""))
         w("")
         for repo, lines in sorted(inv.prune.items()):
             w(f"- {short(repo)}: {len(lines)} entr{'y' if len(lines) == 1 else 'ies'}")
@@ -114,6 +165,7 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
             if len(lines) > 5:
                 w(f"  - ... ({len(lines) - 5} more)")
     w("")
-    w("Only class A is ever removed, and only with --apply (or `workspace-gc remove "
-      "--apply <path>`). B needs a push first; C and D are never touched.")
+    w("Only class A checkouts and empty top-level workspace directories are ever removed, and "
+      "only with --apply (the scheduled job runs `report --apply`) or `workspace-gc remove "
+      "--apply <path>`. B needs a push first; C and D are never touched.")
     return "\n".join(out) + "\n"

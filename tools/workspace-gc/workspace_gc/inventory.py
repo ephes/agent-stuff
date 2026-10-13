@@ -773,12 +773,24 @@ def classify(co: Checkout, min_idle_hours: float = 0) -> None:
 # ---------------------------------------------------------------- run
 
 @dataclass
+class Run:
+    """What an --apply run did. `refused` (the in-use sources that could not
+    be read) means nothing was removed."""
+    refused: list[str] = field(default_factory=list)
+    removed: list[Checkout] = field(default_factory=list)
+    outcomes: list[dict] = field(default_factory=list)   # path, outcome; one per class-A checkout
+    skipped: int = 0
+
+
+@dataclass
 class Inventory:
     roots: list[str]
-    checkouts: list[Checkout]
+    checkouts: list[Checkout]     # after an --apply run: the ones that remain
     signals: Signals
     prune: dict[str, list[str]] = field(default_factory=dict)
     keep_patterns: list[str] = field(default_factory=list)
+    empty_dirs: list = field(default_factory=list)   # empties.EmptyDir
+    run: Run | None = None        # None: dry run
 
 
 def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None,

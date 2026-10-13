@@ -1,21 +1,25 @@
 # workspace-gc
 
 Inventories the git checkouts agents leave under `~/workspaces` and removes only
-the ones that are provably safe to lose. Dry run by default. Python 3 stdlib
-only, no dependencies.
+the ones that are provably safe to lose, plus the empty workspace directories
+that removed checkouts leave behind. Dry run by default. Python 3 stdlib only,
+no dependencies.
 
 ```sh
-~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc            # text report
+~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc            # text report (dry run)
 ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc --json     # same, as JSON
-~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc --apply    # remove class A, prune stale worktree entries
+~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc --apply    # remove class A and empty workspace directories, prune stale worktree entries
 ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc remove <path>           # what would happen to one checkout
 ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc remove --apply <path>   # guarded removal of one checkout
-~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc report --out-dir DIR [--work-item SLUG]
+~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc report --out-dir DIR [--work-item SLUG]           # dry run, written to DIR
+~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc report --apply --out-dir DIR [--work-item SLUG]   # the scheduled job
 ```
 
-`report` is for the scheduled job: it writes `DIR/latest.txt` and
-`DIR/latest.json` and, with `--work-item`, upserts that work-app item. It has no
-`--apply`.
+`report` is the scheduled command. It does the same run as the default command
+(`--apply` goes through the same code, with the same refusal and the same
+re-checks per removal), but writes the result to `DIR/latest.txt` and
+`DIR/latest.json` and, with `--work-item`, upserts that work-app item. See
+[The scheduled job](#the-scheduled-job).
 
 Sizes in the text report, the summary line and the work-app request are
 human-readable like `du -h` (`512K`, `27M`, `1.3G`); `--json` keeps the raw
@@ -95,9 +99,74 @@ consequence: a keep-listed clone that borrows objects from a candidate clone
 would go unseen. Keep-list whole workspaces, not single repositories, when
 that matters.
 
+## Empty workspace directories
+
+Removing a checkout leaves its workspace directory (`~/workspaces/ws-x/`)
+behind. Every run also lists the direct children of the roots that hold
+nothing: no file (a `.DS_Store` counts as a file), no symlink, only empty
+directories, all on one filesystem. `--apply` removes them bottom-up with
+`os.rmdir`, which cannot delete content: if anything has appeared in the
+directory, the call fails and the directory stays. The check and the removal
+both walk the tree through directory descriptors that do not follow symlinks,
+so a directory swapped for a symlink stops the removal, and only the
+directories the last check saw are removed: one created or replaced after it
+stays, with its workspace. Directories with
+content are not listed and never touched. A tree of more than 200 empty
+directories is left alone.
+
+An empty directory is kept, and listed with the reason, when
+
+- it is named `ws-work-planning`, or it, a directory in it, or a path below it
+  (existing or not, glob patterns included) is on the keep-list;
+- a process or herdr pane has its working directory in it. The process list is
+  read again before each directory is removed, and a directory is kept when
+  that read fails;
+- an active work item names a worktree in it;
+- it, or a directory in it, was created or changed less than 6 hours ago
+  (`EMPTY_DIR_MIN_AGE_HOURS` in `workspace_gc/empties.py`). A worker may be
+  about to clone into it. The age is the newest of creation, modification and
+  status-change time.
+
+The list is taken before the checkouts are removed, and removing a checkout
+changes its workspace directory. So a directory emptied by a run is removed by
+a later run, once it is 6 hours old.
+
+## The scheduled job
+
+The Studio runs `workspace-gc report --apply --out-dir
+~/.local/state/workspace-gc --work-item workspace-gc-report` every day at 08:00
+(LaunchAgent `de.wersdoerfer.workspace-gc`, managed in the owner's dotfiles).
+Daily, because a class D checkout becomes class A once it has been idle for 48
+hours. The job
+
+- removes class A checkouts and empty workspace directories as described here,
+  and prunes stale worktree entries. It never touches classes B, C and D;
+- removes nothing at all when an in-use source cannot be read (see below). The
+  report then starts with `REFUSED`, the exit code is 2, and the work item is
+  handed to the owner;
+- writes `latest.txt` and `latest.json`: what was removed in this run (count
+  and disk), then what remains, with the reasons for B and C. A class A
+  checkout that failed a re-check stays listed under A with that reason, and
+  the exit code is 1;
+- sets the work item's next action to the one-line summary, and withdraws the
+  approval requests that earlier, report-only versions of the job opened.
+
+To preview what the next run would do, run the same command without `--apply`
+and with another `--out-dir` and no `--work-item`, so the last real report
+stays in place:
+
+```sh
+~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc report --out-dir "$(mktemp -d)"
+```
+
+A checkout that must survive needs one of these: its path in the `worktree`
+field of an active work item, an entry on the keep-list, or the uncommitted or
+unpushed work that makes it class B or C.
+
 ## Removal guards
 
-`--apply` and `remove --apply` remove class A only. Each removal re-checks the
+`--apply`, `report --apply` and `remove --apply` remove class A checkouts only
+(the first two also empty workspace directories). Each removal re-checks the
 following immediately before acting, and skips the checkout if any check fails:
 
 - the path is a canonical, non-symlink directory strictly inside a root and
@@ -123,7 +192,7 @@ repository. Clones are deleted with `shutil.rmtree`, which does not follow
 symlinks. After removals, `git worktree prune` runs on the repositories that
 own the inventoried worktrees and on the clones under the roots.
 
-`--apply` refuses to run when an in-use source (herdr, processes, work app)
+`--apply` and `report --apply` refuse to run when an in-use source (herdr, processes, work app)
 failed, returned partial results (`lsof` exiting non-zero, a truncated work
 item list), or was turned off
 with `--no-*`. A source that does not exist on this
@@ -148,5 +217,6 @@ The tests build temporary repositories. A private `GIT_CONFIG_GLOBAL` rewrites
 `git@net.test:` to local bare repositories, so the "network" remote,
 `ls-remote`, clone and push all work offline. They cover the classes, the
 local-origin chain and alternates handling, tag containment, missing remote
-tips, the keep-list, every removal guard under changed facts, and the
-complete, capped, truncated and paged shapes of the work item list.
+tips, the keep-list, every removal guard under changed facts, the complete,
+capped, truncated and paged shapes of the work item list, the scheduled command
+(applied, refused, dry run), and empty-directory removal with its guards.

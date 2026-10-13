@@ -273,54 +273,45 @@ class TestReport(GitFixture):
         return self.cli("report", "--out-dir", self.out_dir, "--work-env", self.env,
                         "--work-ledger", self.tmp, *extra)
 
-    def test_writes_files_and_never_removes(self):
+    def test_dry_run_writes_files_and_removes_nothing(self):
         wt = self.worktree(self.main, "ws-a", "a")
         code, out = self.report()
         self.assertEqual(code, 0)
         self.assertTrue(os.path.isdir(wt))
         with open(os.path.join(self.out_dir, "latest.txt")) as fh:
-            self.assertIn("1 removable", fh.read())
+            text = fh.read()
+        self.assertIn("workspace-gc dry run - ", text)
+        self.assertIn("1 removable", text)
         with open(os.path.join(self.out_dir, "latest.json")) as fh:
-            self.assertEqual(json.load(fh)["totals"]["A"]["count"], 1)
+            data = json.load(fh)
+        self.assertEqual(data["totals"]["A"]["count"], 1)
+        self.assertEqual(data["mode"], "dry-run")
         self.assertEqual(self.calls, [])  # no --work-item, no work calls
         self.assertEqual(sorted(os.listdir(self.out_dir)), ["latest.json", "latest.txt"])
 
-    def test_report_has_no_apply_option(self):
-        with self.assertRaises(SystemExit):
-            cli.parser().parse_args(["report", "--out-dir", "x", "--apply"])
-
-    def test_item_upsert_and_ask_when_removable(self):
+    def test_item_upsert_never_asks(self):
         self.worktree(self.main, "ws-a", "a")
         code, out = self.report("--work-item", "workspace-gc-report")
         self.assertEqual(code, 0, out)
-        kinds = [c[0] for c in self.calls]
-        self.assertEqual(kinds, ["upsert", "show", "ask"])
+        self.assertEqual([c[0] for c in self.calls], ["upsert", "show"])
         upsert = self.calls[0]
         summary = [a for a in upsert if a.startswith("1 removable")]
         self.assertEqual(len(summary), 1, upsert)
         self.assertRegex(summary[0], r"^1 removable \(\d+(K|M)\), 0 removable after push, "
                                      r"0 need you")
-        ask = " ".join(self.calls[2])
-        self.assertRegex(ask, r"class-A checkouts \(\d+(K|M)\) listed in")
-        self.assertNotIn("GB", ask)
-        self.assertEqual(upsert[upsert.index("--owner") + 1], "jochen")
+        self.assertEqual(upsert[upsert.index("--owner") + 1], "workspace-gc")
+        self.assertIn("dry run, nothing removed", upsert[upsert.index("--notes") + 1])
         self.assertNotIn("not-used-in-tests", " ".join(sum(self.calls, [])))
 
-    def test_no_second_ask_when_open(self):
+    def test_moot_approval_request_is_withdrawn(self):
         self.worktree(self.main, "ws-a", "a")
-        self.requests = [{"id": 7, "status": "open", "kind": "approval",
-                          "text": "Remove ... with workspace-gc --apply?"}]
-        self.report("--work-item", "workspace-gc-report")
-        self.assertEqual([c[0] for c in self.calls], ["upsert", "show"])
-
-    def test_withdraw_when_nothing_removable(self):
         self.requests = [{"id": 7, "status": "open", "kind": "approval",
                           "text": "Remove ... with workspace-gc --apply?"},
                          {"id": 8, "status": "open", "kind": "question", "text": "other"}]
-        self.report("--work-item", "workspace-gc-report")
+        code, out = self.report("--work-item", "workspace-gc-report", "--apply")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([c[0] for c in self.calls], ["upsert", "show", "withdraw"])
         self.assertEqual(self.calls[-1], ["withdraw", "7"])
-        upsert = self.calls[0]
-        self.assertEqual(upsert[upsert.index("--owner") + 1], "workspace-gc")
 
     def test_absent_env_file_is_tolerated(self):
         code, out = self.cli("report", "--out-dir", self.out_dir, "--work-env",

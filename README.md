@@ -30,7 +30,7 @@ chezmoi symlinks.
 
 | Tool | Purpose |
 |------|---------|
-| [`tools/workspace-gc`](tools/workspace-gc/README.md) | Live inventory of agent checkouts under `~/workspaces` (classes A removable / B after push / C needs owner / D keep), guarded removal of class A only (dry run by default), and the report behind the weekly Studio job. The `work-ledger` closeout step uses its single-path `remove` |
+| [`tools/workspace-gc`](tools/workspace-gc/README.md) | Live inventory of agent checkouts under `~/workspaces` (classes A removable / B after push / C needs owner / D keep), guarded removal of class A and of leftover empty workspace directories (dry run by default), and the daily Studio job that removes both and writes the report. The `work-ledger` closeout step uses its single-path `remove` |
 | [`tools/guard-projects`](tools/guard-projects/README.md) | Opt-in Claude Code `PreToolUse` hook that keeps `~/projects` read-only for agents and blocks pushes outside `github.com/ephes/`, plus `check-push-remote` for pre-push checks |
 
 ## CI
