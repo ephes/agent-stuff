@@ -151,7 +151,12 @@ Every brief states the item slug, goal, acceptance criteria, and:
   `bash -c '...'`.
 - Cleanup guard rails: check writability first; never remove a clone that
   others borrow objects from (git alternates); check commit containment against
-  all remote refs, tags included. Prefer `tools/workspace-gc`.
+  all remote refs, tags included. Prefer `tools/workspace-gc`. Its daily job on
+  the Studio already removes class A checkouts (clean, fully pushed, idle 48
+  hours, not in use, no active item) and workspace directories that have been
+  empty for 6 hours, without asking; do not plan or request that cleanup.
+  Classes B and C stay for the owner, listed in
+  `~/.local/state/workspace-gc/latest.txt`.
 - Restricted areas stay untouched (e.g. a stopped investigation). Real financial
   or personal data only in attended sessions with explicit owner authorization.
   Never print or commit tokens.

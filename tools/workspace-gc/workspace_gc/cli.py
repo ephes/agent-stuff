@@ -2,8 +2,10 @@
 
   workspace-gc [scan] [--json] [--apply]   inventory the roots (dry run unless --apply)
   workspace-gc remove [--apply] PATH       guarded removal of one checkout
-  workspace-gc report --out-dir DIR        dry run written to DIR/latest.{txt,json}
-                                           (for the scheduled job; never applies)
+  workspace-gc report --out-dir DIR [--apply]
+                                           the same run as scan, written to
+                                           DIR/latest.{txt,json} (the scheduled job
+                                           passes --apply; without it: dry run)
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import socket
 import sys
 import tempfile
 
+from . import empties
 from . import inventory as inv_mod
 from . import remove as rm_mod
 from . import report as rep
@@ -63,16 +66,20 @@ def parser() -> argparse.ArgumentParser:
     _idle(scan, DEFAULT_MIN_IDLE)
     scan.add_argument("--json", action="store_true", help="print JSON instead of text")
     scan.add_argument("--apply", action="store_true",
-                      help="remove class A checkouts and prune stale worktree entries")
+                      help="remove class A checkouts and empty workspace directories, "
+                           "prune stale worktree entries")
     rm = sub.add_parser("remove", help="guarded removal of one checkout")
     _common(rm)
     _idle(rm, 0)
     rm.add_argument("path")
     rm.add_argument("--apply", action="store_true", help="actually remove it")
-    rp = sub.add_parser("report", help="write the dry-run report to files (never applies)")
+    rp = sub.add_parser("report", help="like scan, but written to files (the scheduled job)")
     _common(rp)
     _idle(rp, DEFAULT_MIN_IDLE)
     rp.add_argument("--out-dir", required=True)
+    rp.add_argument("--apply", action="store_true",
+                    help="remove like `scan --apply` and report what was removed "
+                         "(without it: dry run)")
     rp.add_argument("--work-item", metavar="SLUG",
                     help="also upsert this work-app item with the one-line summary")
     return ap
@@ -95,10 +102,13 @@ def _main_roots(a) -> list[str]:
 
 
 def _build(a, sig, only=None):
-    return inv_mod.build(_roots(a), sig, main_roots=_main_roots(a), keep=a.keep,
+    inv = inv_mod.build(_roots(a), sig, main_roots=_main_roots(a), keep=a.keep,
                          keep_file=a.keep_file, regenerable=a.regenerable,
                          sizes=not a.no_sizes, jobs=a.jobs, only=only,
                          min_idle_hours=a.min_idle_hours)
+    if only is None:
+        inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
+    return inv
 
 
 def _write_atomic(path: str, text: str) -> None:
@@ -114,51 +124,77 @@ def _write_atomic(path: str, text: str) -> None:
         raise
 
 
-def cmd_scan(a, sig, out) -> int:
-    inv = _build(a, sig)
+def _preview_prune(inv) -> None:
+    for repo in inv_mod.prune_targets(inv):
+        lines = inv_mod.prune_preview(repo)
+        if lines:
+            inv.prune[repo] = lines
+
+
+def _apply(a, inv) -> inv_mod.Run:
+    """The one apply path, for `scan --apply` and `report --apply`: refuse if
+    an in-use source is incomplete; otherwise remove class A (each removal
+    re-checked), prune stale worktree entries and remove empty workspace
+    directories. Removed checkouts leave inv.checkouts; skipped ones stay in
+    class A with the reason."""
+    run = inv.run = inv_mod.Run(refused=inv.signals.apply_blockers())
+    if run.refused:
+        _preview_prune(inv)
+        return run
     targets = inv_mod.prune_targets(inv)
-    if not a.apply:
-        for repo in targets:
-            lines = inv_mod.prune_preview(repo)
-            if lines:
-                inv.prune[repo] = lines
-        out.write(json.dumps(rep.to_json(inv), indent=2) + "\n" if a.json else rep.to_text(inv))
-        return 0
-    blockers = inv.signals.apply_blockers()
-    if blockers:
-        out.write(rep.to_text(inv))
-        out.write("REFUSED --apply: in-use signals incomplete: " + "; ".join(blockers) + "\n")
-        return 2
-    results = []
-    failed = 0
     roots, mains = _roots(a), _main_roots(a)
     for co in sorted((c for c in inv.checkouts if c.cls == "A"), key=lambda c: c.path):
         try:
             outcome = rm_mod.remove_checkout(co, roots, mains, inv.keep_patterns, a.regenerable)
-            results.append({"path": co.path, "outcome": outcome})
+            run.removed.append(co)
         except rm_mod.Refused as exc:
-            failed += 1
-            results.append({"path": co.path, "outcome": f"skipped: {exc}"})
-    pruned = {}
+            run.skipped += 1
+            outcome = f"skipped: {exc}"
+            co.reasons.insert(0, f"not removed in this run: {exc}")
+        run.outcomes.append({"path": co.path, "outcome": outcome})
+    inv.checkouts = [c for c in inv.checkouts if c not in run.removed]
     for repo in targets:
         lines = rm_mod.prune(repo)
         if lines:
-            pruned[repo] = lines
+            inv.prune[repo] = lines
+    empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals)
+    return run
+
+
+def _exit_code(run: inv_mod.Run) -> int:
+    return 2 if run.refused else 1 if run.skipped else 0
+
+
+def cmd_scan(a, sig, out) -> int:
+    inv = _build(a, sig)
+    if not a.apply:
+        _preview_prune(inv)
+        out.write(json.dumps(rep.to_json(inv), indent=2) + "\n" if a.json else rep.to_text(inv))
+        return 0
+    run = _apply(a, inv)
+    if run.refused:
+        out.write(rep.to_text(inv))
+        out.write("REFUSED --apply: in-use signals incomplete: " + "; ".join(run.refused) + "\n")
+        return 2
+    gone = [e for e in inv.empty_dirs if e.removed]
     if a.json:
-        out.write(json.dumps({"removed": results, "pruned": pruned,
+        out.write(json.dumps({"removed": run.outcomes, "pruned": inv.prune,
+                              "empty_dirs_removed": [e.path for e in gone],
                               "summary": rep.summary_line(inv)}, indent=2) + "\n")
     else:
-        for r in results:
+        for r in run.outcomes:
             if r["outcome"].startswith("removed"):
                 out.write(r["outcome"] + "\n")
             else:
                 out.write(f"SKIP {rep.short(r['path'])}: {r['outcome']}\n")
-        for repo, lines in pruned.items():
+        for repo, lines in inv.prune.items():
             out.write(f"pruned {len(lines)} stale worktree entr{'y' if len(lines) == 1 else 'ies'} in {rep.short(repo)}\n")
-        n_removed = sum(1 for r in results if r["outcome"].startswith("removed"))
-        out.write(f"{n_removed} removed, {failed} skipped; untouched: "
+        for e in gone:
+            out.write(f"removed empty directory {e.path}\n")
+        out.write(f"{len(run.removed)} removed, {run.skipped} skipped, {len(gone)} empty "
+                  f"director{'y' if len(gone) == 1 else 'ies'} removed; untouched: "
                   f"{sum(1 for c in inv.checkouts if c.cls != 'A')} checkouts in classes B/C/D\n")
-    return 1 if failed else 0
+    return _exit_code(run)
 
 
 def cmd_remove(a, sig, out) -> int:
@@ -202,20 +238,22 @@ def _upsert_item(a, inv, out_dir: str) -> str:
     unavailable = sig_mod.work_available(a.work_env, a.work_ledger)
     if unavailable:
         return f"work item: not updated ({unavailable.detail})"
-    t = rep.totals(inv)
-    removable = t["A"]["count"]
-    summary = rep.summary_line(inv)
     report_path = rep.short(os.path.join(out_dir, "latest.txt"))
-    args = ["upsert", a.work_item, "--title", "Weekly workspace-gc report",
+    refused = bool(inv.run and inv.run.refused)
+    what = "removes class A checkouts and empty workspace directories itself" if a.apply \
+        else "dry run, nothing removed"
+    args = ["upsert", a.work_item, "--title", "workspace-gc report",
             "--project", "agent-stuff", "--repo-url", "https://github.com/ephes/agent-stuff",
-            "--stage", "installed", "--owner", "jochen" if removable else "workspace-gc",
-            "--next-action", summary,
-            "--notes", f"Weekly dry run on {socket.gethostname()}; full report in "
-                       f"{report_path}. The job never removes anything.",
+            "--stage", "installed", "--owner", "jochen" if refused else "workspace-gc",
+            "--next-action", rep.summary_line(inv),
+            "--notes", f"Scheduled workspace-gc run on {socket.gethostname()} ({what}); "
+                       f"full report in {report_path}.",
             "--checked-at", "now"]
     code, _, err = sig_mod.run_work(a.work_env, a.work_ledger, args)
     if code != 0:
         return f"work item: upsert failed (exit {code}: {err})"
+    # The job removes class A itself, so approval requests that earlier
+    # versions opened for that are moot.
     code, stdout, err = sig_mod.run_work(a.work_env, a.work_ledger, ["show", "--json", a.work_item])
     if code != 0:
         return f"work item: updated; reading requests failed (exit {code})"
@@ -225,27 +263,20 @@ def _upsert_item(a, inv, out_dir: str) -> str:
         return "work item: updated; unexpected show output"
     ours = [r for r in requests if r.get("status") == "open" and r.get("kind") == "approval"
             and "workspace-gc" in (r.get("text") or "")]
-    if removable and not ours:
-        text = (f"Remove the {removable} class-A checkouts ({rep.human_kb(t['A']['kb'])}) listed in "
-                f"{report_path} with workspace-gc --apply?")
-        code, _, err = sig_mod.run_work(a.work_env, a.work_ledger,
-                                        ["ask", a.work_item, text, "--kind", "approval"])
-        return "work item: updated, owner asked" if code == 0 else f"work item: ask failed ({err})"
-    if not removable:
-        for r in ours:
-            sig_mod.run_work(a.work_env, a.work_ledger, ["withdraw", str(r["id"])])
-        return "work item: updated" + (", moot request withdrawn" if ours else "")
-    return "work item: updated (owner request already open)"
+    for r in ours:
+        sig_mod.run_work(a.work_env, a.work_ledger, ["withdraw", str(r["id"])])
+    return "work item: updated" + (", moot request withdrawn" if ours else "")
 
 
 def cmd_report(a, sig, out) -> int:
     out_dir = os.path.realpath(os.path.expanduser(a.out_dir))
     os.makedirs(out_dir, exist_ok=True)
     inv = _build(a, sig)
-    for repo in inv_mod.prune_targets(inv):
-        lines = inv_mod.prune_preview(repo)
-        if lines:
-            inv.prune[repo] = lines
+    if a.apply:
+        code = _exit_code(_apply(a, inv))
+    else:
+        _preview_prune(inv)
+        code = 0
     stamp = rep.now_iso()
     _write_atomic(os.path.join(out_dir, "latest.txt"), rep.to_text(inv, stamp))
     _write_atomic(os.path.join(out_dir, "latest.json"),
@@ -254,7 +285,7 @@ def cmd_report(a, sig, out) -> int:
     if a.work_item:
         msg += f"; {_upsert_item(a, inv, out_dir)}"
     out.write(msg + "\n")
-    return 0
+    return code
 
 
 def main(argv: list[str] | None = None, *, signals: sig_mod.Signals | None = None,
