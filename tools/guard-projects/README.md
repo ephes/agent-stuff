@@ -11,14 +11,36 @@ Two small guards for agent shells. Python 3 stdlib only.
   `pytest`, `xcodebuild`, ...) run with a working directory there. It follows
   `cd`, `git -C` and `bash -c`. Reads, `git fetch` and
   `git -C ~/projects/<repo> worktree add ~/workspaces/...` stay allowed. It
-  also blocks `git push` to a remote that is not under `github.com/ephes/`.
-- `bin/check-push-remote [remote]`: exits 1 unless the remote (default
-  `origin`) of the current repository is under `github.com/ephes/`. Use it
-  before every push:
+  also blocks `git push` unless every URL it would push to is under
+  `github.com/ephes/` (see below).
+- `bin/check-push-remote [git push arguments]`: exits 1 unless a `git push`
+  with the same arguments, run in the current repository, would push only to
+  `github.com/ephes/`. Without arguments it checks what a bare `git push`
+  would use. Use it before every push:
 
   ```sh
-  ~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote && git push -u origin HEAD
+  ~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote -u origin HEAD && git push -u origin HEAD
   ```
+
+Both resolve the push target the way git does, without contacting any remote:
+
+- options are parsed with their values (`-o ci.skip`, `--push-option`,
+  `--receive-pack`, unique abbreviations such as `--rep`), and the first
+  positional argument wins over `--repo`;
+- a bare `git push` uses `branch.<current>.pushRemote`, then
+  `remote.pushDefault`, then `branch.<current>.remote`, then the only remote,
+  then `origin`;
+- every push URL is checked: `remote.<name>.pushurl` (else `url`) with
+  `insteadOf`/`pushInsteadOf` applied as git does, including remotes and
+  rewrites set with `git -c`, plus `git remote get-url --push --all`; a
+  repository given as a URL or path gets the same rewriting;
+- `git -C`, `--git-dir`, `--work-tree`, `-c`/`--config-env` and leading
+  `VAR=value` assignments (also of an enclosing `bash -c`) are applied while
+  resolving. A push after `export`, `unset`, `set`, `source` or similar in the
+  same command is refused, since the resulting environment is not tracked.
+
+Anything that cannot be resolved (unknown or ambiguous option, missing
+repository, no push URL) is refused rather than allowed.
 
 `GUARD_PROJECTS_ROOT` and `GUARD_PUSH_OWNER` override `~/projects` and `ephes`
 (for tests). The hook is a heuristic seatbelt, not a sandbox: an interpreter
