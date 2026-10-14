@@ -217,14 +217,17 @@ class GuardTest(unittest.TestCase):
         # --git-dir is resolved after every -C, as git does.
         self.assertIsNotNone(self.blocked(f"git --git-dir=.git -C {other} push origin"))
         self.assertIsNone(self.blocked(f"git -C {other} --git-dir={self.ws}/.git push origin"))
-        # Environment reaches nested shells and later segments.
+        # Leading assignments reach nested shells; export/unset before a push
+        # cannot be followed reliably, so the push is refused.
         for cmd in [f"GIT_DIR={other}/.git bash -c 'git push origin'",
                     f"export GIT_DIR={other}/.git; git push origin",
-                    f"export GIT_DIR={other}/.git && bash -c 'git push origin'"]:
+                    f"true || export GIT_DIR={self.ws}/.git; git push origin",
+                    "unset GIT_DIR; git push origin",
+                    f"export X=1 && bash -c 'git push origin'"]:
             with self.subTest(cmd=cmd):
                 self.assertIsNotNone(self.blocked(cmd))
-        self.assertIsNone(self.blocked(
-            f"export GIT_DIR={other}/.git; unset GIT_DIR; git push origin"))
+        self.assertIsNone(self.blocked(f"GIT_DIR={self.ws}/.git bash -c 'git push origin'",
+                                       other))
         # A remote defined only with -c is a remote, not a URL to rewrite.
         self.assertIsNotNone(self.blocked(
             "git -c remote.tmp.url=git@github.com:someone-else/repo.git "

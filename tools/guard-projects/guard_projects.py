@@ -69,8 +69,8 @@ def _segments(command):
 def blocked_reason(command, cwd, root=None, env=None):
     """Return why ``command`` would write under the projects root, or None.
 
-    ``env`` holds variables exported by an enclosing command; ``export`` and
-    ``unset`` in ``command`` update a copy of it.
+    ``env`` holds the leading ``VAR=value`` assignments of an enclosing
+    command (``VAR=x bash -c '...'``).
     """
     root = root or projects_root()
     env = dict(env or {})
@@ -106,15 +106,10 @@ def _check(words, cwd, root, exported):
     args = words[1:]
     here = _inside(os.path.realpath(cwd), root)
 
-    if cmd == "export":
-        for a in args:
-            name, has_eq, value = a.partition("=")
-            if has_eq and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                exported[name] = value
-        return None, cwd
-    if cmd == "unset":
-        for a in args:
-            exported.pop(a, None)
+    if cmd in ("export", "unset", "set", "declare", "typeset", "source", "."):
+        # The shell environment changes in ways segment parsing cannot follow
+        # (control flow, subshells): a later push cannot be resolved.
+        exported[ENV_CHANGED] = cmd
         return None, cwd
     if cmd in ("cd", "pushd"):
         target = args[0] if args else "~"
@@ -144,6 +139,9 @@ def _check(words, cwd, root, exported):
         if args and args[0] in GIT_WRITE and _inside(os.path.realpath(gitdir), root):
             return f"git {args[0]} in {gitdir}", cwd
         if args and args[0] == "push":
+            if ENV_CHANGED in env:
+                return (f"cannot resolve push target after `{env[ENV_CHANGED]}` "
+                        "in the same command; push in a separate command"), cwd
             return push_reason(args[1:], cwd, global_opts, env), cwd
         return None, cwd
     if cmd == "sed" or cmd == "perl":
@@ -191,6 +189,7 @@ PUSH_LONG = {
     "atomic": None, "push-option": "req", "ipv4": None, "ipv6": None,
 }
 PUSH_SHORT_FLAGS = set("vqdnfu46")
+ENV_CHANGED = "\0env-changed"  # marker key: export/unset seen earlier
 PUSH_SHORT_VALUE = {"o"}
 # git global options whose value may be the next word.
 GIT_GLOBAL_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",

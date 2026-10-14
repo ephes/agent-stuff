@@ -34,9 +34,10 @@ Both resolve the push target the way git does, without contacting any remote:
   `insteadOf`/`pushInsteadOf` applied as git does, including remotes and
   rewrites set with `git -c`, plus `git remote get-url --push --all`; a
   repository given as a URL or path gets the same rewriting;
-- `git -C`, `--git-dir`, `--work-tree`, `-c`/`--config-env`, leading
-  `VAR=value` assignments and earlier `export`/`unset` (also into `bash -c`)
-  are applied while resolving.
+- `git -C`, `--git-dir`, `--work-tree`, `-c`/`--config-env` and leading
+  `VAR=value` assignments (also of an enclosing `bash -c`) are applied while
+  resolving. A push after `export`, `unset`, `set`, `source` or similar in the
+  same command is refused, since the resulting environment is not tracked.
 
 Anything that cannot be resolved (unknown or ambiguous option, missing
 repository, no push URL) is refused rather than allowed.
