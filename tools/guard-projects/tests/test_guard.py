@@ -207,6 +207,46 @@ class GuardTest(unittest.TestCase):
         # Two remotes, none chosen: git falls back to origin, which is missing.
         self.assertIsNotNone(self.blocked("git push"))
 
+    def test_push_resolution_follows_git_semantics(self):
+        git = self.push_repo()
+        other = os.path.join(os.path.dirname(self.ws), "ws-y")
+        os.makedirs(other)
+        subprocess.run(["git", "init", "-q", other], check=True)
+        subprocess.run(["git", "-C", other, "remote", "add", "origin",
+                        "https://github.com/someone-else/repo"], check=True)
+        # --git-dir is resolved after every -C, as git does.
+        self.assertIsNotNone(self.blocked(f"git --git-dir=.git -C {other} push origin"))
+        self.assertIsNone(self.blocked(f"git -C {other} --git-dir={self.ws}/.git push origin"))
+        # Environment reaches nested shells and later segments.
+        for cmd in [f"GIT_DIR={other}/.git bash -c 'git push origin'",
+                    f"export GIT_DIR={other}/.git; git push origin",
+                    f"export GIT_DIR={other}/.git && bash -c 'git push origin'"]:
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(self.blocked(cmd))
+        self.assertIsNone(self.blocked(
+            f"export GIT_DIR={other}/.git; unset GIT_DIR; git push origin"))
+        # A remote defined only with -c is a remote, not a URL to rewrite.
+        self.assertIsNotNone(self.blocked(
+            "git -c remote.tmp.url=git@github.com:someone-else/repo.git "
+            "-c url.git@github.com:ephes/repo.git.insteadOf=tmp push tmp HEAD"))
+        self.assertIsNone(self.blocked(
+            "git -c remote.tmp.url=git@github.com:ephes/repo.git push tmp HEAD"))
+        # A tag named like the branch does not hide branch.<name>.pushRemote.
+        git("-c", "user.name=t", "-c", "user.email=t@example.invalid",
+            "commit", "-q", "--allow-empty", "-m", "x")
+        git("tag", "main")
+        git("config", "branch.main.pushRemote", "up")
+        self.assertIsNotNone(self.blocked("git push"))
+        # pushInsteadOf only applies to url, insteadOf also to pushurl.
+        git("config", "branch.main.pushRemote", "origin")
+        git("config", "remote.origin.pushurl", "https://github.com/ephes/repo")
+        git("config", "url.https://github.com/someone-else/.pushInsteadOf",
+            "https://github.com/ephes/")
+        self.assertIsNone(self.blocked("git push"))
+        git("config", "url.https://github.com/someone-else/.insteadOf",
+            "https://github.com/ephes/")
+        self.assertIsNotNone(self.blocked("git push"))
+
     def test_push_outside_a_repository_fails_closed(self):
         self.assertIsNotNone(self.blocked("git push origin main"))
         self.assertIsNotNone(self.blocked("git push"))

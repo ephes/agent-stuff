@@ -66,21 +66,26 @@ def _segments(command):
         yield seg
 
 
-def blocked_reason(command, cwd, root=None):
-    """Return why ``command`` would write under the projects root, or None."""
+def blocked_reason(command, cwd, root=None, env=None):
+    """Return why ``command`` would write under the projects root, or None.
+
+    ``env`` holds variables exported by an enclosing command; ``export`` and
+    ``unset`` in ``command`` update a copy of it.
+    """
     root = root or projects_root()
+    env = dict(env or {})
     try:
         segments = list(_segments(command))
     except ValueError:
         return None  # unparseable quoting: let the shell report it
     for words in segments:
-        reason, cwd = _check(words, cwd, root)
+        reason, cwd = _check(words, cwd, root, env)
         if reason:
             return reason
     return None
 
 
-def _check(words, cwd, root):
+def _check(words, cwd, root, exported):
     # Redirections anywhere in the segment.
     for i, w in enumerate(words):
         if w in (">", ">>") and i + 1 < len(words):
@@ -88,7 +93,7 @@ def _check(words, cwd, root):
                 return f"redirects output into {words[i + 1]}", cwd
     words = [w for i, w in enumerate(words)
              if w not in (">", ">>", "<") and (i == 0 or words[i - 1] not in (">", ">>", "<"))]
-    env = {}  # leading VAR=value assignments, applied when resolving pushes
+    env = dict(exported)  # plus leading VAR=value: used to resolve pushes
     while words and ("=" in words[0] and not words[0].startswith("=")
                      or words[0] in WRAPPERS):
         name, _, value = words[0].partition("=")
@@ -101,12 +106,22 @@ def _check(words, cwd, root):
     args = words[1:]
     here = _inside(os.path.realpath(cwd), root)
 
+    if cmd == "export":
+        for a in args:
+            name, has_eq, value = a.partition("=")
+            if has_eq and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                exported[name] = value
+        return None, cwd
+    if cmd == "unset":
+        for a in args:
+            exported.pop(a, None)
+        return None, cwd
     if cmd in ("cd", "pushd"):
         target = args[0] if args else "~"
         return None, cwd if target == "-" else _expand(target, cwd)
     if cmd in ("bash", "sh", "zsh", "fish") and "-c" in args:
         inner = args[args.index("-c") + 1] if args.index("-c") + 1 < len(args) else ""
-        return blocked_reason(inner, cwd, root), cwd
+        return blocked_reason(inner, cwd, root, env), cwd
     if cmd == "git":
         gitdir = cwd
         global_opts = []  # options that change which repository/config git sees
@@ -122,7 +137,8 @@ def _check(words, cwd, root):
                 gitdir = _expand(val, gitdir)
                 global_opts += ["-C", gitdir]
             elif opt in ("--git-dir", "--work-tree"):
-                global_opts.append(f"{opt}={_expand(val, gitdir)}")
+                # git resolves these from its final directory (after every -C)
+                global_opts.append(f"{opt}={os.path.expanduser(val)}")
             elif opt in ("-c", "--config-env"):
                 global_opts += [opt, val]
         if args and args[0] in GIT_WRITE and _inside(os.path.realpath(gitdir), root):
@@ -260,8 +276,9 @@ def _config(cwd, global_opts, env, key):
 
 def _default_remote(cwd, global_opts, env):
     """The remote a bare ``git push`` uses, resolved the way git does."""
-    code, out = _git(cwd, global_opts, env, "symbolic-ref", "-q", "--short", "HEAD")
-    branch = out.strip() if code == 0 else None
+    code, out = _git(cwd, global_opts, env, "symbolic-ref", "-q", "HEAD")
+    ref = out.strip() if code == 0 else ""
+    branch = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None
     for key in ([f"branch.{branch}.pushRemote"] if branch else []) + [
             "remote.pushDefault"] + ([f"branch.{branch}.remote"] if branch else []):
         value = _config(cwd, global_opts, env, key)
@@ -277,10 +294,11 @@ def _default_remote(cwd, global_opts, env):
 def push_urls(args, cwd, global_opts=(), env=None):
     """Every URL ``git push <args>`` run in ``cwd`` would push to.
 
-    Named remotes use ``git remote get-url --push --all`` (pushurl, url
-    rewriting); a repository that is not a configured remote is taken as a
-    URL or path and rewritten the same way. Raises PushTargetError when the
-    target cannot be determined.
+    Named remotes are read from the config (pushurl, url, insteadOf and
+    pushInsteadOf, ``-c`` included) and from ``git remote get-url --push
+    --all``; every URL either yields is checked. A repository that is not a
+    configured remote is taken as a URL or path and rewritten the same way.
+    Raises PushTargetError when the target cannot be determined.
     """
     global_opts = list(global_opts)
     repo = parse_push_args(args)
@@ -288,32 +306,52 @@ def push_urls(args, cwd, global_opts=(), env=None):
         repo = _default_remote(cwd, global_opts, env)
     if not repo:
         raise PushTargetError("empty repository")
+    urls = _configured_push_urls(repo, cwd, global_opts, env)
     code, out = _git(cwd, global_opts, env, "remote", "get-url", "--push",
                      "--all", "--", repo)
-    if code == 0:
-        urls = [u.strip() for u in out.split("\n") if u.strip()]
-    else:  # not a configured remote: git treats it as a URL or path
-        urls = [_rewrite_push_url(repo, cwd, global_opts, env)]
+    if code == 0:  # also covers remotes from .git/remotes and .git/branches
+        urls += [u.strip() for u in out.split("\n") if u.strip()]
+    if not urls:  # not a configured remote: git treats it as a URL or path
+        urls = _configured_push_urls(repo, cwd, global_opts, env, anonymous=True)
     if not urls:
         raise PushTargetError(f"no push URL for {repo}")
     return urls
 
 
-def _rewrite_push_url(url, cwd, global_opts, env):
-    """Apply url.<base>.pushInsteadOf, else insteadOf, as git does for a push
-    to a repository given as a URL (longest matching prefix wins)."""
-    code, out = _git(cwd, global_opts, env, "config", "-z", "--get-regexp",
-                     r"^url\..*\.(push)?insteadof$")
+def _config_all(cwd, global_opts, env, *args):
+    code, out = _git(cwd, global_opts, env, "config", "-z", *args)
     if code not in (0, 1):
-        raise PushTargetError("git config --get-regexp url.* failed")
-    best = {"pushinsteadof": None, "insteadof": None}
-    for entry in filter(None, out.split("\0")):
+        raise PushTargetError(f"git config {' '.join(args)} failed")
+    return [e for e in out.split("\0") if e]
+
+
+def _configured_push_urls(repo, cwd, global_opts, env, anonymous=False):
+    """Push URLs of ``repo`` from the git config (including ``-c``), rewritten
+    as git's remote.c alias_all_urls does. ``anonymous`` treats ``repo`` as
+    the remote's only URL."""
+    rules = {"insteadof": [], "pushinsteadof": []}
+    for entry in _config_all(cwd, global_opts, env, "--get-regexp",
+                             r"^url\..*\.(push)?insteadof$"):
         key, _, prefix = entry.partition("\n")
         base, _, kind = key[len("url."):].rpartition(".")
-        if url.startswith(prefix) and (best[kind] is None or len(prefix) > len(best[kind][0])):
-            best[kind] = (prefix, base)
-    match = best["pushinsteadof"] or best["insteadof"]
-    return match[1] + url[len(match[0]):] if match else url
+        rules[kind.lower()].append((prefix, base))
+
+    def rewrite(url, kind):
+        hits = [(p, b) for p, b in rules[kind] if url.startswith(p)]
+        if not hits:
+            return None
+        prefix, base = max(hits, key=lambda h: len(h[0]))
+        return base + url[len(prefix):]
+
+    if anonymous:
+        pushurls, urls = [], [repo]
+    else:
+        pushurls = _config_all(cwd, global_opts, env, "--get-all", f"remote.{repo}.pushurl")
+        urls = _config_all(cwd, global_opts, env, "--get-all", f"remote.{repo}.url")
+    if pushurls:
+        return [rewrite(u, "insteadof") or u for u in pushurls]
+    pushed = [r for r in (rewrite(u, "pushinsteadof") for u in urls) if r]
+    return pushed or [rewrite(u, "insteadof") or u for u in urls]
 
 
 def push_reason(args, cwd, global_opts=(), env=None):

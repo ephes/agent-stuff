@@ -30,11 +30,13 @@ Both resolve the push target the way git does, without contacting any remote:
 - a bare `git push` uses `branch.<current>.pushRemote`, then
   `remote.pushDefault`, then `branch.<current>.remote`, then the only remote,
   then `origin`;
-- every `git remote get-url --push --all` URL is checked, so a `pushurl` or
-  `pushInsteadOf` pointing elsewhere is caught; a repository given as a URL or
-  path gets the same `pushInsteadOf`/`insteadOf` rewriting;
-- `git -C`, `--git-dir`, `--work-tree`, `-c`/`--config-env` and leading
-  `VAR=value` assignments are applied while resolving.
+- every push URL is checked: `remote.<name>.pushurl` (else `url`) with
+  `insteadOf`/`pushInsteadOf` applied as git does, including remotes and
+  rewrites set with `git -c`, plus `git remote get-url --push --all`; a
+  repository given as a URL or path gets the same rewriting;
+- `git -C`, `--git-dir`, `--work-tree`, `-c`/`--config-env`, leading
+  `VAR=value` assignments and earlier `export`/`unset` (also into `bash -c`)
+  are applied while resolving.
 
 Anything that cannot be resolved (unknown or ambiguous option, missing
 repository, no push URL) is refused rather than allowed.
