@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import shutil
 import stat
 import subprocess
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -50,6 +52,22 @@ REGENERABLE = PAYLOAD_DIRS | frozenset({
     "site", ".zed", ".ansible", ".uv-cache", "ansible_collections",
 })
 REGENERABLE_GLOBS = ("*.pyc", "*.pyo", "*.egg-info", ".coverage.*", "*.log", "*.tsbuildinfo")
+# Ignored paths that are regenerable in every project. Unlike the names above
+# they are anchored at the checkout root (see _path_match): a dev database
+# called db.sqlite3 elsewhere stays unique data.
+REGENERABLE_PATHS = (
+    "tests/test_database.sqlite3*",   # pytest-django reusable test database + fingerprint
+    "/uv.lock",                       # a lock file the project ignores is rebuilt by uv
+    "test-media/",                    # media written by test runs
+    "ansible/collections/",           # installed Ansible collections
+)
+DEFAULT_REGENERABLE_FILE = os.path.join(HOME, ".config", "workspace-gc", "regenerable")
+# An ignored directory with more entries than this is never called empty.
+EMPTY_SCAN_LIMIT = 2000
+# More entries than this in a directory matched by a path pattern, or checked
+# entry by entry, means "not regenerable".
+WALK_LIMIT = 200_000
+FETCH_TIMEOUT = 900
 DISCOVERY_SKIP = PAYLOAD_DIRS | {".git", "__pycache__"}
 MAX_DEPTH = 3
 CLASS_NAMES = {"A": "removable", "B": "removable after push",
@@ -86,6 +104,7 @@ class Checkout:
     borrows_from: list[str] = field(default_factory=list)   # objects/info/alternates
     borrowed_by: list[str] = field(default_factory=list)    # repos borrowing our objects
     unpushed_commits: list[str] = field(default_factory=list)
+    unpushed_hints: list[str] = field(default_factory=list)  # per sample commit, informational
     ignored_unique: list[str] = field(default_factory=list)
     device_backups: list[str] = field(default_factory=list)
     payloads: list[dict] = field(default_factory=list)
@@ -123,6 +142,32 @@ def load_keep_patterns(keep: list[str], keep_file: str | None) -> list[str]:
         p = os.path.expanduser(p)
         out.append(os.path.normpath(p) if not any(c in p for c in "*?[") else p)
     return out
+
+
+def load_regenerable(extra: list[str], regenerable_file: str | None) -> list[str]:
+    """Extra regenerable patterns from the command line and the optional file
+    (one per line, `#` comments). See _regenerable for the syntax."""
+    pats = []
+    if regenerable_file and os.path.isfile(regenerable_file):
+        with open(regenerable_file, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    pats.append(line)
+    return pats + list(extra)
+
+
+def project_names(urls: list[str]) -> set[str]:
+    """Repository names of network URLs: git@github.com:ephes/podcast.git and
+    https://github.com/ephes/podcast both give "podcast"."""
+    names = set()
+    for u in urls:
+        tail = u.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        if tail.endswith(".git"):
+            tail = tail[:-4]
+        if tail:
+            names.add(tail)
+    return names
 
 
 def keep_match(path: str, patterns: list[str]) -> str:
@@ -293,13 +338,76 @@ class Inspector:
     """Per-run caches for remote lookups and repository metadata."""
 
     def __init__(self, main_roots: list[str] | None = None, use_cache: bool = True,
-                 keep_patterns: list[str] | None = None):
+                 keep_patterns: list[str] | None = None, fetch: bool = True):
         self.main_roots = [os.path.realpath(os.path.expanduser(r)) for r in (main_roots or [])]
         self.keep_patterns = list(keep_patterns or [])
         self.use_cache = use_cache
+        self.fetch = fetch
         self._lock = threading.Lock()
         self._ls: dict[str, tuple[set[str] | None, str]] = {}
+        self._heads: dict[str, tuple[str, str]] = {}
         self._root_index: dict[str, list[str]] | None = None
+        self._scratch = ""
+        self._fetched: dict[str, tuple[str, str]] = {}
+        self._url_locks: dict[str, threading.Lock] = {}
+
+    def close(self) -> None:
+        """Delete the private scratch repositories of this run."""
+        with self._lock:
+            scratch, self._scratch = self._scratch, ""
+            self._fetched.clear()
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    def fetched_store(self, url: str) -> tuple[str, str]:
+        """(objects dir, error) of a private bare repository with every branch
+        and tag of `url`, fetched once per run into a scratch directory of our
+        own. Checkouts are never fetched into: they only borrow the objects
+        read-only through GIT_ALTERNATE_OBJECT_DIRECTORIES."""
+        with self._lock:
+            if url in self._fetched:
+                return self._fetched[url]
+            if not self._scratch:
+                self._scratch = tempfile.mkdtemp(prefix="workspace-gc-fetch-")
+            url_lock = self._url_locks.setdefault(url, threading.Lock())
+            scratch = self._scratch
+        with url_lock:
+            with self._lock:
+                if url in self._fetched:
+                    return self._fetched[url]
+            repo = tempfile.mkdtemp(prefix="origin-", suffix=".git", dir=scratch)
+            try:
+                git.out(["init", "-q", "--bare", repo])
+                git.out(["-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                         "-c", "fetch.writeCommitGraph=false", "-C", repo, "fetch", "-q",
+                         "--no-tags", "--no-write-fetch-head", url,
+                         "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
+                        timeout=FETCH_TIMEOUT)
+                res = (os.path.join(repo, "objects"), "")
+            except GitError as exc:
+                res = ("", f"fetch {url}: {exc}")
+            with self._lock:
+                self._fetched[url] = res
+            return res
+
+    def default_head(self, url: str) -> tuple[str, str]:
+        """(branch, sha) of the remote's default branch, or ("", "")."""
+        with self._lock:
+            if url in self._heads:
+                return self._heads[url]
+        branch = sha = ""
+        try:
+            text = git.out(["ls-remote", "--symref", url, "HEAD"], timeout=git.LS_REMOTE_TIMEOUT)
+            for line in text.splitlines():
+                if line.startswith("ref: ") and line.endswith("\tHEAD"):
+                    branch = line[5:].split("\t")[0].removeprefix("refs/heads/")
+                elif line.endswith("\tHEAD") and len(line.split("\t")[0]) >= 40:
+                    sha = line.split("\t")[0]
+        except GitError:
+            pass
+        with self._lock:
+            self._heads[url] = (branch, sha)
+        return branch, sha
 
     # -- remotes
 
@@ -400,8 +508,26 @@ class Inspector:
 
     # -- containment
 
-    def unpushed(self, repo: str, revs: list[str], urls: list[str], alternates: list[str]
-                 ) -> tuple[int, list[str], list[str], int]:
+    def unpushed(self, repo: str, revs: list[str], urls: list[str], alternates: list[str],
+                 fetch_missing: bool = True) -> tuple[int, list[str], list[str], int, list[str]]:
+        """_unpushed_once, plus: if commits look unpushed while remote tips are
+        missing locally, and fetching is on, fetch each URL into a private
+        scratch repository and count again with its objects borrowed. Returns
+        (count, sample, remote errors, missing tips, object dirs added)."""
+        count, sample, errors, missing = self._unpushed_once(repo, revs, urls, alternates)
+        added: list[str] = []
+        if count and missing and fetch_missing and self.fetch:
+            for url in urls:
+                store, err = self.fetched_store(url)
+                if store:
+                    added.append(store)
+            if added:
+                count, sample, errors, missing = self._unpushed_once(
+                    repo, revs, urls, list(dict.fromkeys(alternates + added)))
+        return count, sample, errors, missing, added
+
+    def _unpushed_once(self, repo: str, revs: list[str], urls: list[str], alternates: list[str]
+                       ) -> tuple[int, list[str], list[str], int]:
         """(count, sample commits, remote errors, missing tips) for commits
         reachable from revs that are not reachable from any branch or tag of
         any reachable network URL. Only remote tips whose objects exist
@@ -435,9 +561,55 @@ class Inspector:
         count = int(raw)
         sample = []
         if count:
-            sample = git.out(["log", "--stdin", "--format=%h %cs %s", "-n", "8", *revs], repo,
+            sample = git.out(["log", "--stdin", "--format=%H %cs %s", "-n", "8", *revs], repo,
                              input=stdin, alternates=alternates).splitlines()
         return count, sample, errors, missing
+
+    def supersession_hints(self, repo: str, sample: list[str], urls: list[str],
+                           alternates: list[str]) -> tuple[list[str], list[str]]:
+        """For each sample commit ("<sha> <date> <subject>"): whether the
+        remote's default branch has a commit with the same patch id (git
+        cherry) or the same subject. Informational only; never changes a
+        class. Returns (hints, object dirs added by a fetch)."""
+        added: list[str] = []
+        branch = head = ""
+        for url in urls:
+            branch, head = self.default_head(url)
+            if head:
+                break
+        if not head:
+            return ["default branch unknown"] * len(sample), added
+        alts = list(alternates)
+
+        def have(sha: str) -> bool:
+            return git.run(["cat-file", "-e", f"{sha}^{{commit}}"], repo, check=False,
+                           alternates=alts).returncode == 0
+        if not have(head) and self.fetch:
+            store, _ = self.fetched_store(url)
+            if store:
+                added.append(store)
+                alts.append(store)
+        if not have(head):
+            return [f"{branch or 'default branch'} not available locally"] * len(sample), added
+        subjects: dict[str, str] = {}
+        log = git.run(["log", "--format=%h %s", "-n", "5000", head], repo, check=False,
+                      alternates=alts).stdout
+        for line in log.splitlines():
+            short, _, subj = line.partition(" ")
+            subjects.setdefault(subj, short)
+        hints = []
+        for line in sample:
+            sha, _, rest = line.partition(" ")
+            subj = rest.partition(" ")[2]
+            bits = []
+            cherry = git.run(["cherry", head, sha, f"{sha}^"], repo, check=False,
+                             alternates=alts)
+            if cherry.returncode == 0 and f"- {sha}" in cherry.stdout.splitlines():
+                bits.append(f"same patch on {branch}")
+            if subj in subjects:
+                bits.append(f"same subject as {branch} {subjects[subj]}")
+            hints.append("; ".join(bits) or f"no match on {branch}")
+        return hints, added
 
 
 def _workspace_of(path: str, root: str) -> str:
@@ -445,14 +617,110 @@ def _workspace_of(path: str, root: str) -> str:
     return os.path.join(root, rel.split(os.sep)[0])
 
 
-def _regenerable(rel: str, extra: list[str]) -> bool:
+def _path_match(parts: list[str], pattern: str, is_dir: bool) -> bool:
+    """Whether a path (split into components) is, or lies inside, what an
+    anchored path pattern matches. Each pattern component is an fnmatch glob
+    for exactly one path component (`*` never crosses a `/`); a trailing `/`
+    makes the pattern match directories only."""
+    pparts = [p for p in pattern.strip("/").split("/") if p]
+    if not pparts or len(parts) < len(pparts):
+        return False
+    if not all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, pparts)):
+        return False
+    return not (pattern.endswith("/") and len(parts) == len(pparts) and not is_dir)
+
+
+def _pattern_applies(pattern: str, projects: set[str]) -> str:
+    """The pattern without its `<repo>:` scope, or "" if the scope names
+    another repository."""
+    scope, sep, rest = pattern.partition(":")
+    if sep and "/" not in scope:
+        return rest if scope in projects else ""
+    return pattern
+
+
+def _is_dir(path: str) -> bool:
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def _is_empty(path: str) -> bool:
+    """A 0-byte regular file, or a real directory that holds nothing but
+    directories and 0-byte regular files (no symlinks, nothing unreadable,
+    at most EMPTY_SCAN_LIMIT entries)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISREG(st.st_mode):
+        return st.st_size == 0
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    seen = 0
+    errors = []
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
+                                                onerror=errors.append):
+        for name in dirnames + filenames:
+            seen += 1
+            if seen > EMPTY_SCAN_LIMIT:
+                return False
+            try:
+                est = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                return False
+            if stat.S_ISDIR(est.st_mode):
+                continue
+            if not stat.S_ISREG(est.st_mode) or est.st_size:
+                return False
+    return not errors
+
+
+def _venv_prefix(path: str, parts: list[str]) -> int:
+    """Length of the shortest leading part of `parts` that is a virtualenv
+    (a real directory with a pyvenv.cfg file), or 0."""
+    for i in range(1, len(parts) + 1):
+        d = os.path.join(path, *parts[:i])
+        try:
+            if stat.S_ISDIR(os.lstat(d).st_mode) and \
+                    stat.S_ISREG(os.lstat(os.path.join(d, "pyvenv.cfg")).st_mode):
+                return i
+        except OSError:
+            continue
+    return 0
+
+
+def _regenerable(path: str, rel: str, extra: list[str], projects: set[str] = frozenset()
+                 ) -> bool:
+    """Whether the ignored entry `rel` of the checkout at `path` is safe to
+    lose. Regenerable are: a path component named in REGENERABLE or matching
+    REGENERABLE_GLOBS; a path matched by REGENERABLE_PATHS; anything inside a
+    virtualenv (pyvenv.cfg); an empty entry (_is_empty); and the `extra`
+    patterns: a plain name (no `/`) matches any path component, a pattern
+    with a `/` is anchored at the checkout root (_path_match), and either may
+    be scoped to one repository as `<repo>:<pattern>` (see project_names)."""
     parts = [p for p in rel.rstrip("/").split("/") if p]
+    if not parts:
+        return False
     for p in parts:
-        if p in REGENERABLE or p in extra:
+        if p in REGENERABLE or any(fnmatch.fnmatch(p, g) for g in REGENERABLE_GLOBS):
             return True
-        if any(fnmatch.fnmatch(p, g) for g in REGENERABLE_GLOBS):
-            return True
-    return False
+    full = os.path.join(path, *parts)
+    is_dir = rel.endswith("/") or _is_dir(full)
+    for raw in list(REGENERABLE_PATHS) + list(extra):
+        pat = _pattern_applies(raw, projects)
+        if not pat:
+            continue
+        if "/" in pat:
+            if _path_match(parts, pat, is_dir):
+                # A nested repository is never regenerable, whatever matched it.
+                return not (is_dir and _has_git(full))
+        elif pat in parts:
+            return not (is_dir and _has_git(full))
+    if _venv_prefix(path, parts):
+        return True
+    return _is_empty(full)
 
 
 def _du_kb(path: str) -> int:
@@ -528,20 +796,74 @@ def deletion_scan(path: str) -> list[str]:
     return blockers
 
 
-def scan_ignored(path: str, regenerable: list[str]) -> tuple[list[dict], list[str]]:
-    """(payload dirs, ignored entries that are not regenerable)."""
+def scan_ignored(path: str, regenerable: list[str], projects: set[str] = frozenset()
+                 ) -> tuple[list[dict], list[str]]:
+    """(payload dirs, ignored entries that are not regenerable). Payloads
+    are the PAYLOAD_DIRS and virtualenvs (directories with pyvenv.cfg)."""
     payloads, unique = [], []
     ignored = git.out(["ls-files", "-o", "-i", "--exclude-standard", "--directory"], path)
+    seen_payload = set()
     for rel in ignored.splitlines():
         if not rel:
             continue
-        name = os.path.basename(rel.rstrip("/"))
+        parts = [p for p in rel.rstrip("/").split("/") if p]
+        name = parts[-1] if parts else ""
         if name in PAYLOAD_DIRS and rel.endswith("/"):
             payloads.append({"path": rel.rstrip("/"), "kb": 0})
-        elif not _regenerable(rel, regenerable):
-            unique.append(rel)
+            continue
+        venv = _venv_prefix(path, parts)
+        if venv:
+            top = "/".join(parts[:venv])
+            if top not in seen_payload:
+                seen_payload.add(top)
+                payloads.append({"path": top, "kb": 0})
+            continue
+        if _regenerable(path, rel, regenerable, projects):
+            continue
+        if rel.endswith("/") and _regenerable_inside(path, rel, regenerable, projects):
+            continue
+        unique.append(rel)
     return payloads, unique
 
+
+def _regenerable_inside(path: str, rel: str, regenerable: list[str], projects: set[str]
+                        ) -> bool:
+    """For an ignored directory that is not regenerable as a whole (git lists
+    a wholly ignored directory once): whether everything in it is, so
+    patterns may name paths deeper than the directory git reported. The
+    filesystem is walked completely (git's listing leaves out `.git`
+    metadata): every entry that is not a real directory - files, symlinks,
+    symlinks to directories - must be regenerable itself, and a `.git`
+    entry anywhere, an unreadable directory or more than WALK_LIMIT entries
+    means no."""
+    top = os.path.join(path, *[p for p in rel.split("/") if p])
+    if not _is_dir(top):
+        return False
+    errors: list[OSError] = []
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(top, followlinks=False, onerror=errors.append):
+        seen += len(dirnames) + len(filenames)
+        if ".git" in dirnames or ".git" in filenames or seen > WALK_LIMIT:
+            return False
+        reldir = os.path.relpath(dirpath, path).replace(os.sep, "/")
+        others = filenames + [d for d in dirnames if not _is_dir(os.path.join(dirpath, d))]
+        for name in others:
+            if not _regenerable(path, f"{reldir}/{name}", regenerable, projects):
+                return False
+    return not errors
+
+
+def _has_git(top: str) -> bool:
+    """Whether a `.git` entry exists anywhere below `top` (symlinks not
+    followed). An unreadable directory or more than WALK_LIMIT entries
+    counts as yes."""
+    errors: list[OSError] = []
+    seen = 0
+    for _, dirnames, filenames in os.walk(top, followlinks=False, onerror=errors.append):
+        seen += len(dirnames) + len(filenames)
+        if ".git" in dirnames or ".git" in filenames or seen > WALK_LIMIT:
+            return True
+    return bool(errors)
 
 def hidden_state(path: str, gdir: str, common_dir: str) -> list[str]:
     """Things that can hide changes or history from `git status` and
@@ -628,7 +950,6 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
                 if wt and os.path.realpath(wt) != me and "prunable" not in fields:
                     co.linked_worktrees.append(wt)
 
-        co.payloads, co.ignored_unique = scan_ignored(path, regenerable)
         co.hidden = hidden_state(path, gdir, co.common_dir)
         co.device_backups = find_device_backups(path)
 
@@ -655,10 +976,11 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
             alternates = list(dict.fromkeys(alternates))
         co.network_remotes = urls
         co.alternates = alternates
+        co.payloads, co.ignored_unique = scan_ignored(path, regenerable, project_names(urls))
         if urls:
             revs = ["HEAD"] if co.kind == "worktree" else ["HEAD", "--branches", "--tags"]
-            co.unpushed, co.unpushed_commits, co.remote_errors, co.missing_tips = ins.unpushed(
-                path, revs, urls, alternates)
+            co.unpushed, sample, co.remote_errors, co.missing_tips, _ = ins.unpushed(
+                path, revs, urls, alternates, fetch_missing=False)
             if co.unpushed and co.missing_tips and all_repos is not None:
                 # Remote tips we lack may live in another local repository of the
                 # same project (read-only, via alternates).
@@ -666,8 +988,22 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
                 if extra:
                     alternates = list(dict.fromkeys(alternates + extra))
                     co.alternates = alternates
-                    (co.unpushed, co.unpushed_commits, co.remote_errors,
-                     co.missing_tips) = ins.unpushed(path, revs, urls, alternates)
+                    (co.unpushed, sample, co.remote_errors, co.missing_tips,
+                     _) = ins.unpushed(path, revs, urls, alternates, fetch_missing=False)
+            if co.unpushed and co.missing_tips and ins.fetch:
+                # Still unknown: fetch the remote into a private scratch
+                # repository (never into the checkout) and count again.
+                (co.unpushed, sample, co.remote_errors, co.missing_tips,
+                 added) = ins.unpushed(path, revs, urls, alternates)
+                if added:
+                    co.notes.append("containment checked against a fresh fetch of "
+                                    + ", ".join(urls) + " into a scratch repository")
+            if co.unpushed and sample:
+                try:
+                    co.unpushed_hints, _ = ins.supersession_hints(path, sample, urls, alternates)
+                except GitError as exc:   # informational: never changes the class
+                    co.unpushed_hints = [f"hint unavailable: {exc}"] * len(sample)
+            co.unpushed_commits = [ln[:10] + ln[40:] for ln in sample]
     except GitError as exc:
         co.error = str(exc)
         return co
@@ -790,6 +1126,7 @@ class Inventory:
     prune: dict[str, list[str]] = field(default_factory=dict)
     keep_patterns: list[str] = field(default_factory=list)
     empty_dirs: list = field(default_factory=list)   # empties.EmptyDir
+    husks: list = field(default_factory=list)        # husks.Husk
     run: Run | None = None        # None: dry run
 
 
@@ -797,11 +1134,11 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
           keep: list[str] | None = None, keep_file: str | None = DEFAULT_KEEP_FILE,
           regenerable: list[str] | None = None, sizes: bool = True, jobs: int = 8,
           only: str | None = None, use_cache: bool = True,
-          min_idle_hours: float = 0) -> Inventory:
+          min_idle_hours: float = 0, fetch: bool = True) -> Inventory:
     rroots = [os.path.realpath(os.path.expanduser(r)) for r in roots]
     patterns = load_keep_patterns(keep or [], keep_file)
     ins = Inspector(main_roots if main_roots is not None else DEFAULT_MAIN_ROOTS, use_cache,
-                    keep_patterns=patterns)
+                    keep_patterns=patterns, fetch=fetch)
     pairs = discover(rroots)
     if only is not None:
         pairs = [(p, r) for p, r in pairs if p == only]
@@ -837,8 +1174,11 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
                                   + "; ".join(co.deletion_blockers[:3]))
         return co
 
-    with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        cos = list(pool.map(work, cos))
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+            cos = list(pool.map(work, cos))
+    finally:
+        ins.close()
     # local-origin relations, informational
     by_path = {c.path: c for c in cos}
     for c in cos:

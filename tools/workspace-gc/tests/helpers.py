@@ -124,6 +124,8 @@ class GitFixture(unittest.TestCase):
         out = io.StringIO()
         base = ["--root", self.ws, "--main-root", self.projects,
                 "--keep-file", os.path.join(self.tmp, "no-keep-file"), "--no-sizes"]
+        if "--regenerable-file" not in argv:
+            base += ["--regenerable-file", os.path.join(self.tmp, "no-regenerable-file")]
         if "--min-idle-hours" not in argv:
             base += ["--min-idle-hours", "0"]
         argv = list(argv)
