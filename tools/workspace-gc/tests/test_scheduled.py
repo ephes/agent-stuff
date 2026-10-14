@@ -93,9 +93,9 @@ class TestScheduledApply(Scheduled):
         wt = self.worktree(self.main, "ws-a", "feat/a")
         orig = cli.rm_mod.remove_checkout
 
-        def dirty_first(co, *args):
+        def dirty_first(co, *args, **kw):
             self.write(co.path, "late.txt", "x")
-            return orig(co, *args)
+            return orig(co, *args, **kw)
         cli.rm_mod.remove_checkout = dirty_first
         self.addCleanup(setattr, cli.rm_mod, "remove_checkout", orig)
         code, out, text, data = self.report("--apply")

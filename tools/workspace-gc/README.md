@@ -42,9 +42,21 @@ followed), it records:
   and their object stores are borrowed read-only through
   `GIT_ALTERNATE_OBJECT_DIRECTORIES`. If a remote tip's object is missing,
   other local repositories with the same root commit are consulted the same
-  way. If tips are still missing and some commits are not covered, the result
-  is "containment unknown", not "unpushed". A clone with no remote at all is
-  resolved through a repository with the same root commit;
+  way. If tips are still missing and some commits are not covered, every
+  branch and tag of the remote is fetched into a private bare scratch
+  repository under `$TMPDIR` (once per URL and run, deleted at the end of the
+  run), and the count is repeated with its objects borrowed the same
+  read-only way. Nothing is ever fetched into a checkout. Only if the fetch
+  fails, or `--no-fetch` is given, does the result stay "containment
+  unknown", not "unpushed". A clone with no remote at all is resolved through
+  a repository with the same root commit;
+- **supersession hints.** For each listed unpushed commit (up to 8 per
+  checkout) the report says whether the remote's default branch has a commit
+  with the same patch id (`git cherry`) or the same subject, e.g.
+  `[same patch on main; same subject as main 335a535]`. The default branch
+  comes from `ls-remote --symref`; its objects come from the checkout or the
+  scratch fetch. Hints are information for the owner and never change a
+  class;
 - `objects/info/alternates`: which repositories borrow objects from which.
   Every object store below the roots and the main checkouts (`~/projects`) is
   scanned to depth 6, including bare repositories and clones nested in other
@@ -71,10 +83,56 @@ followed), it records:
   without a listed active item class D ("work item list incomplete"); the
   same holds when the work source fails outright;
 - size (`du`), regenerable payloads with sizes (`build`, `.build`,
-  `DerivedData`, `.venv`, `node_modules`, `target`, `dist`, ...), device
-  backups (`.cache/device-db-backups`, `device-preservation-*`), and ignored
-  files that are *not* regenerable (for example `db.sqlite3`, `.envrc`,
-  benchmark `results/`).
+  `DerivedData`, `.venv`, `node_modules`, `target`, `dist`, ..., and any
+  virtualenv, i.e. an ignored directory with a `pyvenv.cfg` such as
+  `.venv311/`), device backups (`.cache/device-db-backups`,
+  `device-preservation-*`), and ignored files that are *not* regenerable
+  (for example a non-empty `db.sqlite3`, `.envrc`, benchmark `results/`). See
+  [Regenerable ignored files](#regenerable-ignored-files).
+
+## Regenerable ignored files
+
+An ignored file or directory makes a checkout class C unless it is
+regenerable. Regenerable are:
+
+- a path component in the built-in name list (`__pycache__`, `.cache`,
+  `.pytest_cache`, `site`, `.ansible`, ...) or matching `*.pyc`, `*.log`,
+  `*.egg-info`, ...;
+- a path matched by the built-in anchored patterns `tests/test_database.sqlite3*`
+  (pytest-django's reusable test database and its fingerprint), `/uv.lock`,
+  `test-media/` and `ansible/collections/`;
+- anything inside a virtualenv (a directory with `pyvenv.cfg`);
+- an **empty** entry: a 0-byte regular file, or a real directory holding
+  nothing but directories and 0-byte regular files (no symlinks, at most
+  2000 entries). A 0-byte `db.sqlite3` or an empty `var/piper/` is
+  regenerable; a dev database with content is not;
+- the extra patterns from `--regenerable PATTERN` (repeatable) and from the
+  file `~/.config/workspace-gc/regenerable` (`--regenerable-file`, one
+  pattern per line, `#` comments; it does not exist by default):
+  - a plain name without `/` matches any path component, as before
+    (`db.sqlite3` would match every dev database, so prefer a path);
+  - a pattern with a `/` is anchored at the checkout root, like
+    `.gitignore`: each component is a glob for exactly one path component
+    (`*` never crosses a `/`), a leading `/` only anchors, and a trailing `/`
+    matches directories only. A path inside a matched directory matches too.
+    Examples: `tests/test_database.sqlite3*`, `cli/src/dds/_assets/*`,
+    `.stage/`, `apps/ios-player/*.xcodeproj/`;
+  - either form can be scoped to one repository as `REPO:PATTERN`, where
+    REPO is the name of the network remote's repository
+    (`git@github.com:ephes/podcast.git` -> `podcast`), e.g.
+    `podcast:apps/ios-player/Rust/`.
+
+A directory matched by a pattern (built-in or extra) that contains a `.git`
+entry anywhere, i.e. a nested repository, is never regenerable.
+
+Git reports a wholly ignored directory once (`var/`). If the directory as a
+whole is not regenerable, the directory is walked on disk (not through git,
+which leaves out `.git` metadata) and every entry that is not a real
+directory - files, symlinks, symlinks to directories - must be regenerable
+itself, so a pattern can name paths deeper than the directory git reported.
+A `.git` entry anywhere in it, an unreadable directory or more than 200000
+entries makes it unique. The removal re-check
+evaluates the same rules again right before removing.
 
 ## Classes
 
@@ -131,6 +189,20 @@ The list is taken before the checkouts are removed, and removing a checkout
 changes its workspace directory. So a directory emptied by a run is removed by
 a later run, once it is 6 hours old.
 
+## Workspace directories without a checkout
+
+Every run also lists the direct children of the roots that hold no checkout
+(none found by discovery) and are not empty, for example the review logs,
+`review-*` directories and `.cache/uv` that a workspace keeps after its last
+checkout is removed. For each it reports the total size, how much of it is
+workspace-level caches (`.cache/uv`, `.cache/uv-tools`, `.cache/prek`,
+`node_modules`), the number of other files, the top-level entries with sizes,
+any git repository found anywhere inside (deeper than discovery looks), and
+why it must not be touched (in use, an active work item, keep-listed or the
+protected `ws-work-planning`; keep-listed and protected ones are not
+inspected). This is a report for the owner: the tool never removes such a
+directory.
+
 ## The scheduled job
 
 The Studio runs `workspace-gc report --apply --out-dir
@@ -175,9 +247,10 @@ following immediately before acting, and skips the checkout if any check fails:
   has not moved;
 - no index flags, submodules or grafts have appeared, and no non-regenerable
   ignored file has appeared;
-- the containment check is repeated with a fresh `ls-remote` (no cache). Any
-  git error, any unreachable remote (even when another remote covers HEAD) and
-  any missing remote tip that leaves commits uncovered counts as unknown. That
+- the containment check is repeated with a fresh `ls-remote` (no cache) and,
+  if remote tips are missing locally, a fresh scratch fetch. Any git error,
+  any unreachable remote (even when another remote covers HEAD) and any
+  missing remote tip that leaves commits uncovered counts as unknown. That
   means skip, never a number;
 - clones only: there is no stash and no linked worktree, and no repository
   under the roots or main roots borrows the clone's objects;
@@ -219,4 +292,12 @@ The tests build temporary repositories. A private `GIT_CONFIG_GLOBAL` rewrites
 local-origin chain and alternates handling, tag containment, missing remote
 tips, the keep-list, every removal guard under changed facts, the complete,
 capped, truncated and paged shapes of the work item list, the scheduled command
-(applied, refused, dry run), and empty-directory removal with its guards.
+(applied, refused, dry run), empty-directory removal with its guards, the
+regenerable rules (empty entries, anchored and repository-scoped patterns,
+virtualenvs), the scratch fetch (resolves containment without touching the
+checkout, also in the removal re-check), supersession hints, and the
+workspace directories without a checkout.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).

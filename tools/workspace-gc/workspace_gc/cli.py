@@ -18,6 +18,7 @@ import sys
 import tempfile
 
 from . import empties
+from . import husks
 from . import inventory as inv_mod
 from . import remove as rm_mod
 from . import report as rep
@@ -40,8 +41,15 @@ def _common(p: argparse.ArgumentParser) -> None:
                    help="never remove (class C, not inspected); repeatable")
     p.add_argument("--keep-file", default=inv_mod.DEFAULT_KEEP_FILE,
                    help="file with one keep path or glob per line (default %(default)s)")
-    p.add_argument("--regenerable", action="append", default=[], metavar="NAME",
-                   help="extra ignored file/dir name that is safe to lose (repeatable)")
+    p.add_argument("--regenerable", action="append", default=[], metavar="PATTERN",
+                   help="extra ignored entry that is safe to lose: a name (any path component), "
+                        "a path glob anchored at the checkout root (contains '/', trailing '/' "
+                        "= directories only), optionally scoped as REPO:PATTERN (repeatable)")
+    p.add_argument("--regenerable-file", default=inv_mod.DEFAULT_REGENERABLE_FILE,
+                   help="file with one --regenerable pattern per line (default %(default)s)")
+    p.add_argument("--no-fetch", action="store_true",
+                   help="do not fetch remotes into a scratch repository to resolve "
+                        "'containment unknown'")
     p.add_argument("--work-env", default=DEFAULT_WORK_ENV)
     p.add_argument("--work-ledger", default=DEFAULT_WORK_LEDGER)
     p.add_argument("--no-work", action="store_true", help="do not read work-app items")
@@ -101,13 +109,18 @@ def _main_roots(a) -> list[str]:
             for r in (a.main_roots or inv_mod.DEFAULT_MAIN_ROOTS)]
 
 
+def _regenerable(a) -> list[str]:
+    return inv_mod.load_regenerable(a.regenerable, a.regenerable_file)
+
+
 def _build(a, sig, only=None):
     inv = inv_mod.build(_roots(a), sig, main_roots=_main_roots(a), keep=a.keep,
-                         keep_file=a.keep_file, regenerable=a.regenerable,
+                         keep_file=a.keep_file, regenerable=_regenerable(a),
                          sizes=not a.no_sizes, jobs=a.jobs, only=only,
-                         min_idle_hours=a.min_idle_hours)
+                         min_idle_hours=a.min_idle_hours, fetch=not a.no_fetch)
     if only is None:
         inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
+        inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes)
     return inv
 
 
@@ -145,7 +158,8 @@ def _apply(a, inv) -> inv_mod.Run:
     roots, mains = _roots(a), _main_roots(a)
     for co in sorted((c for c in inv.checkouts if c.cls == "A"), key=lambda c: c.path):
         try:
-            outcome = rm_mod.remove_checkout(co, roots, mains, inv.keep_patterns, a.regenerable)
+            outcome = rm_mod.remove_checkout(co, roots, mains, inv.keep_patterns,
+                                             _regenerable(a), fetch=not a.no_fetch)
             run.removed.append(co)
         except rm_mod.Refused as exc:
             run.skipped += 1
@@ -214,6 +228,9 @@ def cmd_remove(a, sig, out) -> int:
     desc = f"{rep.short(co.path)} [{co.kind}, class {co.cls}: {inv_mod.CLASS_NAMES[co.cls]}]"
     if co.cls != "A":
         out.write(f"REFUSED {desc}\n" + "".join(f"  - {r}\n" for r in co.reasons))
+        for i, line in enumerate(co.unpushed_commits):
+            hint = co.unpushed_hints[i] if i < len(co.unpushed_hints) else ""
+            out.write(f"    - {line}" + (f" [{hint}]" if hint else "") + "\n")
         return 1
     if not a.apply:
         verb = "git worktree remove" if co.kind == "worktree" else "guarded delete"
@@ -225,7 +242,7 @@ def cmd_remove(a, sig, out) -> int:
         return 2
     try:
         out.write(rm_mod.remove_checkout(co, roots, _main_roots(a), inv.keep_patterns,
-                                         a.regenerable) + "\n")
+                                         _regenerable(a), fetch=not a.no_fetch) + "\n")
     except rm_mod.Refused as exc:
         out.write(f"REFUSED {desc}: {exc}\n")
         return 1

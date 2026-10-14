@@ -1,0 +1,27 @@
+# workspace-gc changelog
+
+## Unreleased
+
+- Empty ignored entries are regenerable: a 0-byte file (an empty
+  `db.sqlite3`) or a directory holding only directories and 0-byte files (an
+  empty `var/piper/`). A non-empty dev database stays class C.
+- `--regenerable` accepts path globs anchored at the checkout root
+  (`tests/test_database.sqlite3*`, `cli/src/dds/_assets/*`, trailing `/` for
+  directories only) and a `REPO:` scope (`podcast:apps/ios-player/Rust/`).
+  Plain names keep matching any path component. Patterns can also be listed
+  in `~/.config/workspace-gc/regenerable` (`--regenerable-file`).
+- Built-in anchored regenerable paths: `tests/test_database.sqlite3*`,
+  `/uv.lock`, `test-media/`, `ansible/collections/`. Virtualenvs
+  (`pyvenv.cfg`, e.g. `.venv311/`) are payload.
+- A wholly ignored directory that is not regenerable as a whole is checked
+  file by file, so patterns can name paths deeper than the directory git
+  reports.
+- "Containment unknown" is resolved by fetching the remote into a private
+  scratch repository (never into the checkout), in the inventory and in the
+  removal re-check. `--no-fetch` turns this off.
+- Unpushed commits in B and C carry a hint: same patch id and/or same subject
+  on the remote's default branch. Informational only.
+- New report section: workspace directories without a checkout, with total
+  size, workspace-level caches (`.cache/uv`, `.cache/uv-tools`,
+  `.cache/prek`, `node_modules`), other entries and any git repository
+  inside. Report only; nothing is removed.

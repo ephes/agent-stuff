@@ -409,7 +409,7 @@ class TestLessonsFromCleanup(GitFixture):
         cl = self.clone(self.url, "ws-behind")
         self.advance_network()  # remote main moves to a commit no local repo has
         sh("git", "commit", "-q", "--allow-empty", "-m", "local", cwd=cl)
-        co = self.by_path(self.build())[cl]
+        co = self.by_path(self.build(fetch=False))[cl]
         self.assertEqual(co.cls, "C", co.reasons)
         self.assertEqual(co.missing_tips, 1)
         self.assertTrue(any("containment unknown" in r for r in co.reasons), co.reasons)

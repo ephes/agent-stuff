@@ -8,7 +8,8 @@ acting:
   still the top level of a git checkout;
 * `git status` is empty (no changes, no untracked files);
 * every commit is contained in a network remote, checked with a fresh
-  `git ls-remote` (no cached answer);
+  `git ls-remote` (no cached answer); remote tips missing locally are fetched
+  into a fresh private scratch repository, never into the checkout;
 * no index entries flagged assume-unchanged/skip-worktree, no submodules,
   no grafts, no non-regenerable ignored files, and an exhaustive walk of the
   tree finds every directory readable and writable and no device backups;
@@ -30,7 +31,7 @@ import shutil
 from . import git
 from .git import GitError
 from .inventory import (Checkout, Inspector, _is_under, borrowers_of, deletion_scan,
-                        hidden_state, keep_match, lending_scope, scan_ignored)
+                        hidden_state, keep_match, lending_scope, project_names, scan_ignored)
 
 
 class Refused(Exception):
@@ -38,7 +39,7 @@ class Refused(Exception):
 
 
 def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
-             keep_patterns: list[str], regenerable: list[str]) -> None:
+             keep_patterns: list[str], regenerable: list[str], fetch: bool = True) -> None:
     path = co.path
     if keep_match(path, keep_patterns) or (co.owner_repo and keep_match(co.owner_repo,
                                                                          keep_patterns)):
@@ -64,22 +65,31 @@ def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
     hidden = hidden_state(path, gdir, common)
     if hidden:
         raise Refused(hidden[0])
-    _, unique = scan_ignored(path, regenerable)
-    if unique:
-        raise Refused("ignored files that are not regenerable: " + ", ".join(unique[:3]))
     blockers = deletion_scan(path)
     if blockers:
         raise Refused("; ".join(blockers[:3]))
     head = git.out(["rev-parse", "--verify", "HEAD"], path).strip()
     if head != co.head:
         raise Refused("HEAD moved since the inventory")
-    fresh = Inspector(main_roots, use_cache=False, keep_patterns=keep_patterns)
+    fresh = Inspector(main_roots, use_cache=False, keep_patterns=keep_patterns, fetch=fetch)
+    try:
+        _recheck_remote(co, path, real, fresh, roots, main_roots, keep_patterns, regenerable)
+    finally:
+        fresh.close()
+
+
+def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots: list[str],
+                    main_roots: list[str], keep_patterns: list[str],
+                    regenerable: list[str]) -> None:
     urls, alternates, _ = fresh.resolve_remotes(path)
     for u in co.network_remotes:
         if u not in urls:
             urls.append(u)
     if not urls:
         raise Refused("no network remote")
+    _, unique = scan_ignored(path, regenerable, project_names(urls))
+    if unique:
+        raise Refused("ignored files that are not regenerable: " + ", ".join(unique[:3]))
     if co.kind == "clone":
         if git.out(["stash", "list"], path).strip():
             raise Refused("stash present")
@@ -102,7 +112,7 @@ def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
         raise Refused(f"kind {co.kind} is never removed")
     # A clone resolved through a same-root sibling borrows that sibling's objects.
     alternates = list(dict.fromkeys(alternates + co.alternates))
-    count, _, errors, missing = fresh.unpushed(path, revs, urls, alternates)
+    count, _, errors, missing, _ = fresh.unpushed(path, revs, urls, alternates)
     if errors:
         raise Refused("remote check failed: " + errors[0])
     if count:
@@ -112,12 +122,13 @@ def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
 
 
 def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
-                    keep_patterns: list[str], regenerable: list[str] | None = None) -> str:
+                    keep_patterns: list[str], regenerable: list[str] | None = None,
+                    fetch: bool = True) -> str:
     """Remove one class-A checkout. Returns a one-line outcome; raises Refused."""
     if co.cls != "A":
         raise Refused(f"class {co.cls}, only class A is removed")
     try:
-        _recheck(co, roots, main_roots, keep_patterns, regenerable or [])
+        _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch)
         if co.kind == "worktree":
             git.out(["worktree", "remove", co.path], co.owner_repo)
             return f"removed worktree {co.path} (git worktree remove)"

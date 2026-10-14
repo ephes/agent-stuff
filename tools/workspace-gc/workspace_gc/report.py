@@ -65,6 +65,7 @@ def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
         "checkouts": [co.to_dict() for co in sorted(inv.checkouts, key=lambda c: (c.cls, c.path))],
         "prune": inv.prune,
         "empty_dirs": [e.to_dict() for e in inv.empty_dirs],
+        "husks": [h.to_dict() for h in inv.husks],
         "mode": "dry-run" if run is None else "refused" if run.refused else "applied",
         "removed": [co.to_dict() for co in run.removed] if run else [],
         "removed_kb": sum(c.size_kb for c in run.removed) if run else 0,
@@ -137,8 +138,9 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
             w(_checkout_line(co))
             for r in co.reasons:
                 w(f"  - {r}")
-            for line in co.unpushed_commits if c in "BC" else []:
-                w(f"    - {line}")
+            for i, line in enumerate(co.unpushed_commits if c in "BC" else []):
+                hint = co.unpushed_hints[i] if i < len(co.unpushed_hints) else ""
+                w(f"    - {line}" + (f" [{hint}]" if hint else ""))
             if co.unpushed > len(co.unpushed_commits) and co.unpushed_commits and c in "BC":
                 w(f"    - ... ({co.unpushed - len(co.unpushed_commits)} more)")
             if co.payloads:
@@ -154,6 +156,25 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
         w("")
         for e in left:
             w(f"- {short(e.path)}" + (f" - kept: {e.reason}" if e.reason else ""))
+    if inv.husks:
+        w("")
+        w(f"## Workspace directories without a checkout ({len(inv.husks)}, "
+          f"{human_kb(sum(h.kb for h in inv.husks))}, of which workspace-level caches "
+          f"{human_kb(sum(h.payload_kb for h in inv.husks))}; never removed by this tool)")
+        w("")
+        for h in sorted(inv.husks, key=lambda x: -x.kb):
+            w(f"- {short(h.path)} [{human_kb(h.kb)}, caches {human_kb(h.payload_kb)}, "
+              f"{h.files} files]" + (f" - kept: {h.kept}" if h.kept else ""))
+            if h.git_dirs:
+                w("  - contains git repositories: " + ", ".join(h.git_dirs[:5])
+                  + (f" (+{len(h.git_dirs) - 5} more)" if len(h.git_dirs) > 5 else ""))
+            ents = sorted(h.entries, key=lambda e: -e["kb"])
+            if ents:
+                w("  - " + ", ".join(f"{e['path']} {human_kb(e['kb'])}"
+                                     + (" (cache)" if e["payload"] else "") for e in ents[:8])
+                  + (f", ... (+{len(ents) - 8} more)" if len(ents) > 8 else ""))
+            if h.note:
+                w(f"  - note: {h.note}")
     if inv.prune:
         w("")
         w("## Stale worktree entries" + (" (pruned)" if applied else ""))
