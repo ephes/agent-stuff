@@ -1404,6 +1404,12 @@ Expected: a session launched by the correctly configured `codex-yolo` wrapper ca
 
 Promotion: incident — existing permission inspection and fail-closed review rules cover this; no launcher or skill change needed.
 
+## 2026-10-18 — Log protection changed validation fixture permissions
+
+Expected: validation runs with normal child-process permissions while its logs stay private. Actual: a wrapper set a global `umask 077` to protect logs, so an existing fixture's requested `0755` child lock directory became `0700`. Its permission attestation then failed, producing false product failures. The same fixture failed under `077` and passed under `022`, confirming the environmental cause without a product-code change. The corrected wrapper precreated `0600` logs inside a `0700` parent and ran child tests with normal `umask 022`; the full suite then passed. Both runs and the focused reproduction were retained. Status: resolved.
+
+Promotion: incident — this was a project-fixture/environment interaction; the existing evidence and validation rules cover it, so no broad skill rewrite is needed.
+
 ## 2026-10-17 — Mail relay rollback review stop condition overlooked
 
 Expected: inspect the harness exit code, `result.state`, and `convergence.status` together before any further work; exit 4 ends the loop and requires reporting the stop condition. Actual: after earlier clean gates, the temporary rollback gate returned `ISSUES` with a Warning and exit 4 (a non-converging result; `convergence.status` is `escalate`). The worker reported the finding but overlooked the exit and convergence stop; the shared slice ledger had counted rounds across different gate contexts. The coordinator authorized a scoped repair without knowing about exit 4. Approval of a reported finding was not informed approval to proceed past an undisclosed harness stop condition.
