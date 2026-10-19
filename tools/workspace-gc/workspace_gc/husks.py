@@ -9,7 +9,11 @@ without a checkout found by discovery, with its size, the share of
 workspace-level caches (WORKSPACE_PAYLOADS) and what else is in it. Nothing
 here deletes anything: the owner decides.
 
-One exception: a directory that holds nothing but workspace-level caches
+Two exceptions. A directory is `stale` when it has no git repository outside
+`.cache/uv`, is not kept (in use, work item, keep list, protected), nothing in
+it was changed for `min_stale_hours` (default 72) and nothing in it is
+unreadable. `remove()` then deletes the whole directory (review logs and notes
+included); `removed_what` says "directory". And a directory that holds nothing but workspace-level caches
 (`cache_only`: no file outside them, no git repository, nothing unreadable),
 is not kept (in use, work item, keep list) and whose directories were all last
 changed at least `min_idle_hours` ago is `removable`. `remove()` deletes only
@@ -23,6 +27,7 @@ caches and logs only.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 import stat
@@ -53,6 +58,9 @@ class Husk:
     idle_hours: float | None = None   # since the newest directory change (cache_only only)
     removable: bool = False    # cache_only, not kept, idle long enough
     removed: bool = False
+    stale: bool = False        # whole directory removable (see module doc)
+    removed_what: str = ""     # "directory" or "caches" once removed
+    removed_kb: int = 0
     outcome: str = ""     # why removing the caches failed or was refused
 
     def to_dict(self) -> dict:
@@ -157,7 +165,35 @@ def _idle_hours(path: str, limit: float) -> float:
     return max(now - newest, 0.0) / 3600
 
 
-def _classify(h: Husk, min_idle_hours: float) -> None:
+def _newest_change(path: str, limit_hours: float) -> float:
+    """Hours since the newest change of anything in the tree (files, links and
+    directories, not followed). Stops early once something is younger than
+    the limit; an unreadable part counts as "now"."""
+    now = _now()
+    newest = 0.0
+    bad = []
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
+                                                onerror=bad.append):
+        for name in [""] + filenames + dirnames:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                bad.append(name)
+                continue
+            newest = max(newest, st.st_mtime, st.st_ctime)
+        if bad or (now - newest) / 3600 < limit_hours:
+            return 0.0 if bad else max(now - newest, 0.0) / 3600
+    return max(now - newest, 0.0) / 3600
+
+
+def _uv_cache(rel: str) -> bool:
+    return rel == ".cache/uv" or rel.startswith(".cache/uv/")
+
+
+def _classify(h: Husk, min_idle_hours: float, min_stale_hours: float = 72.0) -> None:
+    h.stale = bool(not h.kept and not h.note and min_stale_hours > 0
+                   and not [g for g in h.git_dirs if not _uv_cache(g)]
+                   and _newest_change(h.path, min_stale_hours) >= min_stale_hours)
     h.cache_only = (not h.kept and not h.files and not h.git_dirs and not h.note
                     and h.payload_kb > 0)
     if h.cache_only:
@@ -166,7 +202,7 @@ def _classify(h: Husk, min_idle_hours: float) -> None:
 
 
 def scan(inv: Inventory, sig: Signals, sizes: bool = True,
-         min_idle_hours: float = 48.0) -> list[Husk]:
+         min_idle_hours: float = 48.0, min_stale_hours: float = 72.0) -> list[Husk]:
     """Direct child directories of the roots that hold no discovered checkout
     and are not empty (those are empties.py's)."""
     with_checkout = {co.workspace for co in inv.checkouts}
@@ -187,8 +223,7 @@ def scan(inv: Inventory, sig: Signals, sizes: bool = True,
                 continue
             h = inspect(path, sizes)
             h.kept = kept
-            if sizes:
-                _classify(h, min_idle_hours)
+            _classify(h, min_idle_hours, min_stale_hours)
             found.append(h)
     return found
 
@@ -213,7 +248,25 @@ def _fd_path(fd: int) -> str | None:
         return None
 
 
-def _remove_payloads(path: str, root: str, payloads: list[str]) -> str:
+def _keep_inside(path: str, keep_patterns: list[str]) -> str:
+    """The first path in the tree (directories, files, links; not followed)
+    that a keep-list pattern matches, or ""."""
+    if not keep_patterns:
+        return ""
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        for name in dirnames + filenames:
+            p = os.path.join(dirpath, name)
+            for pat in keep_patterns:
+                if any(ch in pat for ch in "*?["):
+                    if fnmatch.fnmatch(p, pat) or fnmatch.fnmatch(p, pat.rstrip("/") + "/*"):
+                        return p
+                elif _is_under(p, pat):
+                    return p
+    return ""
+
+
+def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = False,
+                     ino: int | None = None) -> str:
     """Delete the payload directories (relative to the workspace) below the
     workspace, reached from the root through descriptors opened with
     O_NOFOLLOW, so a path component swapped for a symlink stops the walk."""
@@ -234,6 +287,26 @@ def _remove_payloads(path: str, root: str, payloads: list[str]) -> str:
     except OSError as exc:
         os.close(root_fd)
         return f"cannot open {path}: {exc.strerror or exc}"
+    if ino is not None and os.fstat(ws_fd).st_ino != ino:
+        os.close(ws_fd)
+        os.close(root_fd)
+        return "replaced since the inspection"
+    if whole:
+        # Empty the pinned directory through its descriptor, then rmdir it:
+        # a replacement of the name after the check is never descended into.
+        try:
+            for name in os.listdir(ws_fd):
+                if stat.S_ISDIR(os.lstat(name, dir_fd=ws_fd).st_mode):
+                    _rmtree_under(ws_fd, name)
+                else:
+                    os.unlink(name, dir_fd=ws_fd)
+            os.rmdir(os.path.basename(path), dir_fd=root_fd)
+        except OSError as exc:
+            return f"removing {path} failed: {exc.strerror or exc}"
+        finally:
+            os.close(ws_fd)
+            os.close(root_fd)
+        return ""
     try:
         for rel in payloads:
             parts = rel.split("/")
@@ -258,8 +331,9 @@ def _remove_payloads(path: str, root: str, payloads: list[str]) -> str:
 
 
 def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signals,
-                min_idle_hours: float) -> str:
-    """Delete the cache directories of one husk; returns "" or why not.
+                min_idle_hours: float, min_stale_hours: float) -> str:
+    """Delete one husk (the whole directory if it is stale, else only its
+    cache directories); returns "" or why not.
     Everything is decided again now, from a fresh inspection."""
     root = os.path.dirname(h.path)
     if root not in roots or not _is_real_dir(h.path):
@@ -269,29 +343,47 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
         return now
     if _keep_listed(h.path, [(h.path, 0)], keep_patterns):
         return "a keep-list entry names something inside it"
+    try:
+        ino = os.lstat(h.path).st_ino
+    except OSError as exc:
+        return f"cannot stat {h.path}: {exc.strerror or exc}"
     fresh = inspect(h.path, sizes=True)
-    _classify(fresh, min_idle_hours)
+    _classify(fresh, min_idle_hours, min_stale_hours)
+    h.kb, h.payload_kb = fresh.kb, fresh.payload_kb      # measured now, for the audit
+    if fresh.stale:
+        inside = _keep_inside(h.path, keep_patterns)
+        if inside:
+            return f"keep-listed path inside: {inside}"
+        h.removed_what = "directory"
+        return _remove_payloads(h.path, root, [], whole=True, ino=ino)
     if not fresh.removable:
         return "no longer cache-only and idle"
+    h.removed_what = "caches"
     payloads = [rel for rel, payload in _entries(h.path) if payload]
     return _remove_payloads(h.path, root, payloads)
 
 
 def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
-           sig: Signals, min_idle_hours: float = 48.0) -> None:
-    """Remove the caches of the removable husks, each re-checked right before,
-    with the process working directories read afresh for every one.
-    Updates the entries."""
+           sig: Signals, min_idle_hours: float = 48.0,
+           min_stale_hours: float = 72.0) -> None:
+    """Remove the stale husks (whole directory) and the caches of the
+    cache-only ones, each re-checked right before, with the process working
+    directories read afresh for every one. Updates the entries."""
     for h in entries:
-        if not h.removable:
+        if not (h.removable or h.stale):
             continue
         cwds, status = sig_mod.read_process_cwds()
         if status.status not in ("ok", "absent"):
             h.outcome = f"process working directories unreadable now ({status.detail})"
-            h.removable = False
+            h.removable = h.stale = False
             continue
         live = Signals(herdr_cwds=sig.herdr_cwds, work_refs=sig.work_refs,
                        process_cwds=sorted(set(sig.process_cwds) | set(cwds)))
-        h.outcome = _remove_one(h, roots, keep_patterns, live, min_idle_hours)
+        h.outcome = _remove_one(h, roots, keep_patterns, live, min_idle_hours,
+                                min_stale_hours)
         h.removed = not h.outcome
-        h.removable = h.removed
+        h.removed_kb = (h.kb if h.removed_what == "directory" else h.payload_kb) if h.removed else 0
+        if not h.removed:
+            h.removed_what = ""
+        h.removable = h.removable and h.removed
+        h.stale = h.stale and h.removed

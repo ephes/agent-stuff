@@ -63,6 +63,10 @@ def _idle(p: argparse.ArgumentParser, default: float) -> None:
     p.add_argument("--min-idle-hours", type=float, default=default,
                    help="keep (class D) checkouts with git or directory activity more recent "
                         "than this (default %(default)s; 0 disables)")
+    p.add_argument("--min-stale-hours", type=float, default=72.0,
+                   help="--apply removes a workspace directory without a checkout (no git "
+                        "repository outside .cache/uv, not in use, not keep-listed) once "
+                        "nothing in it changed for this long (default %(default)s; 0 disables)")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -74,7 +78,8 @@ def parser() -> argparse.ArgumentParser:
     _idle(scan, DEFAULT_MIN_IDLE)
     scan.add_argument("--json", action="store_true", help="print JSON instead of text")
     scan.add_argument("--apply", action="store_true",
-                      help="remove class A checkouts and empty workspace directories, "
+                      help="remove class A checkouts, empty workspace directories and stale "
+                           "workspace directories without a checkout (see --min-stale-hours), "
                            "prune stale worktree entries")
     rm = sub.add_parser("remove", help="guarded removal of one checkout")
     _common(rm)
@@ -121,7 +126,8 @@ def _build(a, sig, only=None):
     if only is None:
         inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
         inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes,
-                               min_idle_hours=a.min_idle_hours)
+                               min_idle_hours=a.min_idle_hours,
+                               min_stale_hours=a.min_stale_hours)
     return inv
 
 
@@ -173,7 +179,8 @@ def _apply(a, inv) -> inv_mod.Run:
         if lines:
             inv.prune[repo] = lines
     empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals)
-    husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours)
+    husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours,
+                 a.min_stale_hours)
     return run
 
 
@@ -196,6 +203,9 @@ def cmd_scan(a, sig, out) -> int:
     if a.json:
         out.write(json.dumps({"removed": run.outcomes, "pruned": inv.prune,
                               "empty_dirs_removed": [e.path for e in gone],
+                              "husks_removed": [{"path": h.path, "what": h.removed_what,
+                                                 "kb": h.removed_kb}
+                                                for h in inv.husks if h.removed],
                               "summary": rep.summary_line(inv)}, indent=2) + "\n")
     else:
         for r in run.outcomes:
@@ -207,6 +217,10 @@ def cmd_scan(a, sig, out) -> int:
             out.write(f"pruned {len(lines)} stale worktree entr{'y' if len(lines) == 1 else 'ies'} in {rep.short(repo)}\n")
         for e in gone:
             out.write(f"removed empty directory {e.path}\n")
+        for h in inv.husks:
+            if h.removed:
+                out.write(f"removed {h.removed_what} of workspace directory {h.path} "
+                          f"({rep.human_kb(h.removed_kb)})\n")
         out.write(f"{len(run.removed)} removed, {run.skipped} skipped, {len(gone)} empty "
                   f"director{'y' if len(gone) == 1 else 'ies'} removed; untouched: "
                   f"{sum(1 for c in inv.checkouts if c.cls != 'A')} checkouts in classes B/C/D\n")
@@ -259,7 +273,8 @@ def _upsert_item(a, inv, out_dir: str) -> str:
         return f"work item: not updated ({unavailable.detail})"
     report_path = rep.short(os.path.join(out_dir, "latest.txt"))
     refused = bool(inv.run and inv.run.refused)
-    what = "removes class A checkouts and empty workspace directories itself" if a.apply \
+    what = ("removes class A checkouts, empty workspace directories and stale workspace "
+            "directories without a checkout itself") if a.apply \
         else "dry run, nothing removed"
     args = ["upsert", a.work_item, "--title", "workspace-gc report",
             "--project", "agent-stuff", "--repo-url", "https://github.com/ephes/agent-stuff",

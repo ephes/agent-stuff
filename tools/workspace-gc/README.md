@@ -211,8 +211,21 @@ reasons above and has had no directory change for `--min-idle-hours` (default
 directories (`.cache/uv`, `.cache/uv-tools`, `.cache/prek`, `node_modules`),
 each re-checked right before (fresh inspection, process working directories
 read again). The empty shell stays and is removed by the empty-directory rule
-once it is 6 hours old. Directories with review logs or other files besides
-caches are never touched.
+once it is 6 hours old.
+
+A directory is `stale, removable` when it has no git repository outside
+`.cache/uv`, is not kept for any of the reasons above (a keep-list entry
+naming anything inside it counts), has nothing unreadable, and nothing in it
+(files and directories) changed for `--min-stale-hours` (default 72; 0
+disables the rule). With `--apply` the run deletes the whole directory,
+review logs and notes included, after a fresh inspection and a fresh read of
+the process working directories, through directory descriptors that do not
+follow symlinks. Directories with a git repository elsewhere are never
+touched. Every removed path and size is listed under "Removed in this run" in
+`latest.txt` and in `husks_removed` in `latest.json`.
+
+The summary line (also the work item's next action) ends with the number of
+top-level directories under the roots and their approximate size.
 
 ## The scheduled job
 

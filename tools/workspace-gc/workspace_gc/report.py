@@ -37,19 +37,49 @@ def _dirs(n: int) -> str:
     return f"{n} empty director{'y' if n == 1 else 'ies'}"
 
 
+def _top_level(inv: Inventory) -> str:
+    """Number of top-level directories under the roots now and, with sizes,
+    roughly their content (checkouts plus workspace directories without one,
+    caches or directories already removed left out)."""
+    n = 0
+    for root in inv.roots:
+        try:
+            n += sum(1 for e in os.scandir(root) if e.is_dir(follow_symlinks=False))
+        except OSError:
+            pass
+    kb = sum(c.size_kb for c in inv.checkouts) + sum(
+        h.kb - h.removed_kb for h in inv.husks if not (h.removed and h.removed_what == "directory"))
+    return f"{n} top-level dirs" + (f" (~{human_kb(kb)})" if kb else "")
+
+
+def _stale_removed(inv: Inventory) -> list:
+    return [h for h in inv.husks if h.removed]
+
+
 def summary_line(inv: Inventory) -> str:
     t = totals(inv)
     left = (f"{t['A']['count']} removable ({human_kb(t['A']['kb'])}), "
             f"{t['B']['count']} removable after push, {t['C']['count']} need you")
+    tail = "; " + _top_level(inv)
     run = inv.run
     if run is None:
         n = sum(1 for e in inv.empty_dirs if e.removable)
-        return left + (f", {_dirs(n)} removable" if n else "")
+        stale = [h for h in inv.husks if h.stale]
+        return (left + (f", {_dirs(n)} removable" if n else "")
+                + (f", {len(stale)} stale workspace directories removable "
+                   f"({human_kb(sum(h.kb for h in stale))})" if stale else "") + tail)
     if run.refused:
-        return "REFUSED, nothing removed (" + "; ".join(run.refused) + "); " + left
+        return "REFUSED, nothing removed (" + "; ".join(run.refused) + "); " + left + tail
+    gone = [h for h in inv.husks if h.removed and h.removed_what == "directory"]
+    caches = [h for h in inv.husks if h.removed and h.removed_what == "caches"]
     return (f"removed {len(run.removed)} checkout{'' if len(run.removed) == 1 else 's'} "
             f"({human_kb(sum(c.size_kb for c in run.removed))}) and "
-            f"{_dirs(sum(1 for e in inv.empty_dirs if e.removed))}; left: {left}")
+            f"{_dirs(sum(1 for e in inv.empty_dirs if e.removed))}"
+            + (f", {len(gone)} stale workspace director{'y' if len(gone) == 1 else 'ies'} "
+               f"({human_kb(sum(h.removed_kb for h in gone))})" if gone else "")
+            + (f", caches of {len(caches)} workspace director{'y' if len(caches) == 1 else 'ies'} "
+               f"({human_kb(sum(h.removed_kb for h in caches))})" if caches else "")
+            + f"; left: {left}" + tail)
 
 
 def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
@@ -66,6 +96,8 @@ def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
         "prune": inv.prune,
         "empty_dirs": [e.to_dict() for e in inv.empty_dirs],
         "husks": [h.to_dict() for h in inv.husks],
+        "husks_removed": [{"path": h.path, "what": h.removed_what, "kb": h.removed_kb}
+                          for h in _stale_removed(inv)],
         "mode": "dry-run" if run is None else "refused" if run.refused else "applied",
         "removed": [co.to_dict() for co in run.removed] if run else [],
         "removed_kb": sum(c.size_kb for c in run.removed) if run else 0,
@@ -116,7 +148,11 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
             w(_checkout_line(co))
         for e in gone:
             w(f"- {short(e.path)} [empty directory]")
-        if not run.removed and not gone:
+        for h in sorted(_stale_removed(inv), key=lambda x: x.path):
+            w(f"- {short(h.path)} [workspace without a checkout, "
+              + ("whole directory" if h.removed_what == "directory" else "caches only")
+              + f", {human_kb(h.removed_kb)}]")
+        if not run.removed and not gone and not _stale_removed(inv):
             w("- nothing")
         w("")
         w("## What remains")
@@ -161,14 +197,16 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
         w(f"## Workspace directories without a checkout ({len(inv.husks)}, "
           f"{human_kb(sum(h.kb for h in inv.husks))}, of which workspace-level caches "
           f"{human_kb(sum(h.payload_kb for h in inv.husks))}; "
-          f"{sum(1 for h in inv.husks if h.removed)} cache-only removed, "
-          f"{sum(1 for h in inv.husks if h.removable)} cache-only removable, "
-          f"everything else is never removed by this tool)")
+          f"{sum(1 for h in inv.husks if h.removed)} removed, "
+          f"{sum(1 for h in inv.husks if h.stale)} stale and removable, "
+          f"{sum(1 for h in inv.husks if h.removable)} cache-only and removable)")
         w("")
         for h in sorted(inv.husks, key=lambda x: -x.kb):
             w(f"- {short(h.path)} [{human_kb(h.kb)}, caches {human_kb(h.payload_kb)}, "
               f"{h.files} files]" + (f" - kept: {h.kept}" if h.kept else "")
-              + (" - caches removed" if h.removed else " - cache-only, removable" if h.removable
+              + (f" - {h.removed_what} removed" if h.removed
+                 else " - stale, removable" if h.stale
+                 else " - cache-only, removable" if h.removable
                  else f" - cache-only, idle {h.idle_hours:.0f}h" if h.cache_only else "")
               + (f" - not removed: {h.outcome}" if h.outcome else ""))
             if h.git_dirs:
@@ -192,7 +230,8 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
             if len(lines) > 5:
                 w(f"  - ... ({len(lines) - 5} more)")
     w("")
-    w("Only class A checkouts and empty top-level workspace directories are ever removed, and "
-      "only with --apply (the scheduled job runs `report --apply`) or `workspace-gc remove "
-      "--apply <path>`. B needs a push first; C and D are never touched.")
+    w("Only class A checkouts, empty top-level workspace directories and workspace "
+      "directories without a checkout that are stale (whole, or just their caches) are ever "
+      "removed, and only with --apply (the scheduled job runs `report --apply`) or "
+      "`workspace-gc remove --apply <path>`. B needs a push first; C and D are never touched.")
     return "\n".join(out) + "\n"

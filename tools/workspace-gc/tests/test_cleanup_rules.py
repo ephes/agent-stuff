@@ -383,6 +383,69 @@ class TestHusks(GitFixture):
         husks.remove(list(hs.values()), inv.roots, inv.keep_patterns, sig)
         return hs
 
+    def test_stale_husk_with_logs_is_removed_whole_and_audited(self):
+        ws = os.path.join(self.ws, "ws-stale")
+        self.write(ws, "review.log", "log")
+        self.write(ws, ".cache/uv/git-v1/checkouts/x/f", "x")
+        os.makedirs(os.path.join(ws, ".cache", "uv", "git-v1", "checkouts", "x", ".git"))
+        hs = self._remove(hours=100)
+        h = hs[ws]
+        self.assertTrue(h.removed, h.outcome)
+        self.assertEqual(h.removed_what, "directory")
+        self.assertGreater(h.removed_kb, 0)
+        self.assertFalse(os.path.exists(ws))
+
+    def test_young_or_guarded_or_git_husk_is_not_removed_whole(self):
+        busy =os.path.join(self.ws, "ws-busy3")
+        self.write(busy, "a.log", "x")
+        kept = os.path.join(self.ws, "ws-kept3")
+        self.write(kept, "a.log", "x")
+        inside = os.path.join(self.ws, "ws-inside3")
+        self.write(inside, "a.log", "x")
+        git = os.path.join(self.ws, "ws-git3")
+        self.write(git, "a.log", "x")
+        os.makedirs(os.path.join(git, "a", "b", "c"))
+        sh("git", "init", "-q", os.path.join(git, "a", "b", "c"))
+        sig = ok_signals(process_cwds=[busy])
+        hs = self._remove(sig=sig, keep=[kept, os.path.join(inside, "a.log")], hours=100)
+        for ws in (busy, kept, inside, git):
+            self.assertFalse(hs[ws].removed, ws)
+            self.assertTrue(os.path.isdir(ws), ws)
+
+    def test_keep_glob_matching_a_file_inside_protects_the_directory(self):
+        ws = os.path.join(self.ws, "ws-globkeep")
+        self.write(ws, "notes-precious.txt", "x")
+        hs = self._remove(keep=[os.path.join(self.ws, "*precious*")], hours=100)
+        self.assertFalse(hs[ws].removed)
+        self.assertTrue(os.path.exists(os.path.join(ws, "notes-precious.txt")))
+
+    def test_replaced_workspace_directory_is_not_removed(self):
+        ws = os.path.join(self.ws, "ws-swap")
+        self.write(ws, "a.log", "x")
+        wrong = os.stat(ws).st_ino + 1
+        out = husks._remove_payloads(ws, self.ws, [], whole=True, ino=wrong)
+        self.assertEqual(out, "replaced since the inspection")
+        self.assertTrue(os.path.exists(os.path.join(ws, "a.log")))
+
+    def test_audit_size_is_measured_at_removal_even_without_sizes(self):
+        ws = os.path.join(self.ws, "ws-nosize")
+        self.write(ws, "a.log", "x" * 20000)
+        sig = ok_signals()
+        inv = self.build(signals=sig)
+        inv.empty_dirs = []
+        self._later(100)
+        hs = husks.scan(inv, sig, sizes=False)
+        husks.remove(hs, inv.roots, inv.keep_patterns, sig)
+        self.assertTrue(hs[0].removed, hs[0].outcome)
+        self.assertGreater(hs[0].removed_kb, 0)
+
+    def test_young_husk_is_not_removed_whole(self):
+        young = os.path.join(self.ws, "ws-young2")
+        self.write(young, "a.log", "x")
+        hs = self._remove(hours=10)
+        self.assertFalse(hs[young].stale)
+        self.assertTrue(os.path.isdir(young))
+
     def test_cache_only_idle_husk_loses_its_caches_only(self):
         ws = os.path.join(self.ws, "ws-cache")
         self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)

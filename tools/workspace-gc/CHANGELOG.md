@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `--apply` removes workspace directories without a checkout whole (logs and
+  notes included) when nothing in them changed for `--min-stale-hours` (72),
+  they contain no git repository outside `.cache/uv` and are not in use,
+  referenced by an active work item or keep-listed. Removed paths and sizes
+  are in `latest.txt` and `latest.json` (`husks_removed`).
+- The summary line ends with the number of top-level directories under the
+  roots and their approximate size.
 - `--apply` deletes the workspace-level caches (`.cache/uv`, `.cache/uv-tools`,
   `.cache/prek`, `node_modules`) of workspace directories without a checkout
   that hold nothing else, are not kept (in use, work item, keep list) and have
