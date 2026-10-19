@@ -160,11 +160,17 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
         w("")
         w(f"## Workspace directories without a checkout ({len(inv.husks)}, "
           f"{human_kb(sum(h.kb for h in inv.husks))}, of which workspace-level caches "
-          f"{human_kb(sum(h.payload_kb for h in inv.husks))}; never removed by this tool)")
+          f"{human_kb(sum(h.payload_kb for h in inv.husks))}; "
+          f"{sum(1 for h in inv.husks if h.removed)} cache-only removed, "
+          f"{sum(1 for h in inv.husks if h.removable)} cache-only removable, "
+          f"everything else is never removed by this tool)")
         w("")
         for h in sorted(inv.husks, key=lambda x: -x.kb):
             w(f"- {short(h.path)} [{human_kb(h.kb)}, caches {human_kb(h.payload_kb)}, "
-              f"{h.files} files]" + (f" - kept: {h.kept}" if h.kept else ""))
+              f"{h.files} files]" + (f" - kept: {h.kept}" if h.kept else "")
+              + (" - caches removed" if h.removed else " - cache-only, removable" if h.removable
+                 else f" - cache-only, idle {h.idle_hours:.0f}h" if h.cache_only else "")
+              + (f" - not removed: {h.outcome}" if h.outcome else ""))
             if h.git_dirs:
                 w("  - contains git repositories: " + ", ".join(h.git_dirs[:5])
                   + (f" (+{len(h.git_dirs) - 5} more)" if len(h.git_dirs) > 5 else ""))

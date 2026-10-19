@@ -369,6 +369,105 @@ class TestHusks(GitFixture):
         self.assertEqual(hs[ws].git_dirs, [".cache/prek/repo"])
         self.assertEqual(hs[ws].files, 0)
 
+    def _later(self, hours):
+        orig = husks._now
+        husks._now = lambda: __import__("time").time() + hours * 3600
+        self.addCleanup(setattr, husks, "_now", orig)
+
+    def _remove(self, sig=None, keep=(), hours=49):
+        sig = sig or ok_signals()
+        inv = self.build(signals=sig, keep=list(keep))
+        inv.empty_dirs = []
+        self._later(hours)
+        hs = {h.path: h for h in husks.scan(inv, sig, sizes=True)}
+        husks.remove(list(hs.values()), inv.roots, inv.keep_patterns, sig)
+        return hs
+
+    def test_cache_only_idle_husk_loses_its_caches_only(self):
+        ws = os.path.join(self.ws, "ws-cache")
+        self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)
+        self.write(ws, "node_modules/a/b.js", "x")
+        hs = self._remove()
+        h = hs[ws]
+        self.assertTrue(h.cache_only)
+        self.assertTrue(h.removed, h.outcome)
+        self.assertFalse(os.path.exists(os.path.join(ws, ".cache", "uv")))
+        self.assertFalse(os.path.exists(os.path.join(ws, "node_modules")))
+        self.assertTrue(os.path.isdir(ws))
+
+    def test_young_cache_husk_is_left(self):
+        ws = os.path.join(self.ws, "ws-young")
+        self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)
+        hs = self._remove(hours=2)
+        self.assertTrue(hs[ws].cache_only)
+        self.assertFalse(hs[ws].removable)
+        self.assertTrue(os.path.isdir(os.path.join(ws, ".cache", "uv")))
+
+    def test_husk_with_other_content_or_guards_is_left(self):
+        logs = os.path.join(self.ws, "ws-logs")
+        self.write(logs, ".cache/uv/wheel.whl", "x" * 5000)
+        self.write(logs, "review.log", "x")
+        busy = os.path.join(self.ws, "ws-busy2")
+        self.write(busy, ".cache/uv/wheel.whl", "x" * 5000)
+        kept = os.path.join(self.ws, "ws-kept2")
+        self.write(kept, ".cache/uv/wheel.whl", "x" * 5000)
+        deep = os.path.join(self.ws, "ws-deepgit")
+        self.write(deep, ".cache/uv/wheel.whl", "x" * 5000)
+        os.makedirs(os.path.join(deep, "a", "b", "c"))
+        sh("git", "init", "-q", os.path.join(deep, "a", "b", "c"))
+        sig = ok_signals(process_cwds=[busy])
+        hs = self._remove(sig=sig, keep=[kept])
+        for ws in (logs, busy, kept, deep):
+            self.assertFalse(hs[ws].removed, ws)
+            self.assertTrue(os.path.isdir(os.path.join(ws, ".cache", "uv")), ws)
+
+    def test_keep_entry_inside_and_bare_repository_protect_caches(self):
+        a = os.path.join(self.ws, "ws-keepin")
+        self.write(a, ".cache/uv/data/f", "x" * 5000)
+        b = os.path.join(self.ws, "ws-bare")
+        bare = os.path.join(b, ".cache", "uv", "repo.git")
+        self.write(b, ".cache/uv/repo.git/HEAD", "ref: refs/heads/main")
+        os.makedirs(os.path.join(bare, "objects"))
+        os.makedirs(os.path.join(bare, "refs"))
+        hs = self._remove(keep=[os.path.join(a, ".cache", "uv", "data")])
+        for ws in (a, b):
+            self.assertFalse(hs[ws].removed, ws)
+            self.assertTrue(os.path.isdir(os.path.join(ws, ".cache", "uv")), ws)
+
+    def test_symlinked_cache_parent_is_not_followed(self):
+        ws = os.path.join(self.ws, "ws-link")
+        self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)
+        outside = os.path.join(self.tmp, "outside")
+        self.write(outside, "uv/precious", "x")
+        h = husks.Husk(path=ws, removable=True)
+        shutil_rmtree = os.path.join(ws, ".cache")
+        __import__("shutil").rmtree(shutil_rmtree)
+        os.symlink(outside, shutil_rmtree)
+        out = husks._remove_payloads(ws, self.ws, [".cache/uv"])
+        self.assertTrue(out)
+        self.assertTrue(os.path.exists(os.path.join(outside, "uv", "precious")))
+
+    def test_root_swapped_for_a_symlink_is_not_followed(self):
+        ws = os.path.join(self.ws, "ws-rootswap")
+        self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        self.write(elsewhere, "ws-rootswap/.cache/uv/precious", "x")
+        moved = self.ws + ".moved"
+        os.rename(self.ws, moved)
+        os.symlink(elsewhere, self.ws)
+        out = husks._remove_payloads(ws, self.ws, [".cache/uv"])
+        self.assertTrue(out)
+        self.assertTrue(os.path.exists(os.path.join(elsewhere, "ws-rootswap/.cache/uv/precious")))
+
+    def test_unverifiable_root_path_removes_nothing(self):
+        ws = os.path.join(self.ws, "ws-unverified")
+        self.write(ws, ".cache/uv/wheel.whl", "x" * 5000)
+        orig = husks._fd_path
+        husks._fd_path = lambda fd: None
+        self.addCleanup(setattr, husks, "_fd_path", orig)
+        self.assertTrue(husks._remove_payloads(ws, self.ws, [".cache/uv"]))
+        self.assertTrue(os.path.isdir(os.path.join(ws, ".cache", "uv")))
+
     def test_keep_listed_and_active_item(self):
         kept = os.path.join(self.ws, "ws-kept")
         self.write(kept, "x.log", "x")

@@ -201,8 +201,18 @@ workspace-level caches (`.cache/uv`, `.cache/uv-tools`, `.cache/prek`,
 any git repository found anywhere inside (deeper than discovery looks), and
 why it must not be touched (in use, an active work item, keep-listed or the
 protected `ws-work-planning`; keep-listed and protected ones are not
-inspected). This is a report for the owner: the tool never removes such a
-directory.
+inspected). Apart from the case below this is a report for the owner: the
+tool never removes such a directory.
+
+A directory that holds nothing but those workspace-level caches (no other
+file, no git repository inside, nothing unreadable), is not kept for any of the
+reasons above and has had no directory change for `--min-idle-hours` (default
+48h) is `cache-only, removable`. With `--apply` the run deletes its cache
+directories (`.cache/uv`, `.cache/uv-tools`, `.cache/prek`, `node_modules`),
+each re-checked right before (fresh inspection, process working directories
+read again). The empty shell stays and is removed by the empty-directory rule
+once it is 6 hours old. Directories with review logs or other files besides
+caches are never touched.
 
 ## The scheduled job
 

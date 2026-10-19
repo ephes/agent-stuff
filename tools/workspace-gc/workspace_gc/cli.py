@@ -120,7 +120,8 @@ def _build(a, sig, only=None):
                          min_idle_hours=a.min_idle_hours, fetch=not a.no_fetch)
     if only is None:
         inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
-        inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes)
+        inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes,
+                               min_idle_hours=a.min_idle_hours)
     return inv
 
 
@@ -172,6 +173,7 @@ def _apply(a, inv) -> inv_mod.Run:
         if lines:
             inv.prune[repo] = lines
     empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals)
+    husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours)
     return run
 
 

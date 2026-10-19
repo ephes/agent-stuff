@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `--apply` deletes the workspace-level caches (`.cache/uv`, `.cache/uv-tools`,
+  `.cache/prek`, `node_modules`) of workspace directories without a checkout
+  that hold nothing else, are not kept (in use, work item, keep list) and have
+  been idle for `--min-idle-hours` (48h). Directories with logs or other files
+  stay untouched and report-only.
 - Fix: a keep-list glob such as `~/workspaces/*on-device-ad*` no longer
   protects every empty workspace directory (a pattern prefix matched all of
   them, so none was removed). A glob now protects only directories it matches.

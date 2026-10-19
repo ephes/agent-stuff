@@ -9,6 +9,13 @@ without a checkout found by discovery, with its size, the share of
 workspace-level caches (WORKSPACE_PAYLOADS) and what else is in it. Nothing
 here deletes anything: the owner decides.
 
+One exception: a directory that holds nothing but workspace-level caches
+(`cache_only`: no file outside them, no git repository, nothing unreadable),
+is not kept (in use, work item, keep list) and whose directories were all last
+changed at least `min_idle_hours` ago is `removable`. `remove()` deletes only
+its WORKSPACE_PAYLOADS directories, each re-checked right before; the empty
+shell stays and is removed by empties.py once it is old enough.
+
 A git repository deeper than discovery looks (or inside a skipped payload
 directory name) is listed under `git_dirs`, so a husk is never mistaken for
 caches and logs only.
@@ -17,10 +24,13 @@ caches and logs only.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
+import time
 from dataclasses import asdict, dataclass, field
 
-from .empties import PROTECTED_NAMES
+from .empties import PROTECTED_NAMES, _keep_listed
+from . import signals as sig_mod
 from .inventory import Inventory, _du_kb, _is_under, keep_match
 from .signals import Signals
 
@@ -39,6 +49,11 @@ class Husk:
     git_dirs: list[str] = field(default_factory=list)   # repositories found inside
     kept: str = ""        # why it must not be touched (in use, keep-listed, ...)
     note: str = ""        # walk truncated or unreadable parts
+    cache_only: bool = False   # nothing but workspace-level caches
+    idle_hours: float | None = None   # since the newest directory change (cache_only only)
+    removable: bool = False    # cache_only, not kept, idle long enough
+    removed: bool = False
+    outcome: str = ""     # why removing the caches failed or was refused
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +119,8 @@ def inspect(path: str, sizes: bool = True) -> Husk:
             break
         if ".git" in dirnames or ".git" in filenames:
             h.git_dirs.append(os.path.relpath(dirpath, path))
+        elif "objects" in dirnames and "refs" in dirnames and "HEAD" in filenames:
+            h.git_dirs.append(os.path.relpath(dirpath, path))    # a bare repository
         # Caches are walked for repositories but their files are not counted.
         if not any(_is_under(dirpath, p) for p in payload_abs):
             h.files += len(filenames)
@@ -119,7 +136,37 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     return h
 
 
-def scan(inv: Inventory, sig: Signals, sizes: bool = True) -> list[Husk]:
+def _now() -> float:
+    return time.time()
+
+
+def _idle_hours(path: str, limit: float) -> float:
+    """Hours since the newest change (modification or status change) of any
+    directory in the tree, not following symlinks. Stops early once something
+    younger than `limit` is found."""
+    newest = 0.0
+    now = _now()
+    for dirpath, dirnames, _files in os.walk(path, followlinks=False):
+        try:
+            st = os.lstat(dirpath)
+        except OSError:
+            continue
+        newest = max(newest, st.st_mtime, st.st_ctime)
+        if (now - newest) / 3600 < limit:
+            break
+    return max(now - newest, 0.0) / 3600
+
+
+def _classify(h: Husk, min_idle_hours: float) -> None:
+    h.cache_only = (not h.kept and not h.files and not h.git_dirs and not h.note
+                    and h.payload_kb > 0)
+    if h.cache_only:
+        h.idle_hours = _idle_hours(h.path, min_idle_hours)
+        h.removable = h.idle_hours >= min_idle_hours
+
+
+def scan(inv: Inventory, sig: Signals, sizes: bool = True,
+         min_idle_hours: float = 48.0) -> list[Husk]:
     """Direct child directories of the roots that hold no discovered checkout
     and are not empty (those are empties.py's)."""
     with_checkout = {co.workspace for co in inv.checkouts}
@@ -140,5 +187,111 @@ def scan(inv: Inventory, sig: Signals, sizes: bool = True) -> list[Husk]:
                 continue
             h = inspect(path, sizes)
             h.kept = kept
+            if sizes:
+                _classify(h, min_idle_hours)
             found.append(h)
     return found
+
+
+def _rmtree_under(parent_fd: int, name: str) -> None:
+    """Delete the real directory `name` below the descriptor, without
+    following symlinks anywhere (shutil.rmtree works through descriptors)."""
+    shutil.rmtree(name, dir_fd=parent_fd)
+
+
+def _fd_path(fd: int) -> str | None:
+    """The real path of an open descriptor (macOS F_GETPATH, Linux /proc);
+    None where the platform cannot say."""
+    try:
+        import fcntl
+        return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, b"\0" * 1024)).split("\0")[0]
+    except (ImportError, AttributeError, OSError):
+        pass
+    try:
+        return os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        return None
+
+
+def _remove_payloads(path: str, root: str, payloads: list[str]) -> str:
+    """Delete the payload directories (relative to the workspace) below the
+    workspace, reached from the root through descriptors opened with
+    O_NOFOLLOW, so a path component swapped for a symlink stops the walk."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(root, flags)
+    except OSError as exc:
+        return f"cannot open {root}: {exc.strerror or exc}"
+    # Ancestors of the root could be symlinks swapped after the inspection:
+    # the descriptor must still be where the root really is.
+    actual = _fd_path(root_fd)
+    if actual != root:
+        os.close(root_fd)
+        return (f"{root} now resolves to {actual}" if actual
+                else f"cannot verify where {root} is; nothing removed")
+    try:
+        ws_fd = os.open(os.path.basename(path), flags, dir_fd=root_fd)
+    except OSError as exc:
+        os.close(root_fd)
+        return f"cannot open {path}: {exc.strerror or exc}"
+    try:
+        for rel in payloads:
+            parts = rel.split("/")
+            fds = []
+            try:
+                cur = ws_fd
+                for part in parts[:-1]:
+                    cur = os.open(part, flags, dir_fd=cur)
+                    fds.append(cur)
+                _rmtree_under(cur, parts[-1])
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                return f"removing {rel} failed: {exc.strerror or exc}"
+            finally:
+                for fd in fds:
+                    os.close(fd)
+    finally:
+        os.close(ws_fd)
+        os.close(root_fd)
+    return ""
+
+
+def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signals,
+                min_idle_hours: float) -> str:
+    """Delete the cache directories of one husk; returns "" or why not.
+    Everything is decided again now, from a fresh inspection."""
+    root = os.path.dirname(h.path)
+    if root not in roots or not _is_real_dir(h.path):
+        return "not a real directory directly under a root"
+    now = _kept(h.path, keep_patterns, sig)
+    if now:
+        return now
+    if _keep_listed(h.path, [(h.path, 0)], keep_patterns):
+        return "a keep-list entry names something inside it"
+    fresh = inspect(h.path, sizes=True)
+    _classify(fresh, min_idle_hours)
+    if not fresh.removable:
+        return "no longer cache-only and idle"
+    payloads = [rel for rel, payload in _entries(h.path) if payload]
+    return _remove_payloads(h.path, root, payloads)
+
+
+def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
+           sig: Signals, min_idle_hours: float = 48.0) -> None:
+    """Remove the caches of the removable husks, each re-checked right before,
+    with the process working directories read afresh for every one.
+    Updates the entries."""
+    for h in entries:
+        if not h.removable:
+            continue
+        cwds, status = sig_mod.read_process_cwds()
+        if status.status not in ("ok", "absent"):
+            h.outcome = f"process working directories unreadable now ({status.detail})"
+            h.removable = False
+            continue
+        live = Signals(herdr_cwds=sig.herdr_cwds, work_refs=sig.work_refs,
+                       process_cwds=sorted(set(sig.process_cwds) | set(cwds)))
+        h.outcome = _remove_one(h, roots, keep_patterns, live, min_idle_hours)
+        h.removed = not h.outcome
+        h.removable = h.removed
