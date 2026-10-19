@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: a keep-list glob such as `~/workspaces/*on-device-ad*` no longer
+  protects every empty workspace directory (a pattern prefix matched all of
+  them, so none was removed). A glob now protects only directories it matches.
 - Empty ignored entries are regenerable: a 0-byte file (an empty
   `db.sqlite3`) or a directory holding only directories and 0-byte files (an
   empty `var/piper/`). A non-empty dev database stays class C.

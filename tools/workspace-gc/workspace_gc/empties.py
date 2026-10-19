@@ -120,16 +120,22 @@ def _rmdir_inspected(root_fd: int, root: str, dirs: list[tuple[str, int]]) -> No
 
 
 def _keep_listed(path: str, dirs: list[tuple[str, int]], keep_patterns: list[str]) -> bool:
-    """The directory, a directory in it, or a path a pattern could match below
-    it (existing or not) is on the keep list."""
+    """The directory, a directory in it, or (for a plain path) a path below it
+    is on the keep list."""
     if any(keep_match(d, keep_patterns) for d, _ in dirs):
         return True
-    below = path + os.sep
+    # A glob protects the directory only when its leading path segments match
+    # the directory (each `*` kept inside one segment) and at least one more
+    # segment follows, which can then name something below it
+    # (`ws-*/repo`). Matching a pattern prefix with `*` crossing `/` would
+    # protect everything: `~/workspaces/*on-device-ad*` starts with
+    # `~/workspaces/*`, which matches every directory.
+    parts = path.split(os.sep)
     for pat in keep_patterns:
         if any(ch in pat for ch in "*?["):
-            # Some prefix of the pattern matches "path/": the rest of the
-            # pattern can then match something below the directory.
-            if any(fnmatch.fnmatch(below, pat[:k]) for k in range(1, len(pat) + 1)):
+            segs = pat.rstrip(os.sep).split(os.sep)
+            if len(segs) > len(parts) and all(
+                    fnmatch.fnmatchcase(p, g) for p, g in zip(parts, segs)):
                 return True
         elif _is_under(pat, path) or _is_under(os.path.realpath(pat), path):
             return True

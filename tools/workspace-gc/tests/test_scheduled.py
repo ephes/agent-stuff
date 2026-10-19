@@ -313,13 +313,13 @@ class TestEmptyDirs(Scheduled):
 
     def test_keep_pattern_for_a_path_below_a_globbed_workspace(self):
         one = self.empty("ws-one")
-        spanned = self.empty("ws-span")
+        spanned = self.empty("span-ws")
         other = self.empty("other")
         self.later()
         self.report("--apply", "--keep", os.path.join(self.ws, "ws-*", "repo"),
-                    "--keep", os.path.join(self.ws, "ws-span*x"))
+                    "--keep", os.path.join(self.ws, "span-w*x"))
         self.assertTrue(os.path.isdir(one))
-        self.assertTrue(os.path.isdir(spanned))
+        self.assertFalse(os.path.exists(spanned))   # `*` does not span segments
         self.assertFalse(os.path.exists(other))
 
     def test_protected_and_keep_listed_are_kept(self):

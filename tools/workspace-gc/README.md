@@ -175,7 +175,8 @@ directories is left alone.
 An empty directory is kept, and listed with the reason, when
 
 - it is named `ws-work-planning`, or it, a directory in it, or a path below it
-  (existing or not, glob patterns included) is on the keep-list;
+  (a plain path, existing or not; a glob such as `ws-*/repo` when its leading
+  segments match the directory and more follow) is on the keep-list;
 - a process or herdr pane has its working directory in it. The process list is
   read again before each directory is removed, and a directory is kept when
   that read fails;
