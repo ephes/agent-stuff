@@ -213,7 +213,7 @@ each re-checked right before (fresh inspection, process working directories
 read again). The empty shell stays and is removed by the empty-directory rule
 once it is 6 hours old.
 
-A directory is `stale, removable` when it has no git repository outside
+A directory named `ws-*` is `stale, removable` when it has no git repository outside
 `.cache/uv`, is not kept for any of the reasons above (a keep-list entry
 naming anything inside it counts), has nothing unreadable, and nothing in it
 (files and directories) changed for `--min-stale-hours` (default 72; 0

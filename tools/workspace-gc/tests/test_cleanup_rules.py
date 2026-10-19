@@ -439,6 +439,13 @@ class TestHusks(GitFixture):
         self.assertTrue(hs[0].removed, hs[0].outcome)
         self.assertGreater(hs[0].removed_kb, 0)
 
+    def test_only_ws_prefixed_directories_are_stale(self):
+        other = os.path.join(self.ws, "emerge-bugs")
+        self.write(other, ".envrc", "x")
+        hs = self._remove(hours=100)
+        self.assertFalse(hs[other].stale)
+        self.assertTrue(os.path.isdir(other))
+
     def test_young_husk_is_not_removed_whole(self):
         young = os.path.join(self.ws, "ws-young2")
         self.write(young, "a.log", "x")

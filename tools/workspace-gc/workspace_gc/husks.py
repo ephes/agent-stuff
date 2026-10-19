@@ -191,7 +191,10 @@ def _uv_cache(rel: str) -> bool:
 
 
 def _classify(h: Husk, min_idle_hours: float, min_stale_hours: float = 72.0) -> None:
-    h.stale = bool(not h.kept and not h.note and min_stale_hours > 0
+    # Only workspace directories (`ws-*`): `.venv` or a hand-made directory
+    # under the root is not one.
+    h.stale = bool(os.path.basename(h.path).startswith("ws-")
+                   and not h.kept and not h.note and min_stale_hours > 0
                    and not [g for g in h.git_dirs if not _uv_cache(g)]
                    and _newest_change(h.path, min_stale_hours) >= min_stale_hours)
     h.cache_only = (not h.kept and not h.files and not h.git_dirs and not h.note

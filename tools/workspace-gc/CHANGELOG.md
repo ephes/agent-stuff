@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `--apply` removes workspace directories without a checkout whole (logs and
+- `--apply` removes `ws-*` workspace directories without a checkout whole (logs and
   notes included) when nothing in them changed for `--min-stale-hours` (72),
   they contain no git repository outside `.cache/uv` and are not in use,
   referenced by an active work item or keep-listed. Removed paths and sizes
