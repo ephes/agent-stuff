@@ -185,7 +185,38 @@ def work_list_gap(data: dict, rows: int) -> str:
     return ""
 
 
+def _check_item(item) -> None:
+    """Raise TypeError unless `item` is an item row (list or detail).
+
+    `slug` must be a string; `stage` and `worktree` must be strings when
+    present (`worktree` may also be null). A malformed answer is an error and
+    never silently drops a reference.
+    """
+    if not isinstance(item, dict):
+        raise TypeError("work item is not an object")
+    slug = item.get("slug")
+    if not isinstance(slug, str):
+        raise TypeError("work item without a slug")
+    if not isinstance(item.get("stage", ""), str) or not isinstance(item.get("worktree"), (str, type(None))):
+        raise TypeError(f"unexpected work item fields for {slug[:60]!r}")
+
+
+def _work_ref(item) -> WorkRef | None:
+    """The WorkRef for one checked item row, or None without a worktree."""
+    _check_item(item)
+    wt = item.get("worktree")
+    n = normalize_path(wt) if wt else ""
+    return WorkRef(item["slug"], item.get("stage", ""), n) if n else None
+
+
 def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], SourceStatus]:
+    """WorkRefs for every listed item that names a worktree, closed items included.
+
+    Work servers that list `worktree` give everything in one `work items --json`
+    call. A row without the `worktree` key (a server from before that field)
+    is fetched with `work show --json <slug>`, so an old server costs one
+    request per item but still yields every reference.
+    """
     unavailable = work_available(env_file, ledger_dir)
     if unavailable:
         return [], unavailable
@@ -197,10 +228,13 @@ def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], Sour
         rows = data["items"]
         if not isinstance(rows, list):
             raise TypeError
-        slugs = [i["slug"] for i in rows]
+        for row in rows:
+            _check_item(row)
     except (ValueError, KeyError, TypeError):
         return [], SourceStatus("error", "unexpected work items output")
-    gap = work_list_gap(data, len(slugs))
+    gap = work_list_gap(data, len(rows))
+    listed = [r for r in rows if "worktree" in r]
+    missing = [r["slug"] for r in rows if "worktree" not in r]
 
     def show(slug: str):
         c, o, e = run_work(env_file, ledger_dir, ["show", "--json", slug])
@@ -210,20 +244,25 @@ def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], Sour
 
     refs: list[WorkRef] = []
     try:
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            for item in pool.map(show, slugs):
-                wt = item.get("worktree") or ""
-                n = normalize_path(wt) if wt else ""
-                if n:
-                    refs.append(WorkRef(item["slug"], item.get("stage", ""), n))
+        for row in listed:
+            ref = _work_ref(row)
+            if ref:
+                refs.append(ref)
+        if missing:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                for detail in pool.map(show, missing):
+                    ref = _work_ref(detail)
+                    if ref:
+                        refs.append(ref)
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:
         return [], SourceStatus("error", _sanitize(str(exc)))
+    shown = f", {len(missing)} fetched one by one" if missing else ""
     if gap:
         # Keep the refs that did arrive (they still protect their worktrees),
         # but the error status blocks --apply and makes every checkout without
         # a listed active item class D (see inventory.apply_signals).
-        return refs, SourceStatus("error", f"{gap}; {len(refs)} listed with worktree")
-    return refs, SourceStatus("ok", f"{len(slugs)} items, {len(refs)} with worktree")
+        return refs, SourceStatus("error", f"{gap}; {len(refs)} listed with worktree{shown}")
+    return refs, SourceStatus("ok", f"{len(rows)} items, {len(refs)} with worktree{shown}")
 
 
 def gather(*, herdr: bool = True, processes: bool = True, work: bool = True,

@@ -70,9 +70,12 @@ followed), it records:
   cache are turned off;
 - in use: a herdr pane (`herdr pane list`) or a process working directory
   (`lsof`) anywhere in the checkout's top-level workspace directory;
-- work-app items whose `worktree` field covers the path (`work items --json` /
-  `work show --json`, with `~/.config/work/env`; skipped if that file does not
-  exist). The item list must be provably complete. Servers before paging cap
+- work-app items whose `worktree` field covers the path, closed items
+  included (`work items --json`, with `~/.config/work/env`; skipped if that
+  file does not exist). Work servers that list `worktree` answer this with the
+  item list alone; for a list row without the `worktree` key (a server from
+  before that field) the item is read with `work show --json <slug>`, one
+  request per item. The item list must be provably complete. Servers before paging cap
   every list at 500 rows without saying so, so 500 rows without a `count` is
   treated as incomplete. With a paging server the `work` CLI follows every
   page; the result is incomplete if it says `truncated`, still carries a
@@ -315,7 +318,8 @@ The tests build temporary repositories. A private `GIT_CONFIG_GLOBAL` rewrites
 `ls-remote`, clone and push all work offline. They cover the classes, the
 local-origin chain and alternates handling, tag containment, missing remote
 tips, the keep-list, every removal guard under changed facts, the complete,
-capped, truncated and paged shapes of the work item list, the scheduled command
+capped, truncated and paged shapes of the work item list, listed `worktree`
+versus the per-item fallback for older servers, the scheduled command
 (applied, refused, dry run), empty-directory removal with its guards, the
 regenerable rules (empty entries, anchored and repository-scoped patterns,
 virtualenvs), the scratch fetch (resolves containment without touching the

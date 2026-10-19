@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Work items are read from `work items --json` alone when the server lists
+  `worktree` (work-ledger from 414e794 on): one paged list per run instead of
+  one `work show --json` per item (~900 requests and subprocesses per run).
+  Rows without the `worktree` key (older servers) are still fetched one by
+  one. Completeness checks, closed-item notes and `--apply` guards are
+  unchanged; a malformed row is a work source error.
+
 - `--apply` removes `ws-*` workspace directories without a checkout whole (logs and
   notes included) when nothing in them changed for `--min-stale-hours` (72),
   they contain no git repository outside `.cache/uv` and are not in use,

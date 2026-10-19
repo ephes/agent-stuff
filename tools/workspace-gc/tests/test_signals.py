@@ -34,6 +34,8 @@ class StubWork:
         if args[:2] == ["items", "--json"]:
             return 0, json.dumps(self.listing), ""
         if args[:2] == ["show", "--json"]:
+            if args[2] not in self.items:
+                return 1, "", "not found"
             return 0, json.dumps({"item": self.items[args[2]]}), ""
         return 2, "", "unexpected"
 
@@ -57,13 +59,62 @@ class ReadWorkItemsTest(unittest.TestCase):
         return [item(f"item-{i:04d}", **kw) for i in range(n)]
 
     def test_complete_list_is_ok(self):
+        # a server that lists `worktree`: one call, no per-item fetches
         rows = [item("a"), item("b", stage="merged"), {"slug": "c", "stage": "parked", "worktree": ""}]
-        listing = {"items": [{"slug": r["slug"], "stage": r["stage"]} for r in rows]}
-        refs, status, _ = self.read(listing, rows)
+        refs, status, stub = self.read({"items": rows}, [])
         self.assertEqual(status.status, "ok")
         self.assertEqual(status.detail, "3 items, 2 with worktree")
+        self.assertEqual(stub.calls, [["items", "--json"]])
+        # closed items keep their reference (reported as a note, see inventory)
         self.assertEqual(sorted(refs, key=lambda r: r.slug),
                          [WorkRef("a", "implementing", "/w/a"), WorkRef("b", "merged", "/w/b")])
+
+    def test_server_without_listed_worktree_falls_back_to_show(self):
+        # a server from before the list carried `worktree`
+        rows = [item("a"), item("b", stage="merged"), {"slug": "c", "stage": "parked", "worktree": ""}]
+        listing = {"items": [{"slug": r["slug"], "stage": r["stage"]} for r in rows]}
+        refs, status, stub = self.read(listing, rows)
+        self.assertEqual(status.status, "ok")
+        self.assertEqual(status.detail, "3 items, 2 with worktree, 3 fetched one by one")
+        self.assertEqual(sorted(c[2] for c in stub.calls if c[0] == "show"), ["a", "b", "c"])
+        self.assertEqual(sorted(refs, key=lambda r: r.slug),
+                         [WorkRef("a", "implementing", "/w/a"), WorkRef("b", "merged", "/w/b")])
+
+    def test_only_rows_without_worktree_key_are_fetched(self):
+        listed = item("a")
+        legacy = item("b", stage="dropped")
+        listing = {"items": [listed, {"slug": "b", "stage": "dropped"}], "count": 2,
+                   "truncated": False, "next_cursor": None}
+        refs, status, stub = self.read(listing, [legacy])
+        self.assertEqual(status.status, "ok")
+        self.assertEqual([c for c in stub.calls if c[0] == "show"], [["show", "--json", "b"]])
+        self.assertEqual(sorted(r.slug for r in refs), ["a", "b"])
+
+    def test_null_worktree_is_no_reference(self):
+        refs, status, stub = self.read({"items": [{"slug": "a", "stage": "implementing", "worktree": None}]}, [])
+        self.assertEqual((status.status, refs, len(stub.calls)), ("ok", [], 1))
+
+    def test_malformed_rows_are_an_error(self):
+        for row in ({"slug": "a", "stage": "implementing", "worktree": 5},
+                    {"slug": "a", "stage": ["merged"], "worktree": "/w/a"},
+                    {"slug": 7, "stage": "implementing", "worktree": "/w/a"},
+                    {"stage": "implementing", "worktree": "/w/a"},
+                    "a",
+                    # rows without `worktree` (fallback path) are checked too
+                    {"slug": "a", "stage": None},
+                    {"slug": "a", "stage": 3}):
+            with self.subTest(row=row):
+                details = [item("a")]  # a valid detail must not hide a malformed list row
+                refs, status, stub = self.read({"items": [item("ok"), row]}, details)
+                self.assertEqual(status.status, "error")
+                self.assertEqual(refs, [])
+                self.assertEqual(stub.calls, [["items", "--json"]])
+
+    def test_failed_show_is_an_error(self):
+        listing = {"items": [{"slug": "a", "stage": "implementing"}]}
+        refs, status, _ = self.read(listing, [])  # the stub has no detail for "a"
+        self.assertEqual((status.status, refs), ("error", []))
+        self.assertIn("work show a exit 1", status.detail)
 
     def test_complete_paged_list_is_ok(self):
         # what a paging-aware CLI prints after following every page
