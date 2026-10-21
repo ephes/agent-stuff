@@ -172,9 +172,8 @@ class TestClassification(GitFixture):
             fh.write("# comment\n" + os.path.join(self.ws, "ws-keep*") + "\n")
         self.assertEqual(self.by_path(self.build(keep_file=kf))[wt].cls, "C")
 
-    def test_builtin_keep_contains_echoport(self):
-        self.assertIn(os.path.expanduser("~/workspaces/ws-echoport-retention-race"),
-                      inventory.load_keep_patterns([], None))
+    def test_no_builtin_keep_paths(self):
+        self.assertEqual(inventory.load_keep_patterns([], None), [])
 
     def test_herdr_pane_in_workspace_is_D(self):
         wt = self.worktree(self.main, "ws-busy", "busy")

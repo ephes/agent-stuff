@@ -149,8 +149,7 @@ evaluates the same rules again right before removing.
 A work item counts as active unless its stage is `merged`, `installed`,
 `accepted` or `dropped`. A closed item's worktree is reported as a note.
 
-Keep-list: `~/workspaces/ws-echoport-retention-race` is built in and cannot be
-turned off. More paths or globs can be added with `--keep` or in
+Keep-list: nothing is built in. Paths or globs can be added with `--keep` or in
 `~/.config/workspace-gc/keep` (one per line, `#` comments). Keep-listed
 checkouts are class C and are **not inspected at all**. No git command or `du`
 runs on them, their alternates are not read, and local-origin chains and

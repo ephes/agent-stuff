@@ -31,9 +31,8 @@ from .signals import Signals
 HOME = os.path.expanduser("~")
 DEFAULT_ROOTS = [os.path.join(HOME, "workspaces")]
 DEFAULT_MAIN_ROOTS = [os.path.join(HOME, "projects")]
-# Built in and not removable by configuration: the restricted Echoport
-# worktree must never be inspected or removed by this tool.
-BUILTIN_KEEP = [os.path.join(HOME, "workspaces", "ws-echoport-retention-race")]
+# Built-in keep paths that configuration cannot turn off (currently none).
+BUILTIN_KEEP: list[str] = []
 DEFAULT_KEEP_FILE = os.path.join(HOME, ".config", "workspace-gc", "keep")
 
 # Ignored directories whose contents are rebuilt by tooling. They are reported

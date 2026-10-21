@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The built-in keep entry for `ws-echoport-retention-race` is removed (its work
+  is saved on a branch); the keep list is now empty unless configured.
+
 - Work items are read from `work items --json` alone when the server lists
   `worktree` (work-ledger from 414e794 on): one paged list per run instead of
   one `work show --json` per item (~900 requests and subprocesses per run).
