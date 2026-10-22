@@ -7,7 +7,8 @@ in the session record but not in the event stream. The session record (the
 with the model and effort for every turn, and every tool call the model made.
 So the verdict is only accepted after that record has been read and it shows:
 
-- at least one turn, and every turn on the pinned model and effort;
+- at least one turn, and every turn on the pinned model and effort - and,
+  when the caller asked for a cyber access program, under that program;
 - no model reroute, which Codex records when the server answers with a model
   other than the one requested;
 - only allowlisted tools, and no delegation of any kind.
@@ -40,6 +41,9 @@ class Audit:
     path: str | None = None
     models: list = field(default_factory=list)
     efforts: list = field(default_factory=list)
+    access_programs: list = field(default_factory=list)
+    #: `codex_error_info` tags of failed turns, e.g. "cyber_policy".
+    error_infos: list = field(default_factory=list)
     reroutes: list = field(default_factory=list)
     tool_uses: list = field(default_factory=list)
     forbidden: list = field(default_factory=list)
@@ -103,6 +107,7 @@ def audit_session(path):
             elif kind == "turn_context":
                 audit.models.append(payload.get("model"))
                 audit.efforts.append(payload.get("effort"))
+                audit.access_programs.append(payload.get("cyber_access_program"))
             elif kind in DELEGATION_RECORDS:
                 audit.forbidden.append(kind)
             elif kind == "response_item" and payload.get("type") in (
@@ -117,11 +122,18 @@ def audit_session(path):
                 item = payload.get("item")
                 if isinstance(item, dict) and item.get("type") in DELEGATION_ITEMS:
                     audit.forbidden.append(item["type"])
+            error = payload.get("error") if kind == "event_msg" else None
+            if isinstance(error, dict) and isinstance(
+                    error.get("codex_error_info"), str):
+                audit.error_infos.append(error["codex_error_info"])
     return audit
 
 
-def judge(audit, *, model, effort):
-    """Return None when the record proves the pinned run, else the reason."""
+def judge(audit, *, model, effort, access_program=None):
+    """Return None when the record proves the pinned run, else the reason.
+
+    The access program is checked only when one was asked for: without the
+    flag the server picks it, and the harness pins the model instead."""
     if audit.error:
         return audit.error
     if not audit.models:
@@ -132,6 +144,12 @@ def judge(audit, *, model, effort):
     wrong_efforts = sorted({str(e) for e in audit.efforts if e != effort})
     if wrong_efforts:
         return f"turn ran at effort {', '.join(wrong_efforts)}, not {effort}"
+    if access_program is not None:
+        wrong_programs = sorted({str(p) for p in audit.access_programs
+                                 if p != access_program})
+        if wrong_programs:
+            return (f"turn ran under cyber access program "
+                    f"{', '.join(wrong_programs)}, not {access_program}")
     if audit.reroutes:
         return "session record shows a model reroute: " + "; ".join(audit.reroutes)
     return None

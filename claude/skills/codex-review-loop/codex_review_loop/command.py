@@ -38,6 +38,11 @@ the installed Codex (0.158.0) rather than assumed:
   trusted, because a trusted project loads the reviewed repository's own
   `.codex/config.toml` - its MCP servers, hooks and exec policies - which is
   repository data under review, never configuration for the reviewer.
+- `--cyber-access-program` is passed only when the caller asked for one. It is
+  a per-turn `codex exec` flag (Codex 0.163.0), not a `-c` key. The Daybreak
+  programs are served by their own models: `gpt-6.1-sol` with
+  `daybreak_blue` is refused (403 "Daybreak isn't available for this model"),
+  so a Daybreak program always runs with its matching model and nothing else.
 """
 import json
 import os
@@ -48,6 +53,29 @@ REVIEW_EFFORT = "high"
 #: for, so a run at medium is proven medium exactly as the default is proven high.
 REVIEW_EFFORTS = ("medium", "high")
 PROFILE_NAME = "codex_review_loop"
+
+#: The values of `codex exec --cyber-access-program`. Without the flag the
+#: server applies its default, which the session record reports as "standard".
+ACCESS_PROGRAMS = ("standard", "daybreak_blue", "daybreak_red")
+#: The one model each Daybreak program runs on. Checked live on 2026-10-22:
+#: `gpt-daybreak-blue-latest` answers with `daybreak_blue`; the account's
+#: catalogue lists no Daybreak Red model, and `gpt-daybreak-red-latest` is
+#: refused for a ChatGPT-account login.
+PROGRAM_MODELS = {
+    "daybreak_blue": "gpt-daybreak-blue-latest",
+    "daybreak_red": "gpt-daybreak-red-latest",
+}
+#: Every model the harness can run, each only under its own access program.
+REVIEW_MODELS = (REVIEW_MODEL,) + tuple(PROGRAM_MODELS.values())
+
+
+def model_for(access_program):
+    """The only model a review under `access_program` may run on: the
+    program's Daybreak model, or `gpt-6.1-sol` for none or `standard`."""
+    if access_program is not None and access_program not in ACCESS_PROGRAMS:
+        raise ValueError(f"access program {access_program!r} is not one of "
+                         f"{ACCESS_PROGRAMS}")
+    return PROGRAM_MODELS.get(access_program, REVIEW_MODEL)
 
 #: Features the reviewer must not have. Each one either reaches beyond the
 #: repository copy (apps, browser, computer use, plugins, web), delegates the
@@ -101,11 +129,19 @@ def project_trust(path):
 
 
 def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
-              instruction, effort=REVIEW_EFFORT, toolchain=None):
+              instruction, effort=REVIEW_EFFORT, model=None,
+              access_program=None, toolchain=None):
     """`copy` is the prepared `workspace.ReviewCopy`; the reviewer starts in
-    its worktree."""
+    its worktree. `model` defaults to the one `access_program` requires and
+    must equal it."""
     if effort not in REVIEW_EFFORTS:
         raise ValueError(f"effort {effort!r} is not one of {REVIEW_EFFORTS}")
+    required = model_for(access_program)
+    if model is None:
+        model = required
+    if model != required:
+        raise ValueError(f"model {model!r} cannot run under access program "
+                         f"{access_program!r}; it requires {required!r}")
     profile = filesystem_profile(
         review_root=review_root, workspace_root=copy.root,
         source_objects=copy.source_objects, toolchain=toolchain)
@@ -114,7 +150,7 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
         "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
         "--json",
         "-C", os.path.realpath(copy.path),
-        "-m", REVIEW_MODEL,
+        "-m", model,
         "-c", f"model_reasoning_effort={toml_string(effort)}",
         "-c", f"default_permissions={toml_string(PROFILE_NAME)}",
         "-c", f"permissions.{PROFILE_NAME}.filesystem=" + profile,
@@ -135,6 +171,8 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
         "-c", "include_collaboration_mode_instructions=false",
         "-c", f"developer_instructions={toml_string(instruction)}",
     ]
+    if access_program is not None:
+        cmd += ["--cyber-access-program", access_program]
     for feature in DISABLED_FEATURES:
         cmd += ["--disable", feature]
     # The prompt arrives on stdin: passed as an argument it has silently hung.

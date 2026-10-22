@@ -21,6 +21,7 @@ KIND_MODEL_MISMATCH = "model_mismatch"      # a turn ran on another model/effort
 KIND_MODEL_UNPROVEN = "model_unproven"      # no session record proves the model
 KIND_FORBIDDEN_TOOL = "forbidden_tool"      # delegation or an unlisted tool
 KIND_PROVIDER = "provider"                  # capacity, rate limit, turn failed
+KIND_CYBER_POLICY = "cyber_policy"          # the provider's cyber filter refused
 KIND_STALL = "stall"                        # no activity for --stall-timeout
 KIND_DEADLINE = "deadline"                  # --review-deadline exceeded
 KIND_CRASH = "crash"                        # exited without a completed turn

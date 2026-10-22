@@ -25,6 +25,13 @@ choice overrides this default; record same-family reviews accurately.
   - Codex/GPT-family implementer, including Pi: use `claude` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-claude-opus-5-5}"` (Opus 5.5) at
     `medium` effort, the harness default for that model.
+- A Daybreak model (`gpt-daybreak-blue-latest`, through
+  `codex-review-loop --cyber-access-program daybreak_blue`) is allowed only
+  for a security review the user or coordinator explicitly requested, of
+  security-critical code. It is never a default, never a reviewer for an
+  ordinary slice, and never a fallback when `gpt-6.1-sol` is unavailable or a
+  normal review hits the provider's cyber filter (`failure_kind`
+  `cyber_policy`): that review is blocked and reported.
 - Every Claude-family review must use `claude-review-loop`. Do not invoke direct
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
@@ -387,8 +394,10 @@ correctly and it hung only at exit.
    from Codex's session record, confines the reviewer to a sandboxed throwaway
    copy of the repository at the reviewed state (plus the review bundle), owns
    the lifecycle, and returns the same structured result and
-   exit codes as the Claude and Pi harnesses. The tmux branch remains for other
-   Codex models.
+   exit codes as the Claude and Pi harnesses. An explicitly requested security
+   review on Daybreak Blue uses the same harness with
+   `--cyber-access-program daybreak_blue`, never the tmux branch. The tmux
+   branch remains for other Codex models.
 
    For `codex` only, use tmux with a read-only review command. Generate the nonce
    and full prompt from step 1. Write a runner using a quoted heredoc:

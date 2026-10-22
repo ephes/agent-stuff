@@ -11,7 +11,11 @@ way Codex does. The mode comes from FAKE_CODEX_MODE:
   spawn_stream             CLEAN, but the event stream shows a collab call
   unlisted_tool            CLEAN, but the record holds an unlisted tool
   subagent_meta            CLEAN, but the record is a subagent thread
+  wrong_program            CLEAN, but the record shows the "standard" access
+                           program whatever was requested
   capacity                 error events, then turn.failed, exit 1
+  cyber_policy             the provider's cyber filter refuses the turn: the
+                           record tags it, turn.failed, exit 1
   error_exit               an error event, then exit 1 without a turn
   crash                    exit 3 without any event
   hang                     thread.started, then silence forever
@@ -35,6 +39,12 @@ import time
 import uuid
 
 MODEL, EFFORT = "gpt-6.1-sol", "high"
+CYBER_REFUSAL = (
+    "This content was flagged for possible cybersecurity risk. If this seems "
+    "wrong, try rephrasing your request. Otherwise, confirm that the "
+    "access_programs.cyber parameter is set to the appropriate tier, and note "
+    "that some cybersecurity requests are still limited, even when Daybreak "
+    "is on.")
 
 
 def emit(obj):
@@ -92,6 +102,11 @@ def main():
         if arg == "-c" and sys.argv[i + 1].startswith("model_reasoning_effort="):
             effort = json.loads(sys.argv[i + 1].split("=", 1)[1])
 
+    # Like Codex, the record names the model asked for with `-m` and the access
+    # program asked for, or the server default "standard" without the flag.
+    model = arg_after("-m") or MODEL
+    program = arg_after("--cyber-access-program") or "standard"
+
     if mode == "crash":
         sys.exit(3)
     thread_id = str(uuid.uuid4())
@@ -103,6 +118,24 @@ def main():
         emit({"type": "error", "message": "Reconnecting... 1/2"})
         emit({"type": "turn.failed",
               "error": {"message": "Selected model is at capacity. Please try a different model."}})
+        sys.exit(1)
+    if mode == "cyber_policy":
+        day = os.path.join(home, "sessions", "2026", "10", "22")
+        os.makedirs(day, exist_ok=True)
+        with open(os.path.join(day, f"rollout-2026-10-22T10-00-00-{thread_id}.jsonl"),
+                  "w") as fh:
+            for rec in (
+                    {"type": "session_meta", "payload": {"cli_version": "0.163.0",
+                                                         "source": "exec"}},
+                    {"type": "turn_context", "payload": {
+                        "model": model, "effort": effort,
+                        "cyber_access_program": program}},
+                    {"type": "event_msg", "payload": {
+                        "type": "task_complete", "last_agent_message": None,
+                        "error": {"message": CYBER_REFUSAL,
+                                  "codex_error_info": "cyber_policy"}}}):
+                fh.write(json.dumps(rec) + "\n")
+        emit({"type": "turn.failed", "error": {"message": CYBER_REFUSAL}})
         sys.exit(1)
     if mode == "error_exit":
         emit({"type": "error", "message": "stream disconnected before completion"})
@@ -119,8 +152,10 @@ def main():
                     "payload": {"cli_version": "0.156.1", "source": source}})
     if mode != "no_turn_context":
         records.append({"type": "turn_context", "payload": {
-            "model": "gpt-5.6-sol" if mode == "wrong_model" else MODEL,
-            "effort": "low" if mode == "wrong_effort" else effort}})
+            "model": "gpt-5.6-sol" if mode == "wrong_model" else model,
+            "effort": "low" if mode == "wrong_effort" else effort,
+            "cyber_access_program":
+                "standard" if mode == "wrong_program" else program}})
     records.append({"type": "response_item", "payload": {
         "type": "custom_tool_call", "name": "exec",
         "input": "text('reroute is just a word in reviewed code')"}})

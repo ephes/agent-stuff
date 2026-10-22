@@ -111,6 +111,36 @@ class TestCommand(unittest.TestCase):
         with self.assertRaises(ValueError):
             command.codex_cmd(effort="low", **kw)
 
+    def test_no_access_program_unless_asked_for(self):
+        self.assertNotIn("--cyber-access-program", self.cmd)
+
+    def test_access_program_is_passed_with_its_model(self):
+        kw = dict(codex_bin="codex", review_root=self.root, copy=self.copy,
+                  schema_path="s.json", last_message_path="m.json",
+                  instruction="x")
+        cmd = command.codex_cmd(access_program="daybreak_blue", **kw)
+        self.assertEqual(cmd[cmd.index("--cyber-access-program") + 1],
+                         "daybreak_blue")
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-daybreak-blue-latest")
+        self.assertEqual(cmd[-1], "-")
+        cmd = command.codex_cmd(access_program="standard", **kw)
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-6.1-sol")
+        with self.assertRaises(ValueError):
+            command.codex_cmd(access_program="daybreak_blue",
+                              model="gpt-6.1-sol", **kw)
+        with self.assertRaises(ValueError):
+            command.codex_cmd(model="gpt-daybreak-blue-latest", **kw)
+        with self.assertRaises(ValueError):
+            command.codex_cmd(access_program="daybreak", **kw)
+
+    def test_each_program_has_exactly_one_model(self):
+        self.assertEqual(command.model_for(None), "gpt-6.1-sol")
+        self.assertEqual(command.model_for("standard"), "gpt-6.1-sol")
+        self.assertEqual(command.model_for("daybreak_blue"),
+                         "gpt-daybreak-blue-latest")
+        self.assertEqual(command.model_for("daybreak_red"),
+                         "gpt-daybreak-red-latest")
+
     def test_disables_every_listed_feature(self):
         disabled = {self.cmd[i + 1] for i, a in enumerate(self.cmd) if a == "--disable"}
         self.assertEqual(disabled, set(command.DISABLED_FEATURES))

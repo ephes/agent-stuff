@@ -98,16 +98,35 @@ def _positive_float(value):
 
 
 def _model(value):
-    if value != command_mod.REVIEW_MODEL:
+    if value not in command_mod.REVIEW_MODELS:
         raise argparse.ArgumentTypeError(
-            f"only {command_mod.REVIEW_MODEL} is permitted; this harness never "
-            "runs another model")
+            f"only {command_mod.REVIEW_MODEL} is permitted (or a Daybreak "
+            "model together with its --cyber-access-program); this harness "
+            "never runs another model")
     return value
+
+
+def _resolve_model(args, parser):
+    """The model the run must use and prove: the access program's model. An
+    explicit --model that disagrees with the program is an error, never
+    silently replaced."""
+    required = command_mod.model_for(args.cyber_access_program)
+    if args.model is not None and args.model != required:
+        if args.cyber_access_program in command_mod.PROGRAM_MODELS:
+            parser.error(
+                f"--cyber-access-program {args.cyber_access_program} runs only "
+                f"{required}, not {args.model}")
+        parser.error(
+            f"--model {args.model} needs --cyber-access-program "
+            + next(p for p, m in command_mod.PROGRAM_MODELS.items()
+                   if m == args.model))
+    return required
 
 
 def _build_parser():
     p = _Parser(
-        prog=PROG, description="Run one pinned gpt-6.1-sol review over a git diff.")
+        prog=PROG, description="Run one pinned gpt-6.1-sol review over a git diff "
+                    "(a Daybreak model only under its --cyber-access-program).")
     env_limit = os.environ.get("CODEX_REVIEW_MAX_CONCURRENT")
     default_limit = DEFAULT_MAX_CONCURRENT
     if env_limit is not None:
@@ -122,8 +141,15 @@ def _build_parser():
     p.add_argument("--max-concurrent", type=_positive_int, default=default_limit,
                    help="maximum concurrent Codex review slots for this user "
                         f"(default {DEFAULT_MAX_CONCURRENT})")
-    p.add_argument("--model", type=_model, default=command_mod.REVIEW_MODEL,
-                   help=f"review model (only {command_mod.REVIEW_MODEL})")
+    p.add_argument("--model", type=_model, default=None,
+                   help=f"review model: {command_mod.REVIEW_MODEL} (default), "
+                        "or the Daybreak model its --cyber-access-program "
+                        "requires (derived when omitted)")
+    p.add_argument("--cyber-access-program", choices=command_mod.ACCESS_PROGRAMS,
+                   help="pass `--cyber-access-program` to Codex and prove it "
+                        "from the session record. daybreak_blue/daybreak_red "
+                        "run their Daybreak model; only for explicitly "
+                        "requested security reviews")
     p.add_argument("--effort", choices=command_mod.REVIEW_EFFORTS,
                    default=command_mod.REVIEW_EFFORT,
                    help="reasoning effort, proven per turn from the session "
@@ -268,7 +294,8 @@ def _review_in_copy(args, copy, b, evidence, review_root, codex_bin, extra_env,
     cmd = command_mod.codex_cmd(
         codex_bin=codex_bin[0], review_root=review_root, copy=copy,
         schema_path=schema_path, last_message_path=last_message_path,
-        instruction=instruction, effort=effort)
+        instruction=instruction, effort=effort, model=model,
+        access_program=args.cyber_access_program)
     cmd = codex_bin + cmd[1:]
 
     meta = {"harness_pid": os.getpid(), "cwd": repo_abs, "command": PROG,
@@ -280,7 +307,7 @@ def _review_in_copy(args, copy, b, evidence, review_root, codex_bin, extra_env,
             return run_review(
                 cmd=cmd, run_dir=args.run_dir, prompt_path=prompt_path,
                 last_message_path=last_message_path, model=model,
-                effort=effort,
+                effort=effort, access_program=args.cyber_access_program,
                 stall_timeout=args.stall_timeout,
                 global_deadline=args.review_deadline,
                 exit_grace=args.exit_grace, extra_env=extra_env,
@@ -302,11 +329,11 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
         args = parser.parse_args(argv)
         if args.cumulative and not args.baseline_ref:
             parser.error("--cumulative needs --baseline-ref")
+        model = _resolve_model(args, parser)
     except _ArgumentError as exc:
         return _argument_failure(argv, str(exc))
     if not _claim_run_dir(args.run_dir):
         return 2
-    model = args.model
     effort = args.effort
     review_root = os.path.join(args.run_dir, REVIEW_ROOT_NAME)
     os.mkdir(review_root, 0o700)
@@ -334,12 +361,14 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
             err = (err or b"").decode(errors="replace")
         return _fail(args.run_dir, model,
                      f"cannot build review bundle: {(err or '').strip()}",
-                     effort=effort)
+                     effort=effort,
+                     access_program=args.cyber_access_program)
 
     if not b.has_changes:
         return _fail(args.run_dir, model,
                      "no changes to review; refusing to treat an empty bundle "
-                     "as clean", state=INVALID, effort=effort)
+                     "as clean", state=INVALID, effort=effort,
+                     access_program=args.cyber_access_program)
 
     try:
         evidence, evidence_redactions = evidence_mod.copy_evidence(
@@ -347,7 +376,8 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
             max_size=args.max_evidence_file_size)
     except (OSError, ValueError) as e:
         return _fail(args.run_dir, model, f"cannot prepare evidence: {e}",
-                     effort=effort)
+                     effort=effort,
+                     access_program=args.cyber_access_program)
     for entry in evidence:
         source = os.path.realpath(entry["source"])
         entry["display"] = (os.path.relpath(source, repo_abs)
@@ -358,7 +388,8 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
         try:
             native, launch_env = native_mod.resolve()
         except native_mod.NativeCodexNotFound as exc:
-            return _fail(args.run_dir, model, str(exc), effort=effort)
+            return _fail(args.run_dir, model, str(exc), effort=effort,
+                         access_program=args.cyber_access_program)
         codex_bin = [native]
         extra_env = {**launch_env, **(extra_env or {})}
 
@@ -375,7 +406,8 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
             except KeyboardInterrupt:
                 return _fail(args.run_dir, model,
                              "interrupted while preparing the repository copy",
-                             kind=KIND_INTERRUPTED, effort=effort)
+                             kind=KIND_INTERRUPTED, effort=effort,
+                             access_program=args.cyber_access_program)
             except (subprocess.CalledProcessError, OSError, ValueError) as e:
                 err = getattr(e, "stderr", None)
                 if err is None:
@@ -385,7 +417,8 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
                 return _fail(
                     args.run_dir, model,
                     f"cannot prepare the repository copy: {(err or '').strip()}",
-                    effort=effort)
+                    effort=effort,
+                    access_program=args.cyber_access_program)
             outcome = _review_in_copy(args, copy, b, evidence, review_root,
                                       codex_bin, extra_env, model, effort,
                                       repo_abs)
@@ -438,8 +471,10 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
     result.write(os.path.join(args.run_dir, "result.json"))
 
     scope = " (scoped)" if result.scoped_clean else ""
+    program = (f"access_program={args.cyber_access_program}  "
+               if args.cyber_access_program else "")
     print(f"REVIEW: {result.state}{scope}  items={len(result.items)}  "
-          f"model={model}  effort={effort}  "
+          f"model={model}  effort={effort}  {program}"
           f"result={os.path.join(args.run_dir, 'result.json')}")
     if result.baseline_commit:
         print(f"  baseline={result.baseline_commit}"

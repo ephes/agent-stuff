@@ -2,8 +2,9 @@
 
 The fields the siblings write are all here under the same names, so callers and
 the shared ledger read one shape. The extra fields record what this harness
-proved about the run: which model and effort every turn actually used, which
-tools ran, and which Codex session the evidence came from.
+proved about the run: which model, effort and cyber access program every turn
+actually used (`access_program` is the one requested, None without the flag),
+which tools ran, and which Codex session the evidence came from.
 """
 import json
 from dataclasses import dataclass, field, asdict
@@ -19,6 +20,7 @@ class ReviewResult:
     started_at: float
     ended_at: float
     effort: str | None = None
+    access_program: str | None = None
     failure_kind: str | None = None
     skipped_files: list = field(default_factory=list)
     truncations: list = field(default_factory=list)
@@ -34,6 +36,7 @@ class ReviewResult:
     session_record: str | None = None
     observed_models: list = field(default_factory=list)
     observed_efforts: list = field(default_factory=list)
+    observed_access_programs: list = field(default_factory=list)
     tool_uses: list = field(default_factory=list)
     forbidden_tool_uses: list = field(default_factory=list)
     structured_output: dict | None = None

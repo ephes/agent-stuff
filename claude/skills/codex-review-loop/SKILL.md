@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6.1-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff. Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.1-sol review\", \"codex review before commit\", \"run the codex review loop\"."
+description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6.1-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff (a dedicated, explicitly requested security review may run OpenAI's Daybreak Blue model with `--cyber-access-program daybreak_blue`). Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.1-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
 The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/codex-review-loop`
@@ -34,6 +34,46 @@ runs. `pi-review-loop` can run the same model through Pi, but it is a different
 harness: use it only when the user asks for Pi. Do not substitute Pi, Claude,
 another model, or your own verdict when this gate is unavailable — stop and
 report the blocked gate.
+
+### Security reviews on Daybreak
+
+Only when the user or coordinator explicitly asks for a dedicated security
+review of security-critical code (authentication, sandboxing, cryptography,
+permission boundaries, exploit-relevant parsing), run it on OpenAI's Daybreak
+Blue cyber access program:
+
+```bash
+python3 ~/projects/agent-stuff/claude/skills/codex-review-loop/bin/codex-review-loop \
+  --repo "$PWD" --run-dir "$(mktemp -d)/codex-review" \
+  --slice-id "<slice>-security" --record-baseline \
+  --cyber-access-program daybreak_blue
+```
+
+The flag goes to `codex exec --cyber-access-program`, and the program decides
+the model: `daybreak_blue` runs `gpt-daybreak-blue-latest` (derived; an
+explicit `--model gpt-daybreak-blue-latest` is the same run), at the same
+`--effort` (`high` default, `medium` on request). `gpt-6.1-sol` under a
+Daybreak program, or a Daybreak model without its program, is refused before
+Codex starts — the provider answers that combination with a 403 anyway. The
+session record must then show every turn on that model, effort and program,
+otherwise the run is `model_mismatch`. `standard` keeps `gpt-6.1-sol` and
+proves the program too. Without the flag nothing changes: `gpt-6.1-sol` is the
+only model, and the server's default program is recorded but not judged.
+`daybreak_red` maps to `gpt-daybreak-red-latest`, which on 2026-10-22 this
+account's catalogue did not list and the provider refused for a ChatGPT login;
+expect `PROVIDER_ERROR` there.
+
+Never use Daybreak by default, for ordinary code reviews, or as a fallback when
+`gpt-6.1-sol` is unavailable. Use a separate `--slice-id` for the security
+review so its rounds do not mix with the slice's ordinary review history.
+
+When the provider's cyber filter refuses a review ("This content was flagged
+for possible cybersecurity risk ... access_programs.cyber ..."), the result is
+`PROVIDER_ERROR` with `failure_kind` `cyber_policy` and a hint in `error`.
+That is a blocked review, not a verdict. Rerun with
+`--cyber-access-program daybreak_blue` only when the review is an explicitly
+requested security review; otherwise stop and report the block. A refusal
+under Daybreak itself also means stop and report.
 
 ## The loop (you drive this)
 
@@ -88,12 +128,14 @@ report the blocked gate.
    - `1` → ISSUES. Verify each finding at its source before acting on it.
    - `2` → failed review: `INVALID`, `CRASHED`, `STALLED`, or `PROVIDER_ERROR`,
      refined by `failure_kind` (`model_mismatch`, `model_unproven`,
-     `forbidden_tool`, `provider`, `stall`, `deadline`, `crash`, `verdict`,
-     `preflight`, `interrupted`, `ledger`). This is never a pass. `ledger`
+     `forbidden_tool`, `provider`, `cyber_policy`, `stall`, `deadline`,
+     `crash`, `verdict`, `preflight`, `interrupted`, `ledger`). This is never a pass. `ledger`
      means the review ran but its round could not be recorded under
      `--slice-id`; its findings stay in `items`, but a round missing from the
-     history cannot close a cycle. An invalid invocation (a rejected `--model`,
-     `--cumulative` without a baseline) also writes an `INVALID` result when its
+     history cannot close a cycle. `cyber_policy` means the provider's cyber
+     filter refused the review (see **Security reviews on Daybreak**). An
+     invalid invocation (a rejected `--model`, a model that does not match
+     `--cyber-access-program`, `--cumulative` without a baseline) also writes an `INVALID` result when its
      `--run-dir` is new or empty; a used directory is never written to. Retry once with a fresh
      `--run-dir`; if it fails again, stop and report — do not substitute
      another reviewer.
@@ -124,8 +166,10 @@ A verdict is accepted only when all of these hold; otherwise the result is
 - **The model is proven, not assumed.** `codex exec --json` does not say which
   model answered, so the harness reads Codex's own session record
   (`$CODEX_HOME/sessions/.../rollout-*-<thread>.jsonl`). Every turn must name
-  `gpt-6.1-sol` at the effort the run asked for (`--effort`, default `high`),
-  and the record must hold no model-reroute
+  `gpt-6.1-sol` (or, under `--cyber-access-program daybreak_blue`,
+  `gpt-daybreak-blue-latest`) at the effort the run asked for (`--effort`,
+  default `high`) and, when a program was requested, under that
+  `cyber_access_program`; the record must hold no model-reroute
   entry. A missing record is `model_unproven`, not a pass. The record is copied
   to `session.jsonl` in the run directory.
 - **The review stayed one direct context.** Only the tools `exec` (the code-mode
@@ -158,8 +202,8 @@ by the tests is injected only through `tests/harness_entry.py`.
 
 ## Boundary
 
-Demonstrated against Codex 0.159.1 on macOS with `gpt-6.1-sol` by
-`tests/test_canary.py`, which builds a production copy, asks the model to run
+Demonstrated against Codex 0.159.1 (last re-run on 0.163.0, 2026-10-22) on
+macOS with `gpt-6.1-sol` by `tests/test_canary.py`, which builds a production copy, asks the model to run
 commands inside and outside it, and then checks Codex's session record — which
 holds every command's output — and the filesystem. The canary drives the
 production copy builder, command builder and runner with a canary instruction,
@@ -252,7 +296,9 @@ the shell and plan tools. Starting another `codex` from the shell would find no
 credentials: `~/.codex` is unreadable.
 
 The boundary is Codex's enforcement, verified by the canary for this Codex
-version. It is not something the harness can re-prove on every run. Re-run the
+version. The permission profile does not depend on the model; a Daybreak run
+uses the same profile and the same tool audit, but the canary itself runs
+`gpt-6.1-sol`. It is not something the harness can re-prove on every run. Re-run the
 canary after a Codex upgrade or any change to `command.py` or the copy
 builder:
 
@@ -285,7 +331,9 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 
 ## Hard rules
 
-- `gpt-6.1-sol` only. `--model` accepts nothing else.
+- `gpt-6.1-sol` only. `--model` accepts nothing else, except the Daybreak
+  model of an explicit `--cyber-access-program` for a requested security
+  review.
 - Effort `high` by default; `--effort medium` only when the user asked for
   medium. Nothing else is accepted, and the run is proven at the effort it
   asked for, so a run that answered at another effort is `INVALID`.
@@ -301,7 +349,9 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 
 ## Useful flags
 
-`--effort` (`high` default, or `medium`), `--context-file` (repeatable),
+`--effort` (`high` default, or `medium`), `--cyber-access-program`
+(`standard`, `daybreak_blue`, `daybreak_red`; security reviews only),
+`--context-file` (repeatable),
 `--evidence-file` (repeatable),
 `--record-baseline`, `--baseline-ref`, `--cumulative`, `--slice-id`, `--ledger-dir` (default
 `~/.cache/review-loop/ledger`, shared with the sibling harnesses),
@@ -315,8 +365,10 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
 `result.json` (the siblings' fields — `state`, `items`, `model`, `effort`,
 `skipped_files`, `truncations`, `redactions`, `baseline_ref`,
 `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
-`scoped_clean` — plus `failure_kind`, `thread_id`, `session_record`,
-`observed_models`, `observed_efforts`, `tool_uses`, `forbidden_tool_uses`,
+`scoped_clean` — plus `failure_kind`, `access_program` (requested, `null`
+without the flag), `thread_id`, `session_record`, `observed_models`,
+`observed_efforts`, `observed_access_programs`, `tool_uses`,
+`forbidden_tool_uses`,
 `evidence_files`, `review_copy` — the copy's `head`, `tree`, `excluded`
 paths, `notes` and whether it was `removed` — and `structured_output`),
 `review-root/` (the bundle and evidence the reviewer started from),
@@ -332,7 +384,7 @@ python3 -m unittest discover -s tests
 ```
 
 `tests/fake_codex.py` receives the production argv and plays each failure: a
-wrong model or effort, a reroute, a missing record, delegation in the record or
+wrong model, effort or access program, a cyber-filter refusal, a reroute, a missing record, delegation in the record or
 the stream, an unlisted tool, capacity, an error exit, a crash, a non-zero exit
 after a completed turn, a silent hang, a busy hang past the deadline, a
 post-turn hang, an orphaned child, and malformed final messages. It records the

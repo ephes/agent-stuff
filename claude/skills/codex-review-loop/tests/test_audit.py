@@ -50,6 +50,32 @@ class TestAudit(unittest.TestCase):
         other = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol", "effort": "low"}}
         self.assertIn("effort", self.judged(TURN, other)[1])
 
+    def test_access_program_is_judged_only_when_asked_for(self):
+        blue = {"type": "turn_context", "payload": {
+            "model": "gpt-daybreak-blue-latest", "effort": "high",
+            "cyber_access_program": "daybreak_blue"}}
+        record(self.path, blue, blue)
+        result = audit.audit_session(self.path)
+        self.assertEqual(result.access_programs, ["daybreak_blue"] * 2)
+        self.assertIsNone(audit.judge(result, model="gpt-daybreak-blue-latest",
+                                      effort="high",
+                                      access_program="daybreak_blue"))
+        reason = audit.judge(result, model="gpt-daybreak-blue-latest",
+                             effort="high", access_program="daybreak_red")
+        self.assertIn("not daybreak_red", reason)
+        # A record without the field cannot prove a requested program.
+        result, _ = self.judged(TURN)
+        self.assertIn("None", audit.judge(result, model="gpt-6.1-sol",
+                                          effort="high",
+                                          access_program="standard"))
+        self.assertIsNone(audit.judge(result, model="gpt-6.1-sol", effort="high"))
+
+    def test_error_info_of_a_failed_turn_is_recorded(self):
+        result, _ = self.judged(TURN, {"type": "event_msg", "payload": {
+            "type": "task_complete",
+            "error": {"message": "flagged", "codex_error_info": "cyber_policy"}}})
+        self.assertEqual(result.error_infos, ["cyber_policy"])
+
     def test_no_turn_fails(self):
         self.assertIn("no turn", self.judged({"type": "session_meta", "payload": {}})[1])
 

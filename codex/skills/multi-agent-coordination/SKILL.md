@@ -63,9 +63,11 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 - Spend the subscription whose weekly window resets sooner while it has
   headroom; save the other.
 - A worker's review gate spends the reviewer's quota, not the implementer's
-  (Codex reviews of Claude workers spend Codex). Review-heavy workers burn the
-  implementer's quota slowly, so scale parallelism to the target burn rate
-  (roughly 10-12 Claude workers for ~3%/h of a weekly window).
+  (Codex reviews of Claude workers spend Codex). Scale parallelism to the
+  target burn rate: an implementation-heavy Claude (Opus 5.5) worker costs
+  about 1% of the weekly window per hour (13 parallel workers measured
+  12-14%/h in October 2026), so ~3%/h means about three such workers.
+  Workers that mostly wait on reviews cost less; measure before scaling up.
 - Usage reporting is mandatory. Keep the weekly windows fresh in the work app
   (Claude "Weekly · all models", Codex weekly; only those) at session start,
   whenever handling worker results, and on every periodic check (at least
@@ -96,8 +98,14 @@ Every brief states the item slug, goal, acceptance criteria, and:
   pull, checkout, restore, commit or rm there (they may hold uncommitted owner
   work); `git fetch` and `worktree add` from there are fine. The opt-in hook
   `tools/guard-projects` enforces this.
-- **Scratch**: a unique `mktemp -d` directory per worker. Shared scratch paths
-  get overwritten by other workers.
+- **Scratch**: a unique `mktemp -d` directory per worker, and a fresh
+  `mktemp -d` run directory for every review round. Shared scratch paths
+  (including a shared session scratchpad) get overwritten by other workers.
+- **Never end a turn while a review or background command runs**: wait for
+  it in the foreground. A worker whose turn ends loses the background job's
+  result. Workflow-tool subagents can be forced to return on long slices,
+  which lost a running review five times in one campaign; run long slices and
+  finishers as background agents (Claude Code: the Agent tool) instead.
 - **Delivery**: feature branch, push only after
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
   (origin under `github.com/ephes/`; otherwise report, never push), verify with
@@ -107,7 +115,9 @@ Every brief states the item slug, goal, acceptance criteria, and:
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean, park the
   slice and ask the owner instead of looping. Use public APIs or allowlists,
-  not home-made HTTP, streaming or delete-safety layers.
+  not home-made HTTP, streaming or delete-safety layers. Pass each
+  `--evidence-file` and `--context-file` as its own quoted argument; a list
+  in one shell variable word-splits into a broken invocation.
 - **Unclear cases**: if a case does not clearly match the brief's rule, report
   it instead of acting.
 - **Hygiene**: commit messages without AI or tool mentions; docs and changelog
@@ -118,6 +128,9 @@ Every brief states the item slug, goal, acceptance criteria, and:
   the version at merge time, above origin's latest.
 - **Concurrent pushes**: before merging, fetch; if origin moved, rebase and
   rerun the tests.
+- **Linux-only code**: tests behind `cfg(target_os = "linux")` or Linux-only
+  trait impls (e.g. a `System` implementation) neither build nor run on
+  macOS. Run them in a Linux container before merging from macOS.
 - **Parallel test infra**: molecule or docker tests use instance and container
   names unique to the worker (e.g. suffixed with the slug).
 - **Native/Xcode**: each worker creates its own simulator and derived-data

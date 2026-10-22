@@ -1417,3 +1417,22 @@ Expected: inspect the harness exit code, `result.state`, and `convergence.status
 Impact: work continued past an explicit review-loop stop. The documentation and estate-sync repair and later independent final reviews closed clean with no open findings; the production cutover and rollback drill succeeded. The missed exit was discovered during final evidence collection and transparently recorded in the campaign result. Follow-up: check all three harness signals immediately on return and report a stop condition before further work or requesting direction. Keep each slice ID scoped to one gate context rather than carrying clean rounds into a separate gate. This incident does not establish a harness defect. Status: documented; no outstanding finding.
 
 Promotion: incident — the existing exit-4 stopping rule explicitly required stopping regardless of ledger history. Apply that rule and keep gate contexts separate; no new skill rule is introduced.
+
+## 2026-10-22 — Rust-Ports Runde 2: lost background reviews, quota, invocation slips
+
+- Lost reviews: Workflow-tool subagents can be forced to return on long
+  slices. A worker that had started its review in the background lost it, five
+  times in this campaign. Never end a turn while a review or background command
+  runs; long slices and finishers ran better as Agent-tool background agents.
+- Quota: about 13 parallel Opus 5.5 implementation workers burned 12-14% of the
+  weekly Claude window per hour, about 1% per worker-hour. The old guidance of
+  10-12 workers for ~3%/h is far off for implementation-heavy slices.
+- `--evidence-file` lists built in one shell variable word-split into broken
+  invocations twice; pass each file as its own argument.
+- Run directories in a shared scratchpad collided again; use a fresh
+  `mktemp -d` per review.
+- Linux-only tests (`cfg(target_os = "linux")`, Linux `System` trait impls)
+  are not built on macOS, so a green macOS run says nothing about them; run
+  them in a Linux container before merging from macOS.
+
+Promotion: promoted - `multi-agent-coordination`, Quota pacing and Worker brief checklist (Scratch, never end a turn, Review, Linux-only code)

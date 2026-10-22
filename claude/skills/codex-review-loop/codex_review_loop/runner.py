@@ -16,12 +16,40 @@ from .env import codex_env, codex_home
 from .monitor import Monitor
 from .result import ReviewResult
 from .states import (CLEAN, CRASHED, FAILED, INVALID, ISSUES, PROVIDER_ERROR,
-                     KIND_CRASH, KIND_FORBIDDEN_TOOL, KIND_INTERRUPTED,
+                     KIND_CRASH, KIND_CYBER_POLICY, KIND_FORBIDDEN_TOOL,
+                     KIND_INTERRUPTED,
                      KIND_MODEL_MISMATCH, KIND_MODEL_UNPROVEN, KIND_PROVIDER,
                      KIND_VERDICT)
 from .verdict import parse_verdict
 
 SESSION_POLL_INTERVAL = 5.0
+
+#: How the provider's cyber filter announces a refusal: the session record tags
+#: the failed turn with `codex_error_info` "cyber_policy", and the message (on
+#: the event stream too) names the `access_programs.cyber` parameter.
+CYBER_POLICY_INFO = "cyber_policy"
+CYBER_POLICY_MARKERS = ("access_programs.cyber",
+                        "flagged for possible cybersecurity risk")
+
+
+def _is_cyber_refusal(messages, error_infos):
+    if CYBER_POLICY_INFO in error_infos:
+        return True
+    return any(marker in str(m).lower()
+               for m in messages if m for marker in CYBER_POLICY_MARKERS)
+
+
+def cyber_policy_hint(access_program):
+    if access_program in ("daybreak_blue", "daybreak_red"):
+        return (f"the provider's cyber filter refused this review even under "
+                f"--cyber-access-program {access_program}; some requests stay "
+                "limited under Daybreak. Stop and report the blocked review; "
+                "do not switch reviewers.")
+    return ("the provider's cyber filter refused this review. Only for an "
+            "explicitly requested security review of security-critical code, "
+            "rerun with --cyber-access-program daybreak_blue (which runs "
+            "gpt-daybreak-blue-latest); otherwise stop and report the blocked "
+            "review. Never substitute another reviewer.")
 
 
 def _now():
@@ -197,7 +225,7 @@ def _read_text(path):
 
 
 def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
-               stall_timeout, global_deadline, exit_grace=30.0,
+               stall_timeout, global_deadline, access_program=None, exit_grace=30.0,
                poll_interval=0.5, env=None, extra_env=None, on_spawn=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
@@ -322,8 +350,15 @@ def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
         # review was not one direct, sandboxed context.
         state, kind, items = INVALID, KIND_FORBIDDEN_TOOL, []
         error = "forbidden tool use: " + ", ".join(sorted(set(forbidden)))
+    if state in (PROVIDER_ERROR, CRASHED) and kind in (KIND_PROVIDER, KIND_CRASH) \
+            and _is_cyber_refusal([monitor.turn_failure, *monitor.errors],
+                                  audit.error_infos):
+        state, kind = PROVIDER_ERROR, KIND_CYBER_POLICY
+        error = cyber_policy_hint(access_program) + (
+            f"\n{error}" if error else "")
     if state in (CLEAN, ISSUES):
-        reason = audit_mod.judge(audit, model=model, effort=effort)
+        reason = audit_mod.judge(audit, model=model, effort=effort,
+                                 access_program=access_program)
         if reason is not None:
             state = INVALID
             kind = KIND_MODEL_UNPROVEN if (audit.error or not audit.models) \
@@ -331,15 +366,18 @@ def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
             error = reason
             items = []
     elif audit.error is None:
-        reason = audit_mod.judge(audit, model=model, effort=effort)
+        reason = audit_mod.judge(audit, model=model, effort=effort,
+                                 access_program=access_program)
         if reason is not None and error:
             error = f"{error}\n(session record: {reason})"
 
     result = ReviewResult(
-        state=state, items=items, model=model, effort=effort, cost=None,
+        state=state, items=items, model=model, effort=effort,
+        access_program=access_program, cost=None,
         started_at=started, ended_at=_now(), failure_kind=kind if state in FAILED else None,
         thread_id=monitor.thread_id, session_record=record,
         observed_models=audit.models, observed_efforts=audit.efforts,
+        observed_access_programs=audit.access_programs,
         tool_uses=audit.tool_uses, forbidden_tool_uses=sorted(set(forbidden)),
         structured_output=structured, error=error, raw_verdict_line=raw_text,
     )
