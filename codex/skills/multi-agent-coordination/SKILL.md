@@ -118,6 +118,14 @@ Every brief states the item slug, goal, acceptance criteria, and:
   not home-made HTTP, streaming or delete-safety layers. Pass each
   `--evidence-file` and `--context-file` as its own quoted argument; a list
   in one shell variable word-splits into a broken invocation.
+- **Effort**: the brief names the implementer's effort (Claude `high`, Codex
+  `low`). A slice that hits a trigger in `cross-agent-review-cycle`, **Effort
+  escalation** (e.g. new Criticals in the same component round after round) is
+  re-dispatched one step up (`max` / `high`) with the instruction to treat the
+  design as the finding and simplify rather than patch; record the escalation
+  and its reason on the item. It is not a round-cap reset: a round past the
+  park still needs the owner's approval. The next slice starts at the default
+  again.
 - **Unclear cases**: if a case does not clearly match the brief's rule, report
   it instead of acting.
 - **Hygiene**: commit messages without AI or tool mentions; docs and changelog

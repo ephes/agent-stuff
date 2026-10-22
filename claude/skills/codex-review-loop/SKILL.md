@@ -336,7 +336,10 @@ CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
   review.
 - Effort `high` by default; `--effort medium` only when the user asked for
   medium. Nothing else is accepted, and the run is proven at the effort it
-  asked for, so a run that answered at another effort is `INVALID`.
+  asked for, so a run that answered at another effort is `INVALID`. No higher
+  level is offered: none has been proven for `gpt-6.1-sol` in the session
+  record, and effort escalation (`cross-agent-review-cycle`) raises the
+  implementer, not this reviewer.
 - A commit-gate "clean" is exit `0` plus your judgement that any `(scoped)`
   omissions do not matter. Exits `1`–`4` are never clean.
 - Up to ten concurrent reviews by default (`--max-concurrent`,

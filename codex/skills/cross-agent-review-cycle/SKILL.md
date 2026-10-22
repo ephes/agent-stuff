@@ -65,7 +65,7 @@ where the work is mechanical.
 | Role | Default | Escalate a tier when |
 |------|---------|----------------------|
 | Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
-| Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context |
+| Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context (raise effort first: **Effort escalation**) |
 | Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
 
@@ -93,6 +93,51 @@ primary reviewer for any unscoped whole-slice round.
 Record the model each role actually used, taken from the invocation. A
 reviewer's self-reported identity inside its own report is not evidence of which
 model ran.
+
+### Effort escalation
+
+Implementer effort may rise mid-slice when the work proves harder than the
+dispatch assumed. Escalate when any of these holds for one component of the
+slice:
+
+- a second round is not clean and its required findings sit in the same
+  component as the first round's;
+- successive rounds find *new* Critical or Warning defects there instead of
+  narrowing on the old ones;
+- a Critical survived one repair; or
+- the implementer could not reproduce an accepted finding, or its repair did
+  not make the reproduction pass.
+
+Do not escalate for a small repair delta (docs, tests, a local fix) that one
+re-review can close, or because the model is expensive.
+
+Action: re-dispatch (or resume) the implementer one step up - Claude
+implementers `high` -> `max`, Codex implementers (`gpt-6.1-sol`) `low` ->
+`high` - with the explicit instruction to find the root cause and treat the
+design as the finding: replace or simplify the mechanism (an existing tool, a
+narrower accepted input, refusing the unsupported case before any side effect)
+rather than patch the next hole, and stop and propose a simpler design if new
+holes appear again. Record the escalation, its trigger and both effort levels in
+the slice's review summary, and on the work item in a campaign. An implementer
+already at its escalation level has no step left: put the design choice to the
+operator (**Judging the evidence a repair offers**); a model-tier escalation
+from the table above stays a deliberate, recorded choice.
+
+De-escalate at the slice boundary: the next slice starts at the role's default
+effort again.
+
+Escalation is not a round-cap reset. Rounds at the higher effort belong to the
+same slice: the `--slice-id` ledger keeps counting and exit `4` still ends the
+loop, and in a coordinated campaign the 2-non-clean-round park still applies, so
+a further round needs the owner's approval - ask for it together with the
+escalated re-dispatch.
+
+Reviewer effort does not escalate. `codex-review-loop` already runs at `high`,
+the highest effort its session-record check proves for `gpt-6.1-sol`; no higher
+level is offered because none has been proven. `claude-review-loop` and
+`pi-review-loop` stay at their defaults or the campaign's configured value. For
+a Critical repair the reviewer lever is keeping the primary reviewer on the
+delta round, not more effort.
 
 ## Cycle Continuation and Stopping Rule
 
@@ -609,7 +654,9 @@ A reviewer is a source of claims, not verdicts you owe agreement to.
   their Criticals on a hand-rolled encoder for git tree entries - submodules,
   unreadable paths, alternate indexes - each repair introducing the next defect.
   The fix was not a fourth round but letting git build the tree. Stop and put
-  that choice to the operator instead of buying another round.
+  that choice to the operator instead of buying another round of patches; an
+  approved escalated re-dispatch (**Effort escalation**) can carry the
+  redesign.
 - Review a repair delta as its own change, not as a smaller version of a
   reviewed one. In one observed cycle every Critical in round 2 was introduced
   by round 1's repairs: the fix for a secret-exposure warning wrote a raw

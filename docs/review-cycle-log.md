@@ -1436,3 +1436,32 @@ Promotion: incident — the existing exit-4 stopping rule explicitly required st
   them in a Linux container before merging from macOS.
 
 Promotion: promoted - `multi-agent-coordination`, Quota pacing and Worker brief checklist (Scratch, never end a turn, Review, Linux-only code)
+
+## 2026-10-22 — Implementer effort escalation when a component keeps failing review
+
+- Expected: a slice dispatched at the role's default effort converges within
+  the campaign's two non-clean rounds.
+- Actual: in one infrastructure-port campaign an implementer at `high` got two
+  or three *new* Criticals per round from a `gpt-6.1-sol` `high` review, twice,
+  all in the same home-built path/collision-handling component. Re-dispatched
+  at `max` with the explicit instruction to treat the design as the finding, it
+  replaced the mechanism (accept only the role's default layout, refuse
+  everything else before any host contact) and the next round was clean. In a
+  second slice, already at `max`, a third round still found a new Critical in
+  the same leftover-detection component; its next round runs with "stop and
+  propose a simpler design if new holes appear again". A third slice's small
+  docs/tests repair delta closed clean at `high` without escalation.
+- Impact: the skills had a model-tier escalation for implementers and a "the
+  design is the finding" judgement rule, but nothing said to raise effort, how
+  far, when to drop back, or how it relates to the round cap, so escalation
+  happened ad hoc.
+- Fix: escalate implementer effort one step (Claude `high` -> `max`, Codex
+  `low` -> `high`) on repeated or new required findings in one component, a
+  Critical that survived a repair, or an unreproducible finding; instruct a
+  root-cause/simplification pass; record it; reset at the next slice; never a
+  round-cap reset. Reviewer effort does not escalate: `codex-review-loop`'s
+  `high` is the highest effort its session-record check proves for
+  `gpt-6.1-sol`, so no harness flag changed.
+- Status: resolved.
+
+Promotion: promoted - `cross-agent-review-cycle`, Model Roles And Cost / Effort escalation (pointer in `multi-agent-coordination`, Worker brief checklist)
