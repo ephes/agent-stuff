@@ -823,3 +823,22 @@ re-reviewed, so no CLEAN or commit-readiness claim. No source changes or commits
 - Promotion: promoted 2026-09-10 - `cross-agent-review-cycle`, Wrapper Shell
   Hazards, to say the quoted delimiter is required whenever the body contains a
   backtick at all, not only a code fence.
+
+
+## 2026-09-19 — Pi review routing and local-state permissions
+
+Expected: the shared review skill invokes the existing Pi harness and identifies
+preflight failures accurately. Actual: the skill still prescribed an independent
+tmux runner, and Pi state-lock access failures were reported as generic model
+unavailability. The review never started.
+
+Fix: route Pi reviews to pi-review-loop, honor explicit user model selection,
+and diagnose denied auth/settings locks before interpreting a partial model
+listing. Do not infer missing login or repeatedly retry unchanged denials.
+Regression checks exercise both model-resolution entry points, including a
+partial model table and unrelated permission warnings.
+
+Status: correction validated and installed in the shared source after the user
+enabled full access. Existing edits to the source workflow log were preserved.
+Promotion: promoted — cross-agent-review-cycle, Reviewer Procedure;
+pi-review-loop, failure interpretation and model preflight. Promotion is installed in the shared source.

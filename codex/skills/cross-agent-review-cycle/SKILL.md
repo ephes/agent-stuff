@@ -1,6 +1,6 @@
 ---
 name: cross-agent-review-cycle
-description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating value-driven fix/re-review cycles with Claude, Codex, or Pi. Claude reviews delegate to the supervised claude-review-loop harness.
+description: Use before committing an implementation slice when a configurable different-family reviewer should inspect the slice, or when coordinating value-driven fix/re-review cycles with Claude, Codex, or Pi. Claude and Pi reviews use their supervised review harnesses.
 ---
 
 # Cross-Agent Review Cycle
@@ -8,11 +8,12 @@ description: Use before committing an implementation slice when a configurable d
 ## Purpose
 
 Run a value-driven independent review loop before committing an implementation
-slice. The reviewer must be a different model family from the implementer.
+slice. Default to a different model family from the implementer. An explicit user
+choice overrides this default; record same-family reviews accurately.
 
 ## Reviewer Selection
 
-- The reviewer must be a different model family from the implementer.
+- Default to a different model family; honor an explicit user-selected reviewer.
 - `REVIEWER_AGENT` may override the default reviewer. Supported values:
   `auto`, `claude`, `codex`, and `pi`. The legacy values `claude-plan` and
   `claude-no-tools` are accepted only as aliases for `claude`; they no longer
@@ -32,7 +33,8 @@ slice. The reviewer must be a different model family from the implementer.
   OpenRouter model, or any other provider. Claude models run only through
   Claude Code and `claude-review-loop`.
 
-Do not silently substitute a same-family reviewer. If the requested reviewer
+Do not silently substitute a same-family reviewer. Honor an explicit user
+choice without asking again. If the requested reviewer
 command or model is unavailable, report the blocker. For Pi, fail closed if
 the approved model or authentication is unavailable; never make an automatic
 model, provider, or transport fallback.
@@ -69,7 +71,7 @@ needed it. Do not raise effort merely because a model is expensive, and do not
 let a request for a stronger model silently change effort as well.
 
 A cheaper delta re-review is only safe on a round that is actually scoped -
-`--baseline-ref` for Claude, an explicit delta prompt for Codex/Pi. Keep the
+`--baseline-ref` for Claude/Pi, an explicit delta prompt for Codex. Keep the
 primary reviewer for any unscoped whole-slice round.
 
 Record the model each role actually used, taken from the invocation. A
@@ -79,7 +81,7 @@ model ran.
 ## Cycle Continuation and Stopping Rule
 
 Do not use a fixed numeric cap. A valid review is one that completed with a
-parseable verdict from the intended different-family reviewer; harness,
+parseable verdict from the selected reviewer; harness,
 tooling, or lifecycle failures do not count. After every valid review,
 adjudicate the findings and decide whether another fix/re-review cycle has
 substantial expected value.
@@ -133,7 +135,7 @@ Cycle count is a diminishing-returns signal, not a stopping rule. As rounds
 accumulate, require clearer evidence of incremental value. After each review,
 record briefly why another cycle is justified or why the loop is stopping.
 
-For Claude reviews, `--slice-id` computes two of these stopping conditions from
+For Claude/Pi reviews, `--slice-id` computes two of these stopping conditions from
 the recorded rounds - a required finding that survived two repairs, and a
 Critical/Warning count that has not fallen across two consecutive rounds - and
 returns exit `4` when either fires. Treat that as the loop ending: adjudicate
@@ -148,8 +150,8 @@ merely because an arbitrary round count was reached.
 The first valid review may inspect the complete implementation slice. After
 that review, freeze its accepted findings as the repair baseline.
 
-For a Claude re-review, scope the bundle itself with `--baseline-ref` (see the
-reviewer procedure above) rather than relying on the prompt alone. For Codex/Pi,
+For a Claude/Pi re-review, scope the bundle itself with `--baseline-ref` (see the
+reviewer procedure above) rather than relying on the prompt alone. For Codex,
 say the scope in the prompt and quote only the accepted findings.
 
 For every re-review:
@@ -180,7 +182,7 @@ every concern that a fresh whole-slice audit could discover.
 
 Commit only when:
 
-- at least one valid different-family review completed and its findings were
+- at least one valid review from the selected reviewer completed and its findings were
   adjudicated, and
 - no Critical or Warning findings remain, and
 - Suggestions are fixed, explicitly deferred with rationale, or rejected with
@@ -238,7 +240,8 @@ correctly and it hung only at exit.
 
 ## Reviewer Procedure
 
-1. Resolve the reviewer branch first. For Codex/Pi, generate the run's nonce
+1. Resolve the reviewer branch first. For Pi, use its harness in step 3; no
+   sentinel or hand-written prompt is needed. For Codex, generate the run's nonce
    before anything else, because the prompt and the poll loop must both use this
    one value:
 
@@ -249,7 +252,7 @@ correctly and it hung only at exit.
    Then build the matching prompt described in
    **Review Prompt Contents** below, asking for `=== REVIEW COMPLETE $nonce ===`
    as its final line. For Claude, `$review_prompt` must contain
-   only the narrow trusted-context subset. For Codex/Pi, it must contain the full
+   only the narrow trusted-context subset. For Codex, it must contain the full
    review directives and output contract. Only then write that branch-specific
    body to a temp file:
 
@@ -312,131 +315,81 @@ correctly and it hung only at exit.
    artifact directory.
    Preserve the harness defaults unless the user requested a model/effort change.
 
-3. For `codex` or `pi`, use the tmux procedure below. Choose stable paths:
+3. For `pi`, use the existing [pi-review-loop](../../../claude/skills/pi-review-loop/SKILL.md)
+   harness in the foreground. Resolve this relative link against the real skill
+   source directory when this skill is installed through a symlink. Read that
+   skill before invoking its harness; do not recreate its preflight or lifecycle
+   in a tmux script.
+
+   ```bash
+   python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
+     --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
+     --model openai-codex/gpt-5.6-sol
+   ```
+
+   Pi uses the shared redacted bundle, no repository tools, and structured
+   results. Use its `--record-baseline`, `--baseline-ref`, `--slice-id`, and
+   manifest checks for the same repair containment as Claude. Baseline snapshots
+   are optional when Git object storage is read-only; a first full review does
+   not require them. For subsequent repair reviews, prepare a scoped reviewable
+   checkout in a writable workspace if needed and preserve the reviewed state.
+   The harness owns timeouts, model preflight, retries, and child cleanup. Do not
+   use direct `pi -p`, sentinel polling, or an alternative provider as a fallback.
+
+   Both authentication and model discovery need Pi's normal local state access,
+   even though the reviewer has no tools. The default state directory is
+   `~/.pi/agent`; the harness supports a deliberate `PI_REVIEW_AGENT_DIR` override
+   and ignores ambient `PI_CODING_AGENT_DIR`. Use an override only for an existing,
+   deliberately selected Pi profile. Do not copy credentials to scratch storage
+   or disable authentication locks to work around a sandbox denial.
+
+   Classify failures from their actual cause:
+
+   - `EPERM`/`EACCES` creating `auth.json.lock` or `settings.json.lock` means local
+     state access is blocked. Authentication and model availability are still
+     untested; do not describe the account as logged out or recommend login.
+   - A provider DNS/connection failure is a network failure, not a code finding.
+   - A completed listing without the approved model is a model-availability
+     failure. Only an actual authentication failure warrants authentication repair.
+
+   Fix in-scope invocation errors and retry once in a fresh directory when the
+   cause has changed. If execution permissions are the barrier, use an escalation
+   only when the active tool policy permits it. With approvals disabled, give the
+   exact prepared command and required access for a later permitted run; do not
+   invent a permission question or repeat an unchanged failing call. A failed
+   invocation is not a review result. These environment limitations are not
+   caused by the skill's review gate.
+
+   For `codex` only, use tmux with a read-only review command. Generate the nonce
+   and full prompt from step 1. Write a runner using a quoted heredoc:
 
    ```bash
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    log_file="/tmp/${session}.out"
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
-   reviewer_agent="${REVIEWER_AGENT:?set REVIEWER_AGENT to the already-resolved codex or pi branch}"
-   reviewer_model="${REVIEWER_MODEL:-}"
+   reviewer_model="${REVIEWER_MODEL:-gpt-5.6-sol}"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]
-   set reviewer_agent $argv[3]
-   set reviewer_model $argv[4]
-   if test "$reviewer_agent" = auto
-       echo "auto must be resolved by the caller before the tmux-only runner" | tee "$log_file"
-       exit 64
+   set reviewer_model $argv[3]
+   set reasoning_effort high
+   if string match -q '*astra*' -- "$reviewer_model"
+       set reasoning_effort medium
    end
-   switch "$reviewer_agent"
-       case codex
-           test -n "$reviewer_model"; or set reviewer_model gpt-5.6-sol
-           # Effort follows the model generation, not its price: GPT-5.6 reviews
-           # at high, the newer Astra generation at medium.
-           set reasoning_effort high
-           if string match -q '*astra*' -- "$reviewer_model"
-               set reasoning_effort medium
-           end
-           codex -a never exec --sandbox read-only -m "$reviewer_model" \
-             -c "model_reasoning_effort=\"$reasoning_effort\"" - < "$prompt_file" 2>&1 | tee "$log_file"
-       case pi
-           test -n "$reviewer_model"; or set reviewer_model openai-codex/gpt-5.6-sol
-           set reviewer_model_lookup (string replace -r ':(off|minimal|low|medium|high|xhigh|max)$' '' -- "$reviewer_model")
-           if test "$reviewer_model_lookup" != openai-codex/gpt-5.6-sol
-               echo "unsupported Pi review model: $reviewer_model; mandatory Pi reviews use openai-codex/gpt-5.6-sol only (no Claude/Anthropic, local models, OpenRouter, or provider fallback)" | tee "$log_file"
-               exit 64
-           end
-           if not command -q pi
-               echo "pi reviewer unavailable: pi command not found on PATH" | tee "$log_file"
-               exit 127
-           end
-           set pi_models (env PI_CODING_AGENT_DIR=$HOME/.pi/agent PI_TELEMETRY=0 \
-             timeout 60 pi --list-models gpt 2>&1 | string collect)
-           set pi_models_status $pipestatus[1]
-           if test $pi_models_status -eq 124
-               echo "pi model-list preflight timed out after 60s; no review cycle was consumed. Verify the model directly in a PTY, then rerun a fresh runner." | tee "$log_file"
-               exit 69
-           end
-           if test $pi_models_status -ne 0
-               echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
-               printf "%s\n" "$pi_models" | tee -a "$log_file"
-               exit 69
-           end
-           if string match -q '*No models matching*' -- "$pi_models"; or string match -q '*No models available*' -- "$pi_models"; or string match -q '*No API key found*' -- "$pi_models"
-               if string match -q '*No models available*' -- "$pi_models"; or string match -q '*No API key found*' -- "$pi_models"
-                   echo "pi reviewer unavailable in this environment; direct pi may still work in another shell if that shell has provider auth" | tee "$log_file"
-               else
-                   echo "pi reviewer unavailable: requested model $reviewer_model is not listed by pi in this environment" | tee "$log_file"
-               end
-               printf "%s\n" "$pi_models" | tee -a "$log_file"
-               exit 69
-           end
-           if not string match -rq 'openai-codex[ /]+gpt-5\.6-sol' -- "$pi_models"
-               echo "pi reviewer unavailable: required model openai-codex/gpt-5.6-sol is not listed by pi in this environment" | tee "$log_file"
-               printf "%s\n" "$pi_models" | tee -a "$log_file"
-               exit 69
-           end
-           set reviewer_model "$reviewer_model_lookup"
-           env PI_CODING_AGENT_DIR=$HOME/.pi/agent PI_TELEMETRY=0 \
-             pi -p --no-session --no-context-files --approve \
-             --model "$reviewer_model" --thinking high \
-             --tools read,grep,find,ls @"$prompt_file" > "$log_file" 2>&1
-       case '*'
-           echo "unsupported REVIEWER_AGENT=$reviewer_agent" | tee "$log_file"
-           exit 64
-   end
+   codex -a never exec --sandbox read-only -m "$reviewer_model" \
+     -c "model_reasoning_effort=\"$reasoning_effort\"" - < "$prompt_file" 2>&1 | tee "$log_file"
    set statuses $pipestatus
    printf "\n[review pipeline statuses: %s]\n" "$statuses" | tee -a "$log_file"
    read -P "review finished; press Enter to close tmux pane"
    FISH
    tmux new-session -d -s "$session" -c "$PWD" \
-     "fish \"$runner_file\" \"$prompt_file\" \"$log_file\" \"$reviewer_agent\" \"$reviewer_model\""
+     "fish \"$runner_file\" \"$prompt_file\" \"$log_file\" \"$reviewer_model\""
    ```
 
-   For a Claude implementer, resolve `REVIEWER_AGENT=codex` unless another
-   different-family reviewer was explicitly requested. If no stable
-   noninteractive command is available for the requested reviewer, fall back to
-   an interactive tmux session only after telling the user.
-
-   The Pi branch deliberately uses `@"$prompt_file"` with direct log
-   redirection. Do not replace it with a positional prompt, stdin, or a `tee`
-   pipeline; those forms have produced empty-log wrapper hangs in observed runs.
-
-   The Pi branch rejects every model except `openai-codex/gpt-5.6-sol`, then
-   preflights that exact model before starting the review.
-   Exit `64` means the caller requested a forbidden Pi review model, exit `127`
-   means `pi` was not on PATH, and exit `69` means this environment could not
-   list the authenticated approved model. Report that blocker instead of
-   treating the review as queued or clean.
-
-   Both Pi commands pin `PI_CODING_AGENT_DIR` explicitly. Pi reads its
-   credential store from that directory, and a value exported by an unrelated
-   workspace has twice blocked the gate before any reviewer started — once by
-   loading another account so the approved model was not listed, once by
-   crashing on a foreign `auth.json` schema. Never let it be inherited.
-
-   The model-list preflight is wrapped in `timeout` because it is the step that
-   strands the gate: captured through Fish it has hung with an empty log while
-   the same listing returned immediately in a direct PTY. A preflight timeout
-   consumes no review cycle — verify the model directly, then start a fresh
-   runner at the review command itself. Do not extend the timeout to `pi -p`
-   itself; the harness deadlines own that. This uses GNU coreutils `timeout`
-   (exit `124`); on a host without it, bound the preflight some other way rather
-   than dropping the bound.
-
-   After any pre-sentinel failure, check for an orphaned `pi` process group
-   before retrying. Tmux exits without taking its child with it.
-
-4. For the Codex/Pi tmux branches only, poll the log file until the reviewer
-   prints the required completion sentinel. **How many matches to require
-   depends on the branch, and getting it wrong ends the poll on the prompt
-   instead of the report:**
-
-   - `pi -p` does not echo the prompt. One match is enough.
-   - `codex exec` **does** echo the full prompt into the log before running, so
-     the sentinel appears once as prompt text within seconds. Require at least
-     two matches, and treat a match inside the first few seconds as the echo.
+4. For the Codex tmux branch only, poll the log file until the reviewer
+   prints the required completion sentinel. `codex exec` echoes the full prompt
+   into the log before running, so the sentinel appears once as prompt text.
+   Require at least two matches; a prompt echo is not a completed review.
 
    Counting a fixed sentinel is only safe while the reviewed code cannot contain
    it. Reviewing these skills breaks that: their own docs quote the sentinel and
@@ -447,7 +400,7 @@ correctly and it hung only at exit.
    session ending does not help either when the runner deliberately holds the
    pane open; wait on the reviewer process when in doubt.
 
-   Substitute the branch's threshold for `2` below. The nonce makes the count
+   The nonce makes the count
    trustworthy; without it the threshold is guesswork. Use the `$nonce` from
    step 1 - the one already embedded in the prompt. Generating a fresh one here
    would grep for a sentinel the reviewer was never asked to print, and the loop
@@ -483,11 +436,11 @@ correctly and it hung only at exit.
    tmux kill-session -t "$session"
    ```
 
-   After any manual stop or tmux kill, verify that no Codex/Pi reviewer child
+   After any manual stop or tmux kill, verify that no Codex reviewer child
    remains. Tmux can exit while its child process continues; terminate the
    surviving reviewer process group before starting another cycle.
 
-   Claude lifecycle cleanup belongs exclusively to `claude-review-loop`; do not
+   Claude/Pi lifecycle cleanup belongs to their respective harnesses; do not
    recreate it with tmux polling.
 
 ## Wrapper Shell Hazards
@@ -530,7 +483,7 @@ output into Claude context. Do not add severity, read-only, tool, or output-form
 directives; the harness system instruction and JSON schema own those policies.
 The harness supplies repository evidence separately after the untrusted boundary.
 
-For Codex/Pi tmux prompts, say this is review rather than implementation and
+For Codex tmux prompts, say this is review rather than implementation and
 include:
 
 - review round number and whether it is a first review or re-review
@@ -544,7 +497,7 @@ include:
 - for a re-review, the explicit scope boundary: verify only the accepted prior
   findings and the repair delta unless the repair had broad, cross-cutting
   impact whose recorded rationale requires reopening the whole slice
-- when preparing Codex/Pi re-reviews, strip a quoted prior report's trailing
+- when preparing Codex re-reviews, strip a quoted prior report's trailing
   completion sentinel before adding it to the prompt
 - severity policy: Critical, Warning, Suggestion
 - instruction to verify docs/release notes when behavior or workflow changed
@@ -556,7 +509,7 @@ include:
   echoes the files it reads, so any repository that documents the sentinel puts
   extra copies in the log and ends the poll mid-review.
 
-For Codex/Pi, ask the reviewer to report:
+For Codex, ask the reviewer to report:
 
 - finding counts by severity for this round
 - accepted, fixed, rejected, and deferred finding counts when known
@@ -564,7 +517,7 @@ For Codex/Pi, ask the reviewer to report:
 - reviewer agent/model and implementer agent/model
 - whether subagents materially affected the review
 
-For Claude, do not add these fields to the strict review schema. Derive finding
+For Claude/Pi, do not add these fields to the strict review schema. Derive finding
 counts, cycle status, and tool/delegation evidence from `result.json`; track
 accepted/fixed/rejected/deferred counts in the driving agent's cycle summary.
 
