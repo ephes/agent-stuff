@@ -1337,6 +1337,18 @@ Promotion: incident — the existing finding-adjudication and primary-evidence
 rules apply; a valid reviewer verdict is evidence to assess, not an instruction
 to change correct behavior.
 
+## 2026-10-01 — An expired Codex login ends a review as PROVIDER_ERROR, not as a verdict
+
+Expected a high-effort gpt-6.1-sol review of a four-slice branch. Two attempts
+ended `PROVIDER_ERROR` ("workspace routing discovery unauthorized (401)");
+stderr showed an invalidated refresh token. The harness failed closed as
+designed, the gate was reported blocked with no model substitution, the owner
+re-ran `codex login`, and the next attempt produced a valid review. Reading
+stderr for the token error identified the cause faster than the summary line.
+
+Promotion: incident — the harness's failure classification and the
+blocked-gate rule already cover it; the fix was a re-login, not a rule.
+
 ## 2026-10-02 — CGMES retry-backoff review
 
 Expected: the read-count regression executes a listing before testing retry admission. Actual: the first test setup omitted the runtime issue clock, so the worker failed before the counted listing. Fixed the setup with the existing IssueMarkClock and reran against unchanged production code; the repeated-read assertion then reproduced the bug. Opus 5.5 suggested long-TTL and queued-ownership evidence; both added and the repair review closed clean. No new workflow rule is needed: the existing requirement to prove an injected failure executed covers this case.
