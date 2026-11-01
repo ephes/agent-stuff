@@ -20,7 +20,8 @@ from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
 from .states import (CLEAN, CRASHED, FAILED, INVALID, ISSUES,
-                     KIND_INTERRUPTED, KIND_LEDGER, KIND_PREFLIGHT)
+                     KIND_INTERRUPTED, KIND_LEDGER, KIND_PREFLIGHT, KIND_QUOTA,
+                     PROVIDER_ERROR)
 from .verdict import REVIEW_SCHEMA
 
 PROG = "codex-review-loop"
@@ -317,10 +318,11 @@ def _review_in_copy(args, copy, b, evidence, review_root, codex_bin, extra_env,
         return 3
 
 
-def main(argv=None, *, codex_bin=None, extra_env=None):
-    """Run one review. `codex_bin` and `extra_env` exist for the test entry
-    point alone; the installed `bin/codex-review-loop` passes neither, so no
-    environment variable can swap the reviewer in production."""
+def main(argv=None, *, codex_bin=None, extra_env=None, quota_check=None):
+    """Run one review. `codex_bin`, `extra_env` and `quota_check` exist for
+    the test entry point alone; the installed `bin/codex-review-loop` passes
+    none, so no environment variable can swap the reviewer in production, and
+    production always runs the Codex quota guard."""
     argv = sys.argv[1:] if argv is None else list(argv)
     try:
         # Inside the handler: building the parser validates the environment's
@@ -335,6 +337,29 @@ def main(argv=None, *, codex_bin=None, extra_env=None):
     if not _claim_run_dir(args.run_dir):
         return 2
     effort = args.effort
+    if quota_check is None and codex_bin is None:
+        from pathlib import Path
+
+        from . import env as env_mod
+        from . import quota as quota_mod
+
+        # The Codex home the review will actually spend against
+        # (CODEX_REVIEW_HOME or ~/.codex), never an unrelated CODEX_HOME.
+        def quota_check():
+            return quota_mod.check(home=Path(env_mod.codex_home()))
+    if quota_check is not None:
+        # Codex does not refuse once the subscription window is used up; it
+        # spends paid credits. Fail closed before anything is prepared.
+        try:
+            quota = quota_check()
+        except ValueError as exc:
+            return _fail(args.run_dir, model, f"Codex quota guard: {exc}",
+                         state=INVALID, effort=effort,
+                         access_program=args.cyber_access_program)
+        if quota.blocked:
+            return _fail(args.run_dir, model, quota.message,
+                         state=PROVIDER_ERROR, kind=KIND_QUOTA, effort=effort,
+                         access_program=args.cyber_access_program)
     review_root = os.path.join(args.run_dir, REVIEW_ROOT_NAME)
     os.mkdir(review_root, 0o700)
     bundle_path = os.path.join(review_root, BUNDLE_NAME)

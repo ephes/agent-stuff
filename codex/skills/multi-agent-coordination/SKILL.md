@@ -75,6 +75,14 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   (`get_usage`), then `work usage report --provider claude --window "Weekly · all models" --used <pct> --resets-at <iso>
   --observed-at now --source "claude-desktop get_usage"`. Codex: `work usage
   collect-codex`. Stale usage in the work app is a coordinator bug.
+- Check both weekly windows **before every dispatch** and before any Codex
+  call (reviews included), not only when handling results. Codex keeps running
+  on paid credits once its window is full, so "the call worked" proves nothing.
+  `tools/codex-quota-guard/bin/codex-quota-guard` exits 3 while the Codex limit
+  is used up; codex-review-loop and pi-review-loop run it themselves, and Codex
+  worker launchers must run it first. With Codex used up, dispatch Claude
+  workers, and ask the owner how to gate reviews (there is no different-family
+  reviewer then).
 
 ## Periodic checks
 

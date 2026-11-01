@@ -13,7 +13,7 @@ from . import model as model_mod
 from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
 from .runner import run_review
-from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
+from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID, PROVIDER_ERROR
 
 # The bundle's own boundary constant, so the instruction cannot name a heading
 # the bundle never writes. Pi runs with --no-context-files, so this harness has
@@ -161,7 +161,26 @@ def _pi_cmd(model, bundle_path, delta=False, effort=None, baseline_tree=None):
     ]
 
 
-def main(argv=None):
+QUOTA_PREFIX = "Codex quota guard: "
+
+
+def _quota_block():
+    """(state, message) while the review must not start, else None: the
+    Codex quota guard blocks while Pi's openai-codex model would spend paid
+    credits (PROVIDER_ERROR); a bad guard setting is INVALID. Every message
+    starts with QUOTA_PREFIX. The fake reviewer used by the tests skips the
+    guard, like the model check."""
+    if os.environ.get("PI_REVIEW_FAKE_CMD"):
+        return None
+    from . import quota as quota_mod
+    try:
+        status = quota_mod.check()
+    except ValueError as exc:
+        return INVALID, QUOTA_PREFIX + str(exc)
+    return (PROVIDER_ERROR, QUOTA_PREFIX + status.message) if status.blocked else None
+
+
+def main(argv=None, *, quota_block=None):
     args = _build_parser().parse_args(argv)
     os.makedirs(args.run_dir, exist_ok=True)
     existing = [name for name in os.listdir(args.run_dir)]
@@ -175,6 +194,17 @@ def main(argv=None):
     os.makedirs(os.path.dirname(args.lock_dir) or ".", exist_ok=True)
 
     model = args.model or "unresolved"
+    blocked = (quota_block or _quota_block)()
+    if blocked:
+        # Pi reviews on the openai-codex subscription, which spends paid
+        # credits instead of refusing once its window is used up.
+        state, message = blocked
+        print(f"pi-review-loop: {message}", file=sys.stderr)
+        now = time.monotonic()
+        ReviewResult(state=state, items=[], model=model, cost=None,
+                     started_at=now, ended_at=now, error=message).write(
+                         os.path.join(args.run_dir, "result.json"))
+        return 2
     bundle_path = os.path.join(args.run_dir, "review-bundle.md")
     try:
         b = bundle_mod.build_bundle(

@@ -96,6 +96,12 @@ implement and fix; Pi reviews with fresh context.
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
      stall or an oversized bundle. Fix the cause and re-run. Never treat a failed
      review as a pass.
+     A result whose `error` starts with `Codex quota guard: ` comes from the
+     Codex quota guard (`PROVIDER_ERROR`: limit used up; `INVALID`: a bad
+     `CODEX_QUOTA_MAX_PERCENT`; see `tools/codex-quota-guard`). Pi reviews on the
+     openai-codex subscription, which spends paid credits instead of refusing
+     once its window is full, so the harness refuses before Pi starts. Stop and
+     report it; `CODEX_QUOTA_ALLOW_CREDITS=1` (owner decision only) overrides.
      `pi unavailable` is a wrapper diagnosis, not proof of missing credentials.
      Read the underlying error. `EPERM`/`EACCES` on `auth.json.lock` or
      `settings.json.lock` means local state access is blocked before model/auth

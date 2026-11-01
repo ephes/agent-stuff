@@ -75,6 +75,20 @@ That is a blocked review, not a verdict. Rerun with
 requested security review; otherwise stop and report the block. A refusal
 under Daybreak itself also means stop and report.
 
+## Codex quota guard
+
+Codex does not refuse once the subscription's rate-limit window is used up
+when the account has paid credits: the review simply runs and spends credits.
+Before preparing anything, the harness reads the newest rate-limit reading
+from the session records of the Codex home the review uses (`CODEX_REVIEW_HOME`
+or `~/.codex`; `tools/codex-quota-guard`, the same source as
+`work usage collect-codex`) and fails closed while a window is at 100% and has
+not reset: `PROVIDER_ERROR` with `failure_kind` `quota`, exit `2`, Codex never
+started. That is a blocked review, not a verdict: stop and report it; do not
+substitute another reviewer. The owner may allow a credit-funded run with
+`CODEX_QUOTA_ALLOW_CREDITS=1`; `CODEX_QUOTA_MAX_PERCENT` lowers the threshold.
+With no reading at all (a fresh machine) the guard does not block.
+
 ## The loop (you drive this)
 
 1. Make sure the change is in the working tree (staged, unstaged, untracked).
@@ -128,7 +142,7 @@ under Daybreak itself also means stop and report.
    - `1` → ISSUES. Verify each finding at its source before acting on it.
    - `2` → failed review: `INVALID`, `CRASHED`, `STALLED`, or `PROVIDER_ERROR`,
      refined by `failure_kind` (`model_mismatch`, `model_unproven`,
-     `forbidden_tool`, `provider`, `cyber_policy`, `stall`, `deadline`,
+     `forbidden_tool`, `provider`, `quota`, `cyber_policy`, `stall`, `deadline`,
      `crash`, `verdict`, `preflight`, `interrupted`, `ledger`). This is never a pass. `ledger`
      means the review ran but its round could not be recorded under
      `--slice-id`; its findings stay in `items`, but a round missing from the

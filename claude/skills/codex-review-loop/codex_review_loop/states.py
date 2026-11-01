@@ -28,4 +28,5 @@ KIND_CRASH = "crash"                        # exited without a completed turn
 KIND_VERDICT = "verdict"                    # final message not the schema
 KIND_PREFLIGHT = "preflight"                # failed before Codex was started
 KIND_INTERRUPTED = "interrupted"            # Ctrl-C during the review
+KIND_QUOTA = "quota"                        # Codex limit used up; would spend credits
 KIND_LEDGER = "ledger"                      # the slice round could not be recorded
