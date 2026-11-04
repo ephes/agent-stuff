@@ -253,6 +253,17 @@ class TestToolchainPaths(unittest.TestCase):
         self.assertEqual(self.paths(native, which={"uv": uv}.get),
                          [native, uv])
 
+    def test_a_tool_binary_found_on_a_relative_path_is_made_absolute(self):
+        native = self.make_file("opt", "codex")
+        uv = self.make_file("home", ".local", "bin", "uv")
+        cwd = os.getcwd()
+        os.chdir(os.path.join(self.home, ".local"))
+        try:
+            paths = self.paths(native, which={"uv": "bin/uv"}.get)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(paths, [native, uv])
+
     def test_a_symlinked_tool_binary_is_not_granted(self):
         # The sandbox would mount only the target, so `uv` would still not
         # be found by name.

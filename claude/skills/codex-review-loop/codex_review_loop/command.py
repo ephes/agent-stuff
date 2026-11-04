@@ -169,7 +169,7 @@ def toolchain_paths(codex_bin, *, which=shutil.which, isdir=os.path.isdir,
     for name in TOOL_BINARIES:
         found = which(name)
         if found and os.path.realpath(found) == os.path.abspath(found):
-            extra.append(found)
+            extra.append(os.path.abspath(found))
     if os.path.islink(resolv_conf):
         target = os.path.realpath(resolv_conf)
         if os.path.isfile(target):
