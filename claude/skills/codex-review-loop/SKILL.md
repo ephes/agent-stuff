@@ -255,10 +255,22 @@ and as `review_copy.removed: false` in `result.json`; the verdict and the slice
 ledger round are recorded either way.
 
 The harness does not use `--sandbox`. It selects a named Codex permission
-profile with the filesystem entries `:minimal` = read; `/tmp`, `/private/tmp`,
-`/private/var/folders` = deny; the toolchain prefixes that exist
+profile with the filesystem entries `:minimal` = read; on macOS `/tmp`,
+`/private/tmp`, `/private/var/folders` = deny (on Linux `:minimal` admits no
+`/tmp` - the sandbox mounts an empty one - and Codex 0.162.1 drops a `read`
+entry beneath a denied path, which would hide the review root and the
+object store of a run directory under `/tmp`, so nothing is denied there);
+the toolchain prefixes that exist
 (`/opt/homebrew`, `/usr/local`, `/nix`, `/Library/Developer/CommandLineTools`)
-= read; the review root = read; the source repository's object store = read;
+= read; on Linux, outside those prefixes, three resolved paths = read: the install
+root of the Codex binary the harness runs (on Linux bubblewrap re-executes
+that binary inside the sandbox, so without it every command fails; the root
+is the directory holding `codex-package.json`, e.g.
+`~/.local/share/mise/installs/codex/<version>`, otherwise only the binary
+itself), the `uv` on PATH as a single file (e.g. `~/.local/bin/uv`, never its
+directory), and the target of a symlinked `/etc/resolv.conf` (with
+systemd-resolved, `/run/systemd/resolve/stub-resolv.conf`; without it no name
+resolves); the review root = read; the source repository's object store = read;
 and `<run-dir>/workspace` (the copy, a scratch `home/` and a scratch `tmp/`) =
 write. Network is enabled. The reviewer's commands run with `HOME` and
 `TMPDIR` pointed at the scratch `home/` and `tmp/`.
@@ -272,10 +284,12 @@ write. Network is enabled. The reviewer's commands run with `HOME` and
 - read the review root: `review-bundle.md` and any `evidence/` files;
 - read the source repository's object store — the history, which the copy
   already shows;
-- read what `:minimal` admits on macOS (system locations such as `/usr/bin`,
-  `/etc`, `/Library/Preferences`, `/Applications`) and the toolchain prefixes
-  above. These hold installed software, not repository or user data, but they
-  are not empty;
+- read what `:minimal` admits (on macOS system locations such as `/usr/bin`,
+  `/etc`, `/Library/Preferences`, `/Applications`; on Linux `/usr`, `/etc`,
+  `/lib`, which hold git, python3 and just) and the toolchain paths above.
+  These hold installed software, not repository or user data, but they are
+  not empty. Other mise installs (node, pi, sops), the rest of `~/.local` and
+  `~/.config` stay unreadable;
 - reach the network, so it can fetch packages — and could send what it reads
   anywhere. The copy is the user's code; that was decided deliberately;
 - in its model context, not through tools: the review instruction, the stdin
@@ -284,8 +298,9 @@ write. Network is enabled. The reviewer's commands run with `HOME` and
   `--ignore-user-config` and `project_doc_max_bytes=0`. Keep secrets out of that
   file. The repository's own `AGENTS.md` is not injected.
 
-**The reviewer cannot** (each observed as `Operation not permitted`): read the
-source worktree itself, including its ignored and untracked files such as
+**The reviewer cannot** (each observed as `Operation not permitted` on macOS;
+on Linux bubblewrap does not mount what is not granted, so each reads as `No
+such file or directory`): read the source worktree itself, including its ignored and untracked files such as
 `.env`; write to it or to its `.git`; read anything else in the user's home —
 other projects, `~/.ssh`, `~/.codex`, `~/.gitconfig`; read `/tmp`,
 `/private/tmp`, or the rest of `$TMPDIR` (`/private/var/folders/...`), even

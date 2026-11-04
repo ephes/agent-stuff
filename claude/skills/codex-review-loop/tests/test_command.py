@@ -3,6 +3,7 @@ import tempfile
 import tomllib
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 from codex_review_loop import command
 
@@ -26,7 +27,8 @@ class TestCommand(unittest.TestCase):
         self.cmd = command.codex_cmd(
             codex_bin="codex", review_root=self.root, copy=self.copy,
             schema_path="/s.json", last_message_path="/m.json",
-            instruction='Say "hi"\nthen \\ stop', toolchain=["/opt/tools"])
+            instruction='Say "hi"\nthen \\ stop', toolchain=["/opt/tools"],
+            platform="darwin")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -57,6 +59,17 @@ class TestCommand(unittest.TestCase):
         })
         self.assertNotIn(os.path.expanduser("~"), fs)
 
+    def test_linux_denies_no_temporary_directory(self):
+        # `:minimal` admits no `/tmp` there, and a deny would drop the read
+        # grants for a review root and object store beneath it.
+        profile = command.filesystem_profile(
+            review_root=self.root, workspace_root=self.copy.root,
+            source_objects="/o", codex_bin="/usr/bin/codex",
+            toolchain=["/opt/tools"], platform="linux")
+        fs = tomllib.loads("fs=" + profile)["fs"]
+        self.assertNotIn("deny", fs.values())
+        self.assertEqual(fs[self.root], "read")
+
     def test_reviewer_starts_in_the_copy_with_a_scratch_home(self):
         c = self.cmd
         self.assertEqual(c[c.index("-C") + 1], self.copy.path)
@@ -82,9 +95,34 @@ class TestCommand(unittest.TestCase):
     def test_only_existing_toolchain_prefixes_are_granted(self):
         profile = command.filesystem_profile(
             review_root=self.root, workspace_root=self.copy.root,
-            source_objects="/o", toolchain=None)
+            source_objects="/o", codex_bin="/usr/bin/codex", toolchain=None)
         for path in command.TOOLCHAIN_READ_PATHS:
             self.assertEqual(json_key(path) in profile, os.path.isdir(path))
+
+    def test_default_toolchain_includes_the_codex_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            native = self._package_install(os.path.realpath(tmp))
+            profile = command.filesystem_profile(
+                review_root=self.root, workspace_root=self.copy.root,
+                source_objects="/o", codex_bin=native, toolchain=None,
+                platform="linux")
+            root = os.path.join(os.path.realpath(tmp), "installs", "codex",
+                                "0.162.1")
+        fs = tomllib.loads("fs=" + profile)["fs"]
+        self.assertEqual(fs[root], "read")
+
+    @staticmethod
+    def _package_install(base):
+        """Codex's package layout as mise installs it, behind a `latest` link."""
+        root = os.path.join(base, "installs", "codex", "0.162.1")
+        os.makedirs(os.path.join(root, "bin"))
+        with open(os.path.join(root, command.CODEX_PACKAGE_MANIFEST), "w") as fh:
+            fh.write("{}")
+        native = os.path.join(root, "bin", "codex")
+        open(native, "w").close()
+        link = os.path.join(base, "installs", "codex", "latest")
+        os.symlink("0.162.1", link)
+        return os.path.join(link, "bin", "codex")
 
     def test_pins_model_effort_profile_and_stdin(self):
         c = self.cmd
@@ -148,6 +186,106 @@ class TestCommand(unittest.TestCase):
                         "unbounded_connection_retries"):
             self.assertIn(feature, disabled)
         self.assertNotIn("code_mode_host", disabled)
+
+
+
+class TestToolchainPaths(unittest.TestCase):
+    """The readable toolchain beyond `:minimal`: what Codex and the reviewer's
+    tools need on a machine whose software is not all under `/opt/homebrew`
+    or `/usr/local` - a Linux host with Codex from mise and uv in
+    `~/.local/bin`."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.realpath(self.tmp.name)
+        self.home = os.path.join(self.base, "home")
+        os.mkdir(self.home)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def make_file(self, *parts):
+        path = os.path.join(self.base, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+        return path
+
+    def package(self, root):
+        """A Codex package install under `root`; returns its `latest` link
+        to the binary."""
+        native = self.make_file(root, "0.162.1", "bin", "codex")
+        self.make_file(root, "0.162.1", command.CODEX_PACKAGE_MANIFEST)
+        os.symlink("0.162.1", os.path.join(self.base, root, "latest"))
+        return os.path.join(self.base, root, "latest", "bin", "codex")
+
+    def paths(self, codex_bin, *, which=lambda name: None, prefixes=(),
+              resolv_conf="/nonexistent/resolv.conf", platform="linux"):
+        with mock.patch.object(command, "TOOLCHAIN_READ_PATHS", prefixes):
+            return command.toolchain_paths(
+                codex_bin, which=which, resolv_conf=resolv_conf,
+                platform=platform)
+
+    def test_macos_grants_only_the_prefixes(self):
+        link = self.package("home/.local/share/mise/installs/codex")
+        uv = self.make_file("home", ".local", "bin", "uv")
+        self.assertEqual(
+            self.paths(link, which={"uv": uv}.get, platform="darwin"), [])
+
+    def test_a_package_install_grants_its_resolved_root(self):
+        link = self.package("home/.local/share/mise/installs/codex")
+        root = os.path.join(self.home, ".local/share/mise/installs/codex/0.162.1")
+        self.assertEqual(self.paths(link), [root])
+
+    def test_a_lone_binary_grants_only_itself(self):
+        native = self.make_file("home", ".local", "bin", "codex")
+        self.make_file("home", ".local", "bin", "secret-helper")
+        self.assertEqual(self.paths(native), [native])
+
+    def test_a_manifest_at_the_home_directory_grants_only_the_binary(self):
+        native = self.make_file("home", "bin", "codex")
+        self.make_file("home", command.CODEX_PACKAGE_MANIFEST)
+        with mock.patch.dict(os.environ, {"HOME": self.home}):
+            self.assertEqual(self.paths(native), [native])
+
+    def test_tool_binaries_on_path_grant_their_resolved_file(self):
+        native = self.make_file("opt", "codex")
+        uv = self.make_file("home", ".local", "share", "uv-0.13", "uv")
+        link = os.path.join(self.home, ".local", "bin", "uv")
+        os.makedirs(os.path.dirname(link))
+        os.symlink(uv, link)
+        found = {"uv": link}
+        self.assertEqual(self.paths(native, which=found.get), [native, uv])
+
+    def test_paths_under_a_granted_prefix_are_not_repeated(self):
+        prefix = os.path.join(self.base, "brew")
+        native = self.make_file("brew", "bin", "codex")
+        uv = self.make_file("brew", "bin", "uv")
+        self.assertEqual(
+            self.paths(native, which={"uv": uv}.get, prefixes=(prefix,)),
+            [prefix])
+
+    def test_a_symlinked_resolv_conf_grants_its_target(self):
+        native = self.make_file("opt", "codex")
+        stub = self.make_file("run", "systemd", "resolve", "stub-resolv.conf")
+        conf = os.path.join(self.base, "etc", "resolv.conf")
+        os.makedirs(os.path.dirname(conf))
+        os.symlink(stub, conf)
+        self.assertEqual(self.paths(native, resolv_conf=conf), [native, stub])
+
+    def test_a_plain_resolv_conf_adds_nothing(self):
+        native = self.make_file("opt", "codex")
+        conf = self.make_file("etc", "resolv.conf")
+        self.assertEqual(self.paths(native, resolv_conf=conf), [native])
+
+    def test_nothing_in_the_home_directory_is_granted_wholesale(self):
+        link = self.package("home/.local/share/mise/installs/codex")
+        uv = self.make_file("home", ".local", "bin", "uv")
+        for path in self.paths(link, which={"uv": uv}.get):
+            with self.subTest(path=path):
+                self.assertNotIn(path, (
+                    self.home, os.path.join(self.home, ".local"),
+                    os.path.join(self.home, ".local", "bin"),
+                    os.path.join(self.home, ".local/share/mise/installs")))
 
 
 if __name__ == "__main__":

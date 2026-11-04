@@ -170,7 +170,9 @@ class TestLiveBoundary(unittest.TestCase):
         self.assertIn(self.source_write, calls,
                       "canary inconclusive: no write into the source recorded")
         self.assertFalse(os.path.exists(self.source_write))
-        self.assertIn("Operation not permitted", record)
+        # Bubblewrap does not mount what is denied; Seatbelt refuses it.
+        self.assertIn("Operation not permitted" if sys.platform == "darwin"
+                      else "No such file or directory", record)
         self.assertIn("printenv", calls, "canary inconclusive: no env read recorded")
         # The run neither loaded the copy's project configuration nor left a
         # trust entry for the copy in the user's Codex configuration.

@@ -8,13 +8,18 @@ the installed Codex (0.158.0) rather than assumed:
   the directory holding the copy, a scratch home and a scratch temporary
   directory is writable, the harness-owned review root with the bundle is
   readable, and so is the source repository's object store, which the copy
-  borrows its history from. Beyond that only macOS platform paths
-  (`:minimal`) and the toolchain prefixes that exist on this machine
-  (`/opt/homebrew`, `/usr/local`, ...) are readable, so tests can run. The
-  user's home - the source worktree, other projects, `~/.ssh`, `~/.codex` -
-  `/tmp`, `/private/tmp` and `/private/var/folders` stay unreadable. A more
-  specific entry wins over a broader `deny`, which is what lets a run
-  directory inside a temporary directory stay usable. Network is enabled, so a
+  borrows its history from. Beyond that only platform paths (`:minimal`:
+  on Linux `/usr`, `/etc`, `/lib`, ...) and the toolchain that exists on this
+  machine are readable, so tests can run: the prefixes `/opt/homebrew`,
+  `/usr/local`, ..., plus, on Linux and outside those, the Codex install
+  the harness runs, the `uv` on PATH and the target of a symlinked
+  `/etc/resolv.conf` (see `toolchain_paths`). The user's home - the source
+  worktree, other projects, `~/.ssh`, `~/.codex` - and the temporary
+  directories stay unreadable: on macOS `/tmp`, `/private/tmp` and
+  `/private/var/folders` are denied explicitly, on Linux `:minimal` never
+  admits `/tmp` (see `denied_read_paths`). On macOS a more specific entry
+  wins over a broader `deny`, which is what lets a run directory inside a
+  temporary directory stay usable. Network is enabled, so a
   test run can fetch its dependencies.
 - The reviewer's commands see `HOME` and `TMPDIR` pointed into that scratch
   space: the real home is unreadable, and git refuses to run when it cannot
@@ -46,6 +51,8 @@ the installed Codex (0.158.0) rather than assumed:
 """
 import json
 import os
+import shutil
+import sys
 
 REVIEW_MODEL = "gpt-6.1-sol"
 REVIEW_EFFORT = "high"
@@ -95,11 +102,80 @@ DISABLED_FEATURES = (
 #: them.
 DENIED_READ_PATHS = ("/tmp", "/private/tmp", "/private/var/folders")
 
+
+def denied_read_paths(platform=None):
+    """`DENIED_READ_PATHS` on macOS, nothing elsewhere. On Linux `:minimal`
+    does not admit `/tmp` - the sandbox mounts an empty one holding only the
+    granted paths - and a `deny` there would only do harm: Codex 0.162.1
+    drops a `read` entry beneath a denied path (a `write` entry survives), so
+    the review root and the source's object store under a `/tmp` run
+    directory became unreadable."""
+    platform = sys.platform if platform is None else platform
+    return DENIED_READ_PATHS if platform == "darwin" else ()
+
 #: Toolchain prefixes made readable when they exist, so the reviewer can run
 #: git, the project's test runner and its package manager. They hold installed
 #: software, not user data; `:minimal` alone admits none of them.
 TOOLCHAIN_READ_PATHS = ("/opt/homebrew", "/usr/local", "/nix",
                         "/Library/Developer/CommandLineTools")
+
+#: The manifest of Codex's self-contained install layout (`bin/codex`,
+#: `codex-path/rg`, `codex-resources/bwrap`), as mise and the release archive
+#: lay it out under `~/.local/share/mise/installs/codex/<version>`.
+CODEX_PACKAGE_MANIFEST = "codex-package.json"
+#: Tools the reviewer runs by name that may be installed as a lone binary in
+#: the user's home (`~/.local/bin/uv`). Only the resolved file is granted,
+#: never its directory.
+TOOL_BINARIES = ("uv",)
+RESOLV_CONF = "/etc/resolv.conf"
+
+
+def _covered(path, prefixes):
+    return any(os.path.commonpath((prefix, path)) == prefix
+               for prefix in prefixes)
+
+
+def codex_install_path(codex_bin, *, home="~"):
+    """What must be readable for Codex to run inside its own sandbox: on
+    Linux, bubblewrap re-executes the Codex binary in there, so an
+    unreadable binary fails every command. The install root when the binary
+    sits in Codex's package layout - unless that root is the home directory
+    or holds it - otherwise only the binary itself."""
+    real = os.path.realpath(codex_bin)
+    root = os.path.dirname(os.path.dirname(real))
+    home = os.path.realpath(os.path.expanduser(home))
+    if (os.path.isfile(os.path.join(root, CODEX_PACKAGE_MANIFEST))
+            and not _covered(home, [root])):
+        return root
+    return real
+
+
+def toolchain_paths(codex_bin, *, which=shutil.which, isdir=os.path.isdir,
+                    resolv_conf=RESOLV_CONF, platform=None):
+    """The readable toolchain: the prefixes that exist, then, off macOS,
+    what lies outside them and is needed to run - the Codex install, the
+    tool binaries on PATH, and the file a symlinked `/etc/resolv.conf`
+    points to (systemd-resolved keeps it under `/run`, which `:minimal`
+    does not admit, and without it no name resolves). Every entry is a
+    resolved path; nothing is granted because it shares a directory with
+    one. On macOS the prefixes alone are what the canary verified."""
+    platform = sys.platform if platform is None else platform
+    paths = [os.path.realpath(p) for p in TOOLCHAIN_READ_PATHS if isdir(p)]
+    if platform == "darwin":
+        return paths
+    extra = [codex_install_path(codex_bin)]
+    for name in TOOL_BINARIES:
+        found = which(name)
+        if found:
+            extra.append(os.path.realpath(found))
+    if os.path.islink(resolv_conf):
+        target = os.path.realpath(resolv_conf)
+        if os.path.isfile(target):
+            extra.append(target)
+    for path in extra:
+        if not _covered(path, paths):
+            paths.append(path)
+    return paths
 
 
 def toml_string(value):
@@ -108,11 +184,11 @@ def toml_string(value):
 
 
 def filesystem_profile(*, review_root, workspace_root, source_objects,
-                       toolchain=None):
+                       codex_bin, toolchain=None, platform=None):
     if toolchain is None:
-        toolchain = [p for p in TOOLCHAIN_READ_PATHS if os.path.isdir(p)]
+        toolchain = toolchain_paths(codex_bin, platform=platform)
     entries = [(":minimal", "read")]
-    entries += [(path, "deny") for path in DENIED_READ_PATHS]
+    entries += [(path, "deny") for path in denied_read_paths(platform)]
     entries += [(os.path.realpath(path), "read") for path in toolchain]
     entries.append((os.path.realpath(review_root), "read"))
     entries.append((os.path.realpath(source_objects), "read"))
@@ -130,7 +206,7 @@ def project_trust(path):
 
 def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
               instruction, effort=REVIEW_EFFORT, model=None,
-              access_program=None, toolchain=None):
+              access_program=None, toolchain=None, platform=None):
     """`copy` is the prepared `workspace.ReviewCopy`; the reviewer starts in
     its worktree. `model` defaults to the one `access_program` requires and
     must equal it."""
@@ -144,7 +220,8 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
                          f"{access_program!r}; it requires {required!r}")
     profile = filesystem_profile(
         review_root=review_root, workspace_root=copy.root,
-        source_objects=copy.source_objects, toolchain=toolchain)
+        source_objects=copy.source_objects, codex_bin=codex_bin,
+        toolchain=toolchain, platform=platform)
     cmd = [
         codex_bin, "-a", "never", "exec",
         "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
