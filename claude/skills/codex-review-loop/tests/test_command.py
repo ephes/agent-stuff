@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import tomllib
 import unittest
@@ -28,7 +29,7 @@ class TestCommand(unittest.TestCase):
             codex_bin="codex", review_root=self.root, copy=self.copy,
             schema_path="/s.json", last_message_path="/m.json",
             instruction='Say "hi"\nthen \\ stop', toolchain=["/opt/tools"],
-            platform="darwin")
+            platform="darwin", user_temp=None)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -304,6 +305,119 @@ class TestToolchainPaths(unittest.TestCase):
                     self.home, os.path.join(self.home, ".local"),
                     os.path.join(self.home, ".local", "bin"),
                     os.path.join(self.home, ".local/share/mise/installs")))
+
+
+def glob_regex(glob):
+    """The Codex glob subset the carve-out uses: `*`, `?`, `[!...]` (a
+    leading `-` literal) and a trailing `/**` for the whole subtree."""
+    subtree = glob.endswith("/**")
+    body = glob[:-3] if subtree else glob
+    out, i = "", 0
+    while i < len(body):
+        c = body[i]
+        if c == "*":
+            out += "[^/]*"
+        elif c == "?":
+            out += "[^/]"
+        elif c == "[":
+            end = body.index("]", i)
+            chars = body[i + 2:end]
+            assert body[i + 1] == "!" and "-" not in chars[1:], glob
+            out += "[^/" + re.escape(chars) + "]"
+            i = end
+        else:
+            out += re.escape(c)
+        i += 1
+    return re.compile(out + ("/.+" if subtree else "") + r"\Z")
+
+
+class TestPowsyblTempCarveOut(unittest.TestCase):
+    T = "/private/var/folders/ab/cd-ef_12/T"
+
+    def classify(self, entries, rel):
+        path = f"{self.T}/{rel}"
+        denies = [g for g, access in entries if access == "deny"]
+        return "deny" if any(glob_regex(g).match(path) for g in denies) else "allow"
+
+    def test_only_itools_names_stay_reachable(self):
+        entries = command.powsybl_temp_entries(
+            self.T, granted=["/private/tmp/run/workspace", "/src/.git/objects"])
+        self.assertEqual(entries[0], (self.T, "write"))
+        self.assertEqual({a for _, a in entries[1:]}, {"deny"})
+        for rel in ("itools_common_123", "itools_common_1/sub/f", "itools_"):
+            with self.subTest(allowed=rel):
+                self.assertEqual(self.classify(entries, rel), "allow")
+        for rel in ("secret.txt", "dir/nested/secret", ".hidden", "-x", "i",
+                    "it", "itools", "itools/x", "itoolsX", "itoolsX/y",
+                    "ITOOLS_x", "Itools_x", "tmp.Ab", "tmp.Ab/run/workspace"):
+            with self.subTest(denied=rel):
+                self.assertEqual(self.classify(entries, rel), "deny")
+
+    def test_no_carve_out_when_a_granted_path_is_inside(self):
+        # A deny glob would beat the grant, and carving the run directory out
+        # name by name overflows the sandbox compiler, so the temp dir stays
+        # denied as a whole.
+        for granted in ([f"{self.T}/tmp.Ab/run/workspace"],
+                        ["/private/tmp/run/workspace", f"{self.T}/repo/.git/objects"],
+                        [self.T]):
+            with self.subTest(granted=granted):
+                self.assertEqual(
+                    command.powsybl_temp_entries(self.T, granted=granted), [])
+        profile = command.filesystem_profile(
+            codex_bin="codex", platform="darwin",
+            review_root=f"{self.T}/tmp.x/run/review-root",
+            workspace_root=f"{self.T}/tmp.x/run/workspace",
+            source_objects="/o", toolchain=[], user_temp=self.T)
+        fs = tomllib.loads("fs=" + profile)["fs"]
+        self.assertNotIn(self.T, fs)
+        self.assertEqual(fs["/private/var/folders"], "deny")
+
+    def test_fails_closed_on_names_a_glob_could_misread(self):
+        for temp in ("/a/T[1]", "/a b/T", "/a/T*", "relative/T", None, ""):
+            with self.subTest(temp=temp):
+                self.assertEqual(command.powsybl_temp_entries(temp), [])
+
+    def test_profile_detects_the_user_temp_dir_by_default(self):
+        with mock.patch.object(command, "darwin_user_temp_dir",
+                               return_value=self.T):
+            profile = command.filesystem_profile(
+                codex_bin="codex", platform="darwin",
+                review_root="/r", workspace_root="/w", source_objects="/o",
+                toolchain=[])
+        fs = tomllib.loads("fs=" + profile)["fs"]
+        self.assertEqual(fs[self.T], "write")
+        self.assertEqual(fs[f"{self.T}/[!i]*"], "deny")
+        self.assertEqual(fs["/private/var/folders"], "deny")
+        none = command.filesystem_profile(
+            codex_bin="codex", platform="darwin",
+            review_root="/r", workspace_root="/w", source_objects="/o",
+            toolchain=[], user_temp=None)
+        self.assertNotIn(self.T, none)
+
+    def test_every_generated_entry_is_valid_toml(self):
+        profile = command.filesystem_profile(
+            codex_bin="codex", platform="darwin",
+            review_root="/r", workspace_root="/w",
+            source_objects="/o", toolchain=[], user_temp=self.T)
+        self.assertIn(f"{self.T}/[!i]*", tomllib.loads("fs=" + profile)["fs"])
+
+    def test_a_linux_profile_gets_no_carve_out(self):
+        with mock.patch.object(command, "darwin_user_temp_dir",
+                               return_value=self.T):
+            profile = command.filesystem_profile(
+                codex_bin="codex", platform="linux", review_root="/r",
+                workspace_root="/w", source_objects="/o", toolchain=[])
+        self.assertNotIn(self.T, profile)
+
+    def test_user_temp_dir_is_macos_only(self):
+        with mock.patch.object(command.sys, "platform", "linux"):
+            self.assertIsNone(command.darwin_user_temp_dir())
+
+    @unittest.skipUnless(command.sys.platform == "darwin", "macOS only")
+    def test_user_temp_dir_is_the_real_per_user_dir(self):
+        temp = command.darwin_user_temp_dir()
+        self.assertTrue(temp.startswith("/private/var/folders/"), temp)
+        self.assertEqual(temp, os.path.realpath(temp))
 
 
 if __name__ == "__main__":

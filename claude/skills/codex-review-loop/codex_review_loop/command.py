@@ -20,7 +20,11 @@ the installed Codex (0.158.0) rather than assumed:
   admits `/tmp` (see `denied_read_paths`). On macOS a more specific entry
   wins over a broader `deny`, which is what lets a run directory inside a
   temporary directory stay usable. Network is enabled, so a
-  test run can fetch its dependencies.
+  test run can fetch its dependencies. One carve-out on macOS: the user's own
+  temporary directory (`/private/var/folders/../T`) is writable for names
+  starting with `itools_` only, because PyPowSyBl ignores `TMPDIR` and
+  `HOME` and creates its scratch directories there (see
+  `powsybl_temp_entries`); every other name in it stays denied.
 - The reviewer's commands see `HOME` and `TMPDIR` pointed into that scratch
   space: the real home is unreadable, and git refuses to run when it cannot
   read `~/.gitconfig`.
@@ -185,12 +189,89 @@ def toml_string(value):
     return json.dumps(value, ensure_ascii=True)
 
 
+#: The name prefix PowSyBl gives its scratch directories (`itools_common_...`).
+#: PyPowSyBl is a GraalVM native image: it takes `java.io.tmpdir` from
+#: `confstr(_CS_DARWIN_USER_TEMP_DIR)` and `user.home` from the password
+#: database, so neither `TMPDIR` nor a scratch `~/.itools/config.yml` moves
+#: those directories into the copy. Without a grant, `pypowsybl.network.load`
+#: fails with "Operation not permitted" inside the sandbox.
+POWSYBL_TMP_PREFIX = "itools_"
+_CS_DARWIN_USER_TEMP_DIR = 65537
+#: Characters the temporary directory's path may contain to appear in a
+#: generated glob; anything else could be a glob metacharacter, so the
+#: carve-out is dropped (fail closed).
+_GLOB_SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                 "0123456789._-/")
+_DETECT = object()
+
+
+def darwin_user_temp_dir():
+    """The real path of this user's macOS temporary directory
+    (`/private/var/folders/../T`), or None elsewhere or when unknown."""
+    if not sys.platform.startswith("darwin"):
+        return None
+    try:
+        path = os.confstr(_CS_DARWIN_USER_TEMP_DIR)
+    except (OSError, ValueError):
+        return None
+    return os.path.realpath(path) if path else None
+
+
+def inside(path, directory):
+    """Whether the real path of `path` is `directory` or lies below it."""
+    rel = os.path.relpath(os.path.realpath(path), directory)
+    return rel != os.pardir and not rel.startswith(os.pardir + os.sep)
+
+
+def powsybl_temp_entries(temp_dir, granted=()):
+    """Let the reviewer create PowSyBl's `itools_*` directories in
+    `temp_dir` and nothing else there.
+
+    Codex accepts globs only for `deny` and grants `write` only to a whole
+    path, so `temp_dir` is made writable and every other name in it is denied
+    again: one glob per prefix position (`[!i]*`, `i[!t]*`, ...,
+    `itools[!_]*`) and the bare prefixes `i` .. `itools`, each with its
+    subtree. Other tools' files in `temp_dir` stay unreadable and
+    unwritable; the reviewer can list their names, and can reach other
+    `itools_*` directories, which only PowSyBl creates.
+
+    No carve-out when a path in `granted` lies inside `temp_dir` (a
+    `--run-dir` made with a plain `mktemp -d`): a deny glob beats a more
+    specific grant, and everything under a writable `temp_dir` that no glob
+    covers would be open, so the run directory's own files and a source
+    worktree beside it would have to be carved out name by name - which
+    overflows the macOS sandbox compiler ("too many levels of backtracking")
+    for any realistic path. The profile then stays as it was: `temp_dir`
+    denied, PyPowSyBl unable to load."""
+    if (not temp_dir or not os.path.isabs(temp_dir)
+            or not set(temp_dir) <= _GLOB_SAFE
+            or any(inside(path, temp_dir) for path in granted)):
+        return []
+    entries = [(temp_dir, "write")]
+    prefix = POWSYBL_TMP_PREFIX
+    for i, char in enumerate(prefix):
+        stem = f"{temp_dir}/{prefix[:i]}"
+        globs = [f"{stem}[!{char}]*"] + ([stem] if i else [])
+        for glob in globs:
+            entries += [(glob, "deny"), (glob + "/**", "deny")]
+    return entries
+
+
 def filesystem_profile(*, review_root, workspace_root, source_objects,
-                       codex_bin, toolchain=None, platform=None):
+                       codex_bin, toolchain=None, platform=None,
+                       user_temp=_DETECT):
+    """`user_temp` is the macOS per-user temporary directory that receives
+    the PowSyBl carve-out; detected by default (on macOS only), None for no
+    carve-out."""
     if toolchain is None:
         toolchain = toolchain_paths(codex_bin, platform=platform)
+    if user_temp is _DETECT:
+        user_temp = (darwin_user_temp_dir()
+                     if (platform or sys.platform) == "darwin" else None)
     entries = [(":minimal", "read")]
     entries += [(path, "deny") for path in denied_read_paths(platform)]
+    entries += powsybl_temp_entries(
+        user_temp, granted=[review_root, source_objects, workspace_root])
     entries += [(os.path.realpath(path), "read") for path in toolchain]
     entries.append((os.path.realpath(review_root), "read"))
     entries.append((os.path.realpath(source_objects), "read"))
@@ -208,7 +289,8 @@ def project_trust(path):
 
 def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
               instruction, effort=REVIEW_EFFORT, model=None,
-              access_program=None, toolchain=None, platform=None):
+              access_program=None, toolchain=None, platform=None,
+              user_temp=_DETECT):
     """`copy` is the prepared `workspace.ReviewCopy`; the reviewer starts in
     its worktree. `model` defaults to the one `access_program` requires and
     must equal it."""
@@ -223,7 +305,7 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
     profile = filesystem_profile(
         review_root=review_root, workspace_root=copy.root,
         source_objects=copy.source_objects, codex_bin=codex_bin,
-        toolchain=toolchain, platform=platform)
+        toolchain=toolchain, platform=platform, user_temp=user_temp)
     cmd = [
         codex_bin, "-a", "never", "exec",
         "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",

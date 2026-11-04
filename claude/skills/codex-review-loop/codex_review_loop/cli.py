@@ -292,6 +292,13 @@ def _review_in_copy(args, copy, b, evidence, review_root, codex_bin, extra_env,
                          baseline_ref=args.baseline_ref, evidence=evidence,
                          review_root=os.path.realpath(review_root),
                          baseline_tree=b.baseline_ref))
+    user_temp = command_mod.darwin_user_temp_dir()
+    if user_temp and any(command_mod.inside(p, user_temp) for p in
+                         (review_root, copy.root, copy.source_objects)):
+        print(f"{PROG}: note: the run directory or the repository lies in "
+              f"{user_temp}, so the reviewer cannot run PyPowSyBl there; use "
+              "a --run-dir outside $TMPDIR (e.g. mktemp -d /tmp/...) when it "
+              "needs to", file=sys.stderr)
     cmd = command_mod.codex_cmd(
         codex_bin=codex_bin[0], review_root=review_root, copy=copy,
         schema_path=schema_path, last_message_path=last_message_path,

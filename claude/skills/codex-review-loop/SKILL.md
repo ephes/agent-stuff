@@ -44,7 +44,7 @@ Blue cyber access program:
 
 ```bash
 python3 ~/projects/agent-stuff/claude/skills/codex-review-loop/bin/codex-review-loop \
-  --repo "$PWD" --run-dir "$(mktemp -d)/codex-review" \
+  --repo "$PWD" --run-dir "$(mktemp -d /tmp/codex-review.XXXXXX)/run" \
   --slice-id "<slice>-security" --record-baseline \
   --cyber-access-program daybreak_blue
 ```
@@ -96,7 +96,7 @@ With no reading at all (a fresh machine) the guard does not block.
 
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/codex-review-loop/bin/codex-review-loop \
-     --repo "$PWD" --run-dir "$(mktemp -d)/codex-review" \
+     --repo "$PWD" --run-dir "$(mktemp -d /tmp/codex-review.XXXXXX)/run" \
      --slice-id "<slice>" --record-baseline
    ```
 
@@ -120,7 +120,7 @@ With no reading at all (a fresh machine) the guard does not block.
 
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/codex-review-loop/bin/codex-review-loop \
-     --repo "$PWD" --run-dir "$(mktemp -d)/codex-review" \
+     --repo "$PWD" --run-dir "$(mktemp -d /tmp/codex-review.XXXXXX)/run" \
      --slice-id "<slice>" --record-baseline --baseline-ref "$baseline_commit"
    ```
 
@@ -277,6 +277,35 @@ and `<run-dir>/workspace` (the copy, a scratch `home/` and a scratch `tmp/`) =
 write. Network is enabled. The reviewer's commands run with `HOME` and
 `TMPDIR` pointed at the scratch `home/` and `tmp/`.
 
+**One carve-out on macOS, for PyPowSyBl.** PyPowSyBl is a GraalVM native
+image: it takes `java.io.tmpdir` from `confstr(_CS_DARWIN_USER_TEMP_DIR)` (the
+user's `/private/var/folders/../T`) and `user.home` from the password
+database, so neither `TMPDIR` nor a scratch `~/.itools/config.yml` moves its
+`itools_common_*` scratch directories into the copy, and no environment
+variable does either (checked with pypowsybl 1.16.1, GraalVM 21.0.12). Without
+a grant `pypowsybl.network.load` fails with `Operation not permitted`. The
+profile therefore makes that directory writable and denies every name in it
+again except those starting with `itools_`, through deny globs (Codex allows
+globs only for `deny`, and `write` only on a whole path): `[!i]*`, `i[!t]*`,
+..., `itools[!_]*` and the bare prefixes `i` .. `itools`, each with its `/**`
+subtree. What the reviewer gains: it can list the names in that directory and
+read or write other `itools_*` directories (only PowSyBl creates those,
+possibly from the user's own runs). Every other file there stays unreadable
+and unwritable, also through case variants, the `/var` symlink, a symlink or
+hard link planted under `itools_*`, or renaming a directory to an `itools_`
+name.
+
+The carve-out is dropped when the run directory, the review root or the
+source object store lies inside that directory — which a plain `mktemp -d`
+on macOS produces. A deny glob beats a more specific grant, so the run
+directory would have to be carved out name by name, and that overflows the
+macOS sandbox compiler ("too many levels of backtracking"). The profile then
+stays as before (the whole directory denied), the harness prints a note on
+stderr, and PyPowSyBl cannot load. Hence the examples' `mktemp -d
+/tmp/codex-review.XXXXXX`. The carve-out is also dropped if the directory's
+path holds a character a glob could misread. `tests/test_sandbox_powsybl.py`
+proves all of this.
+
 **The reviewer can:**
 
 - read, write, delete and run anything in `<run-dir>/workspace`: grep the
@@ -306,7 +335,8 @@ such file or directory`): read the source worktree itself, including its ignored
 `.env`; write to it or to its `.git`; read anything else in the user's home —
 other projects, `~/.ssh`, `~/.codex`, `~/.gitconfig`; read `/tmp`,
 `/private/tmp`, or the rest of `$TMPDIR` (`/private/var/folders/...`), even
-though the run directory itself may live there.
+though the run directory itself may live there — apart from PowSyBl's
+`itools_*` directories (see the carve-out above).
 
 Nothing the reviewer does reaches the user's worktree: its writes land in the
 copy and its scratch space, its commits and refs in the copy's own `.git`, and
@@ -336,6 +366,17 @@ builder:
 ```bash
 cd ~/projects/agent-stuff/claude/skills/codex-review-loop
 CODEX_REVIEW_RUN_CANARY=1 python3 -m unittest tests.test_canary -v
+```
+
+The PyPowSyBl check spends no model run: it runs plain commands through
+`codex sandbox` under the production profile, installs `pypowsybl` into a
+production copy from inside the sandbox (needs `uv`, Python 3.14 in a toolchain
+prefix and the network), loads two UCTE areas and merges them across their
+X-node, and checks that the rest of the macOS temporary directory stays denied.
+Re-run it with the canary:
+
+```bash
+CODEX_REVIEW_RUN_SANDBOX=1 python3.14 -m unittest tests.test_sandbox_powsybl -v
 ```
 
 ## Lifecycle and timing

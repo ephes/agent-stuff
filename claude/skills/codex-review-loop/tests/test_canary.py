@@ -13,8 +13,9 @@ It then checks Codex's own session record - which holds every command and its
 output - rather than the model's account of what happened, and the filesystem
 afterwards. Inside the repository copy it requires reads, a write, git history
 and a network fetch to work; outside it requires the source worktree, an
-untracked `.env`, a file in the home directory and one in a temporary
-directory to stay unread, and a write into the source worktree to fail. Every
+untracked `.env`, a file in the home directory, one in `/tmp` and one in the
+macOS per-user temporary directory (writable only for PyPowSyBl's `itools_*`
+names) to stay unread, and a write into the source worktree to fail. Every
 denied path must appear in a recorded tool call, so a model that did not try is
 inconclusive rather than a pass. Set CODEX_REVIEW_CANARY_KEEP=1 to keep the
 artifacts.
@@ -49,14 +50,18 @@ output or error, or `(no output)` when it printed nothing."""
 @unittest.skipUnless(RUN, "set CODEX_REVIEW_RUN_CANARY=1 to spend a live run")
 class TestLiveBoundary(unittest.TestCase):
     def setUp(self):
-        self.base = tempfile.mkdtemp(prefix="codex-review-canary-")
+        # Outside the macOS temporary directory, as SKILL.md recommends, so
+        # the profile carries the PyPowSyBl carve-out there.
+        self.base = tempfile.mkdtemp(prefix="codex-review-canary-",
+                                     dir="/private/tmp")
+        self.user_temp = command.darwin_user_temp_dir()
         base = os.path.realpath(self.base)
         self.home_dir = os.path.expanduser(
             f"~/.cache/codex-review-canary/{secrets.token_hex(4)}")
         os.makedirs(self.home_dir)
         self.denied = {name: f"{name}-{secrets.token_hex(8)}"
-                       for name in ("home", "tmp", "ignored", "dotenv",
-                                    "caller_env", "codex_env")}
+                       for name in ("home", "tmp", "user_temp", "ignored",
+                                    "dotenv", "caller_env", "codex_env")}
         self.allowed = {name: f"{name}-{secrets.token_hex(8)}"
                         for name in ("bundle", "committed", "history",
                                      "written")}
@@ -81,6 +86,9 @@ class TestLiveBoundary(unittest.TestCase):
         self.outside = {
             "home": os.path.join(self.home_dir, "outside.txt"),
             "tmp": os.path.join(base, "outside.txt"),
+            "user_temp": os.path.join(
+                self.user_temp or base,
+                f"codex-review-canary-{secrets.token_hex(4)}.txt"),
             "ignored": os.path.join(self.repo, "ignored.txt"),
             "dotenv": os.path.join(self.repo, ".env"),
         }
@@ -99,6 +107,8 @@ class TestLiveBoundary(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.home_dir, ignore_errors=True)
+        if os.path.exists(self.outside["user_temp"]):
+            os.unlink(self.outside["user_temp"])
         if os.environ.get("CODEX_REVIEW_CANARY_KEEP") == "1":
             print(f"kept {self.base}", file=sys.stderr)
         else:
