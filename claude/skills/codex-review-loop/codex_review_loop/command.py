@@ -124,8 +124,10 @@ TOOLCHAIN_READ_PATHS = ("/opt/homebrew", "/usr/local", "/nix",
 #: lay it out under `~/.local/share/mise/installs/codex/<version>`.
 CODEX_PACKAGE_MANIFEST = "codex-package.json"
 #: Tools the reviewer runs by name that may be installed as a lone binary in
-#: the user's home (`~/.local/bin/uv`). Only the resolved file is granted,
-#: never its directory.
+#: the user's home (`~/.local/bin/uv`). Only that file is granted, never its
+#: directory, and only when it is no symlink: the sandbox mounts a resolved
+#: path, so a link's PATH entry would stay missing and granting its target
+#: would not make the name run.
 TOOL_BINARIES = ("uv",)
 RESOLV_CONF = "/etc/resolv.conf"
 
@@ -166,8 +168,8 @@ def toolchain_paths(codex_bin, *, which=shutil.which, isdir=os.path.isdir,
     extra = [codex_install_path(codex_bin)]
     for name in TOOL_BINARIES:
         found = which(name)
-        if found:
-            extra.append(os.path.realpath(found))
+        if found and os.path.realpath(found) == os.path.abspath(found):
+            extra.append(found)
     if os.path.islink(resolv_conf):
         target = os.path.realpath(resolv_conf)
         if os.path.isfile(target):

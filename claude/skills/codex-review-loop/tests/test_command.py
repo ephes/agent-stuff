@@ -247,14 +247,21 @@ class TestToolchainPaths(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOME": self.home}):
             self.assertEqual(self.paths(native), [native])
 
-    def test_tool_binaries_on_path_grant_their_resolved_file(self):
+    def test_a_tool_binary_on_path_grants_that_file(self):
+        native = self.make_file("opt", "codex")
+        uv = self.make_file("home", ".local", "bin", "uv")
+        self.assertEqual(self.paths(native, which={"uv": uv}.get),
+                         [native, uv])
+
+    def test_a_symlinked_tool_binary_is_not_granted(self):
+        # The sandbox would mount only the target, so `uv` would still not
+        # be found by name.
         native = self.make_file("opt", "codex")
         uv = self.make_file("home", ".local", "share", "uv-0.13", "uv")
         link = os.path.join(self.home, ".local", "bin", "uv")
         os.makedirs(os.path.dirname(link))
         os.symlink(uv, link)
-        found = {"uv": link}
-        self.assertEqual(self.paths(native, which=found.get), [native, uv])
+        self.assertEqual(self.paths(native, which={"uv": link}.get), [native])
 
     def test_paths_under_a_granted_prefix_are_not_repeated(self):
         prefix = os.path.join(self.base, "brew")

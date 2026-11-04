@@ -268,7 +268,8 @@ that binary inside the sandbox, so without it every command fails; the root
 is the directory holding `codex-package.json`, e.g.
 `~/.local/share/mise/installs/codex/<version>`, otherwise only the binary
 itself), the `uv` on PATH as a single file (e.g. `~/.local/bin/uv`, never its
-directory), and the target of a symlinked `/etc/resolv.conf` (with
+directory, and not when it is a symlink, whose PATH entry the sandbox would
+not mount), and the target of a symlinked `/etc/resolv.conf` (with
 systemd-resolved, `/run/systemd/resolve/stub-resolv.conf`; without it no name
 resolves); the review root = read; the source repository's object store = read;
 and `<run-dir>/workspace` (the copy, a scratch `home/` and a scratch `tmp/`) =
