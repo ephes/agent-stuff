@@ -217,7 +217,8 @@ by the tests is injected only through `tests/harness_entry.py`.
 ## Boundary
 
 Demonstrated against Codex 0.159.1 (last re-run on 0.163.0, 2026-10-22) on
-macOS with `gpt-6.1-sol` by `tests/test_canary.py`, which builds a production copy, asks the model to run
+macOS, and on Linux (bubblewrap) against Codex 0.162.1 on 2026-11-04,
+with `gpt-6.1-sol` by `tests/test_canary.py`, which builds a production copy, asks the model to run
 commands inside and outside it, and then checks Codex's session record — which
 holds every command's output — and the filesystem. The canary drives the
 production copy builder, command builder and runner with a canary instruction,
