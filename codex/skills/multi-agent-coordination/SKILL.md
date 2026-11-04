@@ -69,13 +69,20 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
      reading is unknown, never 100%. A pool at its limit is blocked; never let
      Codex run into paid credits.
   3. Keep only pools whose remaining weekly % minus what running workers will
-     still use minus a ~5% reserve covers the task (Claude Opus worker ≈ 1%/h).
+     still use minus a ~5% reserve covers the task (Claude cost: see the
+     burn-rate bullet below; Codex cost is unmeasured until calibrated, so
+     use a conservative bound or treat it as not fitting).
   4. Of those, pick the one whose weekly window **resets soonest**, not the one
      with the most % left. Example: Claude 20% left, resets in 1 day; Codex
      more left, resets in 5 days → Claude. Never move running work.
-  5. Reviews: when Codex is clearly ahead of its even pacing line (used % more
-     than ~10 points above the elapsed share of its week) or unavailable,
-     review with Claude Opus 5.5 high instead of GPT-6.1 Sol.
+  5. Reviews follow rules 1-4 too, with one owner exception (2026-11-04) that
+     overrides rule 4 and the different-family default: when Codex is clearly ahead of its even pacing line
+     (used % more than ~10 points above the elapsed share of its week) or used
+     up, a review may run as Claude Opus 5.5 high (`claude-review-loop`)
+     instead of GPT-6.1 Sol, even for Claude-implemented work (the owner
+     accepts same-family review in that case; record it as same-family, as
+     `cross-agent-review-cycle` requires). Any other review constraint
+     a task states still wins; if none fits, rule 6.
   6. Nothing fits → wait or report "blocked"; never fall back to paid usage.
   Once `work usage recommend` exists (ledger item `quota-aware-dispatch`),
   use it instead: it applies these rules and reserves capacity atomically, so
@@ -99,8 +106,7 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   `tools/codex-quota-guard/bin/codex-quota-guard` exits 3 while the Codex limit
   is used up; codex-review-loop and pi-review-loop run it themselves, and Codex
   worker launchers must run it first. With Codex used up, dispatch Claude
-  workers, and ask the owner how to gate reviews (there is no different-family
-  reviewer then).
+  workers and gate reviews as in rule 5 above.
 - **Two Claude subscriptions on one machine.** The owner has a second Claude
   account. `claude-katharina` (auto permission mode) and `claude-katharina-yolo`
   (chezmoi fish/bash functions) run the CLI with
@@ -108,12 +114,18 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   `CLAUDE.md`, `settings.json` (herdr hooks), skills, commands, agents and hooks
   are symlinked from `~/.claude`. The desktop app and plain `claude` stay on the
   main account. When one account has weekly quota left that would expire
-  unused, propose moving or adding workers on the other account: start them in
+  unused, propose adding (or starting the next queued) workers on the other
+  account; never move running ones. Start them in
   herdr panes with these functions on a fast, always-awake machine (atlas or
   studio, not the CPU-bound claascraft laptop). Its workers do not see the main
   account's memory, so their brief must carry the rules. Hosts with the age key
-  and root SSH (atlas, studio): brief them to merge only, never deploy. Measure
-  the second account's usage with `/status` or `/usage` inside such a session.
+  and root SSH (atlas, studio): brief them to merge only, never deploy. Its
+  usage is read with `/usage` inside such a session; once `work usage`
+  supports it, report it as its own pool (never mixed into `--provider
+  claude`). Until
+  `work usage` supports a separate account (item `quota-aware-dispatch`), the
+  second account counts as "unknown" under rule 2 unless the owner gives the
+  number.
 
 ## Periodic checks
 
