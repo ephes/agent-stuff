@@ -60,8 +60,26 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 
 ## Quota pacing
 
-- Spend the subscription whose weekly window resets sooner while it has
-  headroom; save the other.
+- **Choosing the pool for a worker or review** (owner decision 2026-11-04,
+  design and GPT-6.1 Sol review in ws-work-planning
+  `reviews/quota-aware-dispatch-*-20261104.md`). Pools: Claude main, Claude
+  second account (`claude-katharina`), Codex. Read fresh usage first.
+  1. Keep only pools allowed for the task (account, model, review rules).
+  2. Keep only pools with a fresh reading (≤ 1 h). "Reset due" without a new
+     reading is unknown, never 100%. A pool at its limit is blocked; never let
+     Codex run into paid credits.
+  3. Keep only pools whose remaining weekly % minus what running workers will
+     still use minus a ~5% reserve covers the task (Claude Opus worker ≈ 1%/h).
+  4. Of those, pick the one whose weekly window **resets soonest**, not the one
+     with the most % left. Example: Claude 20% left, resets in 1 day; Codex
+     more left, resets in 5 days → Claude. Never move running work.
+  5. Reviews: when Codex is clearly ahead of its even pacing line (used % more
+     than ~10 points above the elapsed share of its week) or unavailable,
+     review with Claude Opus 5.5 high instead of GPT-6.1 Sol.
+  6. Nothing fits → wait or report "blocked"; never fall back to paid usage.
+  Once `work usage recommend` exists (ledger item `quota-aware-dispatch`),
+  use it instead: it applies these rules and reserves capacity atomically, so
+  coordinators on several machines cannot overbook a pool.
 - A worker's review gate spends the reviewer's quota, not the implementer's
   (Codex reviews of Claude workers spend Codex). Scale parallelism to the
   target burn rate: an implementation-heavy Claude (Opus 5.5) worker costs
