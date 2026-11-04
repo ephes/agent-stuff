@@ -83,6 +83,19 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   worker launchers must run it first. With Codex used up, dispatch Claude
   workers, and ask the owner how to gate reviews (there is no different-family
   reviewer then).
+- **Two Claude subscriptions on one machine.** The owner has a second Claude
+  account. `claude-katharina` (auto permission mode) and `claude-katharina-yolo`
+  (chezmoi fish/bash functions) run the CLI with
+  `CLAUDE_CONFIG_DIR=~/.claude-katharina`: own login, history and memory;
+  `CLAUDE.md`, `settings.json` (herdr hooks), skills, commands, agents and hooks
+  are symlinked from `~/.claude`. The desktop app and plain `claude` stay on the
+  main account. When one account has weekly quota left that would expire
+  unused, propose moving or adding workers on the other account: start them in
+  herdr panes with these functions on a fast, always-awake machine (atlas or
+  studio, not the CPU-bound claascraft laptop). Its workers do not see the main
+  account's memory, so their brief must carry the rules. Hosts with the age key
+  and root SSH (atlas, studio): brief them to merge only, never deploy. Measure
+  the second account's usage with `/status` or `/usage` inside such a session.
 
 ## Periodic checks
 
