@@ -122,10 +122,8 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   and root SSH (atlas, studio): brief them to merge only, never deploy. Its
   usage is read with `/usage` inside such a session; once `work usage`
   supports it, report it as its own pool (never mixed into `--provider
-  claude`). Until
-  `work usage` supports a separate account (item `quota-aware-dispatch`), the
-  second account counts as "unknown" under rule 2 unless the owner gives the
-  number.
+  claude`). Until then (item `quota-aware-dispatch`), the second account
+  counts as "unknown" under rule 2 unless the owner gives the number.
 
 ## Periodic checks
 
