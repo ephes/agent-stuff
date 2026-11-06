@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from .states import CLEAN
+from .states import CLEAN, PASSING
 
 
 @dataclass
@@ -38,9 +38,20 @@ class ReviewResult:
             self.skipped_files or self.truncations or self.redactions
         )
 
+    @property
+    def scoped_pass(self):
+        """A passing result (CLEAN or SUGGESTIONS_ONLY) whose bundle skipped,
+        truncated or redacted content: it passes only within that scope.
+        Unlike the slice ledger's `scoped`, which records the bundle scope for
+        any state, this is about a passing result only."""
+        return self.state in PASSING and bool(
+            self.skipped_files or self.truncations or self.redactions
+        )
+
     def to_dict(self):
         d = asdict(self)
         d["scoped_clean"] = self.scoped_clean
+        d["scoped_pass"] = self.scoped_pass
         d["duration_s"] = round(self.ended_at - self.started_at, 3)
         return d
 

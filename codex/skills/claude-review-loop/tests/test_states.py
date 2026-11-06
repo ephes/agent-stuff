@@ -7,13 +7,21 @@ class TestStates(unittest.TestCase):
         self.assertNotIn(states.CLEAN, states.FAILED)
         self.assertNotIn(states.ISSUES, states.FAILED)
 
+    def test_suggestions_only_passes_and_is_not_failed(self):
+        self.assertNotIn(states.SUGGESTIONS_ONLY, states.FAILED)
+        self.assertEqual(states.PASSING,
+                         {states.CLEAN, states.SUGGESTIONS_ONLY})
+        self.assertTrue(states.PASSING.isdisjoint(states.FAILED))
+        self.assertNotIn(states.ISSUES, states.PASSING)
+
     def test_invalid_is_failed(self):
         self.assertIn(states.INVALID, states.FAILED)
 
     def test_all_contains_every_state(self):
         self.assertEqual(
             states.ALL,
-            {states.CLEAN, states.ISSUES, states.INVALID, states.CRASHED,
+            {states.CLEAN, states.ISSUES, states.SUGGESTIONS_ONLY,
+             states.INVALID, states.CRASHED,
              states.STALLED, states.STALLED_RETRY, states.PROVIDER_ERROR},
         )
 

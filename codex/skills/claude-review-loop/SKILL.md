@@ -288,8 +288,20 @@ are not allowed. Separate harness invocations may run concurrently.
      redacted files. Treat this as "clean within provided scope" and decide
      whether those omissions or substitutions matter. Forbidden tool use and
      delegation are detected by the harness and cannot produce exit `0`.
-   - `1` -> ISSUES. Fix each listed `[Severity] path: message`, then re-run a FRESH
-     review (not an edit of the old one).
+   - `0` -> SUGGESTIONS_ONLY. The reviewer answered ISSUES, but every finding
+     is a Suggestion: the round converged with nothing that blocks the commit
+     gate. Make the proportionality decision below (fix in-scope Suggestions
+     that materially help, record why the rest are declined) and stop; do not
+     park or ask the owner. `structured_output.verdict` stays `ISSUES`, and
+     `(scoped)` means the same as for CLEAN; `result.json` reports it as
+     `scoped_pass` (true for either passing state), while `scoped_clean`
+     stays CLEAN-only; the slice ledger's own `scoped` flag records bundle
+     scope for any state. It is never relabeled `CLEAN`.
+     Only a valid, completed review can reach it: a failed review stays exit
+     `2` whatever its findings say.
+   - `1` -> ISSUES: at least one Critical or Warning. Fix each listed
+     `[Severity] path: message`, then re-run a FRESH review (not an edit of the
+     old one).
    - `2` -> failed review (INVALID / CRASHED / STALLED / STALLED_RETRY /
      PROVIDER_ERROR). This is NOT a clean review. Inspect `result.json` `error`,
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
@@ -351,7 +363,8 @@ are not allowed. Separate harness invocations may run concurrently.
    release the commit gate. Stopping with an unresolved Critical or Warning
    means reporting the residual risk to the user, not committing.
 
-   Treat a Suggestion-only verdict as terminal for this loop by default: make an
+   Treat a Suggestion-only verdict (`SUGGESTIONS_ONLY`, exit `0`) as terminal
+   for this loop by default: make an
    explicit proportionality decision, implement in-scope suggestions that
    materially improve the change, record a concise reason for declining the
    rest, and stop. Another round on a Suggestion-only verdict needs a concrete
@@ -379,7 +392,9 @@ are not allowed. Separate harness invocations may run concurrently.
 ## Hard rules
 
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
-  are irrelevant AND the review was direct. Exit `1`/`2`/`3` are never clean.
+  are irrelevant AND the review was direct. For `SUGGESTIONS_ONLY` it also
+  needs the recorded Suggestion dispositions. Exit `1`/`2`/`3`/`4` are never
+  clean.
 - Direct review only: no Claude Code `Agent` tool, Task-style delegation,
   subagents, or parallel reviewer fanout. The harness rejects those tool events.
 - Bounded parallelism: independent harness invocations use a per-user slot pool
@@ -433,7 +448,7 @@ bundle headings and context-redaction manifest entries.
 `forbidden_tool_uses`, `denied_tool_uses`, `skipped_files`, `truncations`, `redactions`,
 `baseline_ref`, `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
 `review_copy` - the copy's `head`, `tree`, `excluded` paths, `notes`, and
-whether it was `removed` - and `scoped_clean`), `events.jsonl` (strict JSONL
+whether it was `removed` - `scoped_clean`, and `scoped_pass`), `events.jsonl` (strict JSONL
 event stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
 `review-bundle.md` (the redacted starting point Claude was given). The copy
 itself is gone after the run.

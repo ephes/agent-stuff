@@ -13,7 +13,7 @@ chezmoi symlinks.
 | Codex, Claude, Pi | `multi-agent-coordination` | How a coordinator runs many workers: roles (coordinator, clerk, scouts), worker brief checklist, quota pacing, owner-load reduction, infrastructure and cleanup safety. Agent-neutral; one copy under `codex/skills/`, symlinked for every agent |
 | Codex | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Codex | `implement-handoff` | Generate an implementation prompt for a second agent |
-| Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default), working in a sandboxed throwaway copy of the repository; default reviewer for Codex and Pi implementers |
+| Codex | `claude-review-loop` | Run the supervised, fail-closed Claude review gate with a configurable model (Opus 5.5 at medium effort by default), working in a sandboxed throwaway copy of the repository; a Suggestion-only round exits `0` as `SUGGESTIONS_ONLY`; default reviewer for Codex and Pi implementers |
 | Codex | `review-handoff` | Generate a code review prompt for a second agent |
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |

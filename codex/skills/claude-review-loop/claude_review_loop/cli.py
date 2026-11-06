@@ -16,7 +16,9 @@ from . import ledger as ledger_mod
 from .runner import run_review
 from .monitor import INSPECTION_TOOLS, REVIEW_TOOL_NAMES
 from .redact import SECRET_PATH_PATTERNS
-from .states import CLEAN, ISSUES, FAILED, CRASHED, INVALID
+from .states import (CLEAN, ISSUES, FAILED, CRASHED, INVALID,
+                     SUGGESTIONS_ONLY)
+from .verdict import classify_completed
 
 REVIEW_INSTRUCTION = f"""\
 You are a code reviewer. Review ONLY the changes in the provided review bundle \
@@ -93,7 +95,7 @@ SECRET_READ_DENIES = [
     for pattern in _SECRET_READ_PATTERNS
 ]
 
-EXIT_BY_STATE = {CLEAN: 0, ISSUES: 1}  # everything in FAILED -> 2
+EXIT_BY_STATE = {CLEAN: 0, SUGGESTIONS_ONLY: 0, ISSUES: 1}  # FAILED -> 2
 # 3 -> no free review slot; 4 -> the slice ledger says the loop is not
 # converging, so stop and hand the residual risk to the user.
 
@@ -592,6 +594,9 @@ def _main(argv=None):
         return outcome
     result = outcome
     result.review_copy = copy.summary()
+    # A completed ISSUES review with only Suggestions converged: it gets its own
+    # state (exit 0) so a driver does not park on findings that never block.
+    result.state = classify_completed(result.state, result.items)
 
     # Fold bundle scope into the result and re-write result.json.
     result.skipped_files = b.skipped_files
@@ -634,7 +639,7 @@ def _main(argv=None):
 
     result.write(os.path.join(args.run_dir, "result.json"))
 
-    scope = " (scoped)" if result.scoped_clean else ""
+    scope = " (scoped)" if result.scoped_pass else ""
     print(f"REVIEW: {result.state}{scope}  items={len(result.items)}  "
           f"model={model}  effort={effort}  "
           f"result={os.path.join(args.run_dir, 'result.json')}")

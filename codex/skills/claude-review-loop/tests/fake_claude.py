@@ -2,6 +2,9 @@
 """Fake `claude --output-format stream-json` for runner tests. Modes via argv[1]:
   clean      -> emit a CLEAN result and exit 0
   issues     -> emit an ISSUES result and exit 0
+  suggestions -> emit an ISSUES result whose findings are all Suggestions
+  suggestion_and_warning -> emit an ISSUES result with a Suggestion and a Warning
+  suggestions_forbidden_tool -> use a forbidden Agent tool, then Suggestions only
   hang       -> emit one event then sleep forever (stall)
   crash      -> print a malformed line then exit 1 (no result)
   crash_whitespace -> write only whitespace to stderr then exit 1
@@ -36,8 +39,14 @@ def assistant(text):
     }}
 
 
-def result(text):
-    if text == "REVIEW: CLEAN":
+SUGGESTION = {"severity": "Suggestion", "path": "a.py", "message": "rename x"}
+WARNING = {"severity": "Warning", "path": "a.py", "message": "tidy this"}
+
+
+def result(text, findings=None):
+    if findings is not None:
+        structured = {"verdict": "ISSUES", "findings": findings}
+    elif text == "REVIEW: CLEAN":
         structured = {"verdict": "CLEAN", "findings": []}
     else:
         structured = {
@@ -83,6 +92,17 @@ def main():
         text = "REVIEW: ISSUES\n1. [Warning] a.py: tidy this"
         emit(assistant(text))
         emit(result(text))
+    elif mode in ("suggestions", "suggestion_and_warning"):
+        findings = [SUGGESTION, dict(SUGGESTION, message="add a docstring")]
+        if mode == "suggestion_and_warning":
+            findings = [SUGGESTION, WARNING]
+        emit(assistant("REVIEW: ISSUES"))
+        emit(result("REVIEW: ISSUES", findings))
+    elif mode == "suggestions_forbidden_tool":
+        emit({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Agent", "input": {"prompt": "review"}}
+        ]}})
+        emit(result("REVIEW: ISSUES", [SUGGESTION]))
     elif mode == "hang":
         emit({"type": "assistant", "message": {"role": "assistant", "content": []}})
         time.sleep(3600)

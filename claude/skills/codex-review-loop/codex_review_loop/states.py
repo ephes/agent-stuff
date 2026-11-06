@@ -1,7 +1,8 @@
 """Terminal review states. A review ends in exactly one of these.
 
 The set is the siblings' set, so a caller that knows one harness's states knows
-this one's. What went wrong inside a failed state is in `failure_kind`.
+this one's - except `claude-review-loop`'s extra `SUGGESTIONS_ONLY` (exit 0),
+which this harness reports as `ISSUES` with only Suggestion findings. What went wrong inside a failed state is in `failure_kind`.
 """
 
 CLEAN = "CLEAN"

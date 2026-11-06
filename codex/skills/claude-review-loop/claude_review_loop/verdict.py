@@ -1,5 +1,5 @@
 """Extract and validate Claude's strict structured review verdict."""
-from .states import CLEAN, ISSUES, INVALID
+from .states import CLEAN, ISSUES, INVALID, SUGGESTIONS_ONLY
 
 
 def extract_claude_assistant_text(event):
@@ -57,3 +57,18 @@ def validate_structured_verdict(value):
     if verdict == ISSUES and not items:
         return INVALID, [], "ISSUES structured verdict must include findings"
     return verdict, items, None
+
+
+def classify_completed(state, items):
+    """Refine a completed ISSUES review whose findings are all Suggestions.
+
+    Only a validated ISSUES verdict with at least one finding and no Critical or
+    Warning becomes SUGGESTIONS_ONLY. Every other state, including every failed
+    one, is returned unchanged, so this can never turn a failure into a pass.
+    """
+    if state != ISSUES or not items:
+        return state
+    if all(isinstance(item, dict) and item.get("severity") == "Suggestion"
+           for item in items):
+        return SUGGESTIONS_ONLY
+    return state

@@ -248,6 +248,58 @@ class TestCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn("ISSUES", proc.stdout)
 
+    def _fake_run(self, mode, *extra):
+        run_dir = os.path.join(self.tmp.name, "run-" + mode)
+        env = dict(os.environ, CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} {mode}")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(SKILL_ROOT, "bin", "claude-review-loop"),
+             "--repo", self.repo, "--run-dir", run_dir,
+             "--lock-dir", os.path.join(self.tmp.name, "lock-" + mode),
+             "--model", "fake/model", *extra],
+            capture_output=True, text=True, env=env,
+        )
+        with open(os.path.join(run_dir, "result.json")) as fh:
+            return proc, json.load(fh)
+
+    def test_suggestion_only_review_is_its_own_passing_state(self):
+        proc, result = self._fake_run("suggestions")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("REVIEW: SUGGESTIONS_ONLY", proc.stdout)
+        self.assertIn("[Suggestion] a.py: rename x", proc.stdout)
+        self.assertEqual(result["state"], "SUGGESTIONS_ONLY")
+        self.assertEqual(len(result["items"]), 2)
+        # The reviewer's own verdict is kept as given, never relabeled CLEAN.
+        self.assertEqual(result["structured_output"]["verdict"], "ISSUES")
+        self.assertFalse(result["scoped_clean"])
+        self.assertFalse(result["scoped_pass"])
+
+    def test_scoped_suggestion_only_review_reports_scope(self):
+        with open(os.path.join(self.repo, "a.py"), "wb") as fh:
+            fh.write(b"changed = '\xff'\n")
+        proc, result = self._fake_run("suggestions")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("REVIEW: SUGGESTIONS_ONLY (scoped)", proc.stdout)
+        self.assertTrue(result["scoped_pass"])
+        self.assertFalse(result["scoped_clean"])
+
+    def test_suggestion_with_warning_stays_issues(self):
+        proc, result = self._fake_run("suggestion_and_warning")
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertEqual(result["state"], "ISSUES")
+
+    def test_suggestion_only_with_forbidden_tool_still_fails_closed(self):
+        proc, result = self._fake_run("suggestions_forbidden_tool")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(result["state"], "INVALID")
+
+    def test_suggestion_only_round_records_converged_slice(self):
+        ledger_dir = os.path.join(self.tmp.name, "ledger")
+        proc, result = self._fake_run(
+            "suggestions", "--slice-id", "s1", "--ledger-dir", ledger_dir)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["convergence"]["status"], "converged")
+        self.assertIn("LOOP: converged", proc.stdout)
+
     def test_sigint_kills_reviewer_and_preserves_crashed_result(self):
         run_dir = os.path.join(self.tmp.name, "run-interrupt")
         lock_pool_dir = os.path.join(self.tmp.name, "lock-interrupt")

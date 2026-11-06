@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from claude_review_loop import result
-from claude_review_loop.states import CLEAN, ISSUES
+from claude_review_loop.states import CLEAN, ISSUES, SUGGESTIONS_ONLY
 
 
 class TestReviewResult(unittest.TestCase):
@@ -68,6 +68,26 @@ class TestReviewResult(unittest.TestCase):
                 data = json.load(fh)
         self.assertEqual(data["scoped_clean"], True)
         self.assertEqual(data["duration_s"], 1.5)
+
+
+class TestScoped(unittest.TestCase):
+    def _result(self, state, **kw):
+        return result.ReviewResult(state=state, items=[], model="m", cost=None,
+                                   started_at=0.0, ended_at=1.0, **kw)
+
+    def test_scoped_pass_covers_both_passing_states(self):
+        for state in (CLEAN, SUGGESTIONS_ONLY):
+            with self.subTest(state=state):
+                self.assertTrue(self._result(
+                    state, skipped_files=["big.bin"]).scoped_pass)
+                self.assertFalse(self._result(state).scoped_pass)
+
+    def test_scoped_pass_is_false_for_issues(self):
+        self.assertFalse(self._result(ISSUES, truncations=["x"]).scoped_pass)
+
+    def test_scoped_clean_stays_clean_only(self):
+        self.assertFalse(self._result(
+            SUGGESTIONS_ONLY, redactions=["x"]).scoped_clean)
 
 
 if __name__ == "__main__":

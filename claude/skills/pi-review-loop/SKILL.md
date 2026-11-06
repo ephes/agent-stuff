@@ -91,6 +91,10 @@ implement and fix; Pi reviews with fresh context.
      the skipped files matter.
    - `1` → ISSUES. Fix each listed `[Severity] path: message`, then re-run a FRESH
      review (not an edit of the old one).
+     If every finding is a Suggestion, the round is Suggestion-only: record the
+     dispositions and stop; it does not count as "not clean" for the park rule
+     (`cross-agent-review-cycle`). This harness has no separate
+     `SUGGESTIONS_ONLY` state, unlike `claude-review-loop`.
    - `2` → failed review (INVALID / CRASHED / STALLED / STALLED_RETRY /
      PROVIDER_ERROR). This is NOT a clean review. Inspect `result.json` `error`,
      `stderr.log`, and `events.jsonl`; the usual causes are a transient provider
@@ -141,7 +145,9 @@ implement and fix; Pi reviews with fresh context.
   authentication fails, fail closed and report the blocker; do not substitute
   another model, provider, or transport.
 - A commit-gate "clean" means exit `0` AND you are satisfied any `(scoped)` skips
-  are irrelevant. Exit `1`/`2`/`3` are never clean.
+  are irrelevant. Exit `1`/`2`/`3`/`4` are never clean; a Suggestion-only exit
+  `1` passes the commit gate only through its recorded Suggestion dispositions,
+  never by being relabeled `CLEAN`.
 - Bounded parallelism only — the harness enforces a per-user slot pool. It
   defaults to 10 concurrent Pi reviews, the same as the Claude and Codex
   harnesses, so sessions in different repositories do not queue behind each

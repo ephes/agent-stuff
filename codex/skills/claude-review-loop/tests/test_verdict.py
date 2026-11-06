@@ -1,6 +1,8 @@
 import unittest
 from claude_review_loop import verdict
-from claude_review_loop.states import CLEAN, ISSUES, INVALID
+from claude_review_loop.states import (
+    CLEAN, CRASHED, ISSUES, INVALID, PROVIDER_ERROR, STALLED, SUGGESTIONS_ONLY,
+)
 
 
 class TestStructuredVerdict(unittest.TestCase):
@@ -64,6 +66,30 @@ class TestStructuredVerdict(unittest.TestCase):
         self.assertEqual(items, [{"severity": "Suggestion", "path": "x.py",
                                   "message": "tidy"}])
         self.assertIsNone(error)
+
+
+class TestClassifyCompleted(unittest.TestCase):
+    SUGGESTION = {"severity": "Suggestion", "path": "x", "message": "m"}
+
+    def test_all_suggestions_become_suggestions_only(self):
+        self.assertEqual(verdict.classify_completed(
+            ISSUES, [self.SUGGESTION, dict(self.SUGGESTION, path="y")]),
+            SUGGESTIONS_ONLY)
+
+    def test_any_required_finding_keeps_issues(self):
+        for severity in ("Critical", "Warning"):
+            with self.subTest(severity=severity):
+                items = [self.SUGGESTION, dict(self.SUGGESTION, severity=severity)]
+                self.assertEqual(verdict.classify_completed(ISSUES, items), ISSUES)
+
+    def test_issues_without_items_is_not_promoted(self):
+        self.assertEqual(verdict.classify_completed(ISSUES, []), ISSUES)
+
+    def test_other_states_are_never_changed(self):
+        for state in (CLEAN, INVALID, CRASHED, STALLED, PROVIDER_ERROR):
+            with self.subTest(state=state):
+                self.assertEqual(
+                    verdict.classify_completed(state, [self.SUGGESTION]), state)
 
 
 if __name__ == "__main__":

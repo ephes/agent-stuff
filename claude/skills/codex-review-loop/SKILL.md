@@ -140,6 +140,10 @@ With no reading at all (a fresh machine) the guard does not block.
    - `0` → CLEAN. `(scoped)` means files were skipped, truncated, or redacted —
      treat it as clean within that scope and decide whether the gaps matter.
    - `1` → ISSUES. Verify each finding at its source before acting on it.
+     If every finding is a Suggestion, the round is Suggestion-only: record the
+     dispositions and stop; it does not count as "not clean" for the park rule
+     (`cross-agent-review-cycle`). This harness has no separate
+     `SUGGESTIONS_ONLY` state, unlike `claude-review-loop`.
    - `2` → failed review: `INVALID`, `CRASHED`, `STALLED`, or `PROVIDER_ERROR`,
      refined by `failure_kind` (`model_mismatch`, `model_unproven`,
      `forbidden_tool`, `provider`, `quota`, `cyber_policy`, `stall`, `deadline`,
@@ -413,7 +417,9 @@ CODEX_REVIEW_RUN_SANDBOX=1 python3.14 -m unittest tests.test_sandbox_powsybl -v
   record, and effort escalation (`cross-agent-review-cycle`) raises the
   implementer, not this reviewer.
 - A commit-gate "clean" is exit `0` plus your judgement that any `(scoped)`
-  omissions do not matter. Exits `1`–`4` are never clean.
+  omissions do not matter. Exits `1`–`4` are never clean; a Suggestion-only
+  exit `1` passes the commit gate only through its recorded Suggestion
+  dispositions, never by being relabeled `CLEAN`.
 - Up to ten concurrent reviews by default (`--max-concurrent`,
   `CODEX_REVIEW_MAX_CONCURRENT`). Live holders honor the lowest limit any of
   them requested, so one run started with `--max-concurrent 1` serializes

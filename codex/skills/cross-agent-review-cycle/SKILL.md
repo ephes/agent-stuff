@@ -210,6 +210,17 @@ Exception for coordinated campaigns (`multi-agent-coordination`): after 2
 review rounds that are not clean, a worker parks the slice and reports to the
 owner instead of opening a third round.
 
+A round is **not clean** when it leaves an unresolved Critical or Warning.
+A Suggestion-only round is not "not clean": once its Suggestion dispositions
+are recorded (fixed, deferred or rejected with rationale), it has converged,
+and the worker proceeds to the commit gate instead of parking or asking the
+owner. `claude-review-loop` reports such a round as `SUGGESTIONS_ONLY` (exit
+`0`); `codex-review-loop` and `pi-review-loop` report it as `ISSUES` (exit `1`)
+whose findings are all Suggestions - read the severities, not only the exit
+code. A failed review (exit `2`) is neither: it reviewed nothing, so retry it
+or report the blocker. This one definition applies wherever these skills say
+"clean" or "not clean" about a round.
+
 ### Re-review scope containment
 
 The first valid review may inspect the complete implementation slice. After
@@ -366,7 +377,9 @@ correctly and it hung only at exit.
    enforced: without it every round re-sends the whole slice and the reviewer
    keeps finding new unrelated concerns in code it already passed.
 
-   Interpret exit `0` as clean, `1` as findings, `2` as a failed/invalid review,
+   Interpret exit `0` as clean (or, for `claude-review-loop`, `SUGGESTIONS_ONLY`:
+   converged with Suggestions to dispose of), `1` as findings, `2` as a
+   failed/invalid review,
    `3` as lock contention, and `4` as findings plus a ledger verdict that the
    loop is not converging - stop, report the residual risk, and do not start
    another round on your own authority. Exit `4` never means the findings are
