@@ -1,0 +1,12 @@
+[0m[38;2;153;153;153m[48;2;55;55;55m❯ [0m[38;2;255;255;255m[48;2;55;55;55mPlease merge the slice and report back. Do you want to proceed? Esc to cancel is fine too. [0m[48;2;55;55;55m      [0m
+
+[0m[38;2;255;255;255m⏺[0m Merged and pushed. The branch [0m[38;2;177;185;249mfix/example[0m is no longer needed.
+  The report is also in REPORT.md (not committed).
+
+[0m[38;2;153;153;153m✻ Worked for 3m 2s · done 5:04 PM[0m
+  
+[0m[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+❯ [0m[2mDelete the stale branch fix/example[0m
+[0m[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+  [0m[2m[38;2;153;153;153mOpus 5.5 | default | demo [main] | ctx:0% | 20:00:01[0m
+  [0m[38;2;255;107;128m⏵⏵ bypass permissions on[0m[38;2;153;153;153m (shift+tab to cycle)[0m

@@ -32,6 +32,8 @@ chezmoi symlinks.
 |------|---------|
 | [`tools/workspace-gc`](tools/workspace-gc/README.md) | Live inventory of agent checkouts under `~/workspaces` (classes A removable / B after push / C needs owner / D keep), guarded removal of class A and of leftover empty workspace directories (dry run by default), a report of workspace directories that hold no checkout, and the daily Studio job that removes both and writes the report. The `work-ledger` closeout step uses its single-path `remove` |
 | [`tools/codex-quota-guard`](tools/codex-quota-guard/README.md) | Exits 3 while the Codex subscription limit is used up (Codex would spend paid credits instead of refusing); read from Codex's session records. codex-review-loop and pi-review-loop run it before every review; Codex worker launchers call it first |
+| [`tools/claude-usage-read`](tools/claude-usage-read/README.md) | Reads a Claude account's weekly usage (percent, reset time) through `claude -p /usage` instead of the interactive `/usage` dialog, which blocked a worker pane; `--report` sends it to `work usage report` |
+| [`tools/pane-watchdog`](tools/pane-watchdog/README.md) | Read-only scan of herdr panes on given machines for open `/usage`, trust and permission dialogs, finished turns that ask the owner a question, and typed input; ignores dim ghost-text suggestions and never sends keys |
 | [`tools/guard-projects`](tools/guard-projects/README.md) | Opt-in Claude Code `PreToolUse` hook that keeps `~/projects` read-only for agents and blocks pushes outside `github.com/ephes/`, plus `check-push-remote` for pre-push checks |
 
 ## CI
@@ -40,7 +42,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on pushes to `main` and on
 pull requests, with no secrets:
 
 - the hermetic unittest suites of `claude-review-loop`, `codex-review-loop`,
-  `pi-review-loop`, `tools/workspace-gc`, `tools/guard-projects` and `tools/codex-quota-guard`, on a macOS runner because the
+  `pi-review-loop`, `tools/workspace-gc`, `tools/guard-projects`, `tools/codex-quota-guard`,
+  `tools/claude-usage-read` and `tools/pane-watchdog`, on a macOS runner because the
   harnesses target the Studio. The live model canaries stay skipped: never set
   `CODEX_REVIEW_RUN_CANARY` or `CLAUDE_REVIEW_RUN_CLAUDE_CANARY` in CI.
 - `.github/scripts/check_skill_frontmatter.py`: every `*/skills/*/SKILL.md`
@@ -96,6 +99,8 @@ agent-stuff/
   tools/
     workspace-gc/       # agent-neutral CLI, not a skill; run from this checkout
     guard-projects/     # opt-in PreToolUse hook and pre-push owner check
+    claude-usage-read/  # weekly Claude usage via `claude -p /usage`, optional work report
+    pane-watchdog/      # read-only herdr pane scan for dialogs, questions, typed input
   README.md
 ```
 

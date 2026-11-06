@@ -51,6 +51,12 @@ jobs:
           - name: codex-quota-guard
             dir: tools/codex-quota-guard
             args: discover -s tests -t .
+          - name: claude-usage-read
+            dir: tools/claude-usage-read
+            args: discover -s tests -t .
+          - name: pane-watchdog
+            dir: tools/pane-watchdog
+            args: discover -s tests -t .
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
