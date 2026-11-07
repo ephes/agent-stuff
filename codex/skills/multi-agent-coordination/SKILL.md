@@ -61,8 +61,10 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 
 ## Planning and dispatch order
 
-After the planning API/CLI and owner UI are deployed, the owner sets the plan
-on `/plan/` (Now / Next / Later); use the rollout and command contract in
+`/plan/` and the planning CLI are merged in work-ledger main but work only
+after the owner deploys the work app (not yet deployed as of 2026-11-07); until
+then dispatch from the current queue files. After deployment the owner sets the
+plan on `/plan/` (Now / Next / Later); use the rollout and command contract in
 `work-ledger`. Before dispatch, read `work next [--project P] [--topic T]
 [--limit N]` and take available Now items in rank order, subject to dependencies,
 same-repo sequencing and quota capacity. If no Now item fits, report why and

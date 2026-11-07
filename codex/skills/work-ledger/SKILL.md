@@ -99,13 +99,17 @@ in `work note`.
 
 ## Planning and picking work
 
-Rollout: the planning commands below require the deployed planning API and CLI;
-`/plan/` requires the owner UI slice too. If either is unavailable, report that
-prerequisite instead of interpreting an error as an empty plan. The coordinator
-runs the one-off queue import only after deployment; workers never run it.
+Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
+`--expedite` upsert flags are merged in work-ledger main (2026-11-07) but work
+**only after the owner deploys the work app; as of 2026-11-07 it is not yet
+deployed**. Until then the live app and `work` CLI lack them: report that
+prerequisite instead of interpreting an error as an empty plan, and keep using
+the current queue files. The coordinator runs the one-off queue import only
+after deployment; workers never run it.
 
 The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
-each horizon, project filters and free topic slugs. Stage still describes
+each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
+`idea`/`designed` items, and free topic slugs shown on each card. Stage still describes
 execution progress; horizon describes the owner's plan.
 
 - Read `work plan` for the ordered plan, or `work plan --json` for structured
@@ -129,7 +133,7 @@ execution progress; horizon describes the owner's plan.
   --topics security,infra --checked-at now`. Omit rank and neighbours; the
   server appends. `--topics` supplies at most five slug-validated free topics
   (no Topic table); `--topics ""` clears the list. Omitted fields stay unchanged.
-  Use existing suggestions where they fit.
+  Reuse topic slugs already shown by `work plan` where they fit.
 - **Agents never reorder existing items or move items into Now**, including
   within Next. Routine stage/owner updates omit horizon and rank. Send any
   reorder or horizon-change proposal through `work ask <slug> "<proposal>"`
