@@ -97,6 +97,66 @@ in `work note`.
 `owner` is who acts next: `claude`, `codex`, `herdr:<workspace label>`,
 `jochen`.
 
+## Planning and picking work
+
+Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
+`--expedite` upsert flags are merged in work-ledger main (2026-11-07) but work
+**only after the owner deploys the work app; as of 2026-11-07 it is not yet
+deployed**. Until then the live app and `work` CLI lack them: report that
+prerequisite instead of interpreting an error as an empty plan, and keep using
+the current queue files. The coordinator runs the one-off queue import only
+after deployment; workers never run it.
+
+The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
+each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
+`idea`/`designed` items, and free topic slugs shown on each card. Stage still describes
+execution progress; horizon describes the owner's plan.
+
+- Read `work plan` for the ordered plan, or `work plan --json` for structured
+  data. The plan includes Now, Next, Later and Unplanned, with `--project P`
+  and `--topic T` filters. Use `work next [--project P] [--topic T] [--limit N]` to read available
+  work from **Now**, in the same rank order: stage `designed` or `prototype`,
+  no open owner request (including bulk acceptance), and owner exactly
+  `jochen`, `claude`, `codex` or `pi` (the owner/coordinator pool identities).
+  Named workers such as `herdr:<workspace>` and unknown owners are excluded;
+  there is no live worker registry, so verify availability before dispatch.
+  Blocked and parked items are excluded. `--limit` is positive, defaults to 1,
+  and applies after filtering across all pages. `--json` includes the returned
+  `count` and pre-limit `available_count`. Incomplete reads fail instead of
+  appearing as an empty ready queue. The Now WIP warning above six items is a hint;
+  `work next` still returns available work.
+- A read does not claim an item. Re-read before dispatch, check that no worker
+  already owns it, then claim with `--stage implementing --owner <worker>`
+  and `--expect-updated-at` from `work show <slug> --json`.
+- Agents create new items only at the **end of Next or Later**:
+  `work upsert <slug> --title "..." --project P --stage idea --horizon next
+  --topics security,infra --checked-at now`. Omit rank and neighbours; the
+  server appends. `--topics` supplies at most five slug-validated free topics
+  (no Topic table); `--topics ""` clears the list. Omitted fields stay unchanged.
+  Reuse topic slugs already shown by `work plan` where they fit.
+- **Agents never reorder existing items or move items into Now**, including
+  within Next. Routine stage/owner updates omit horizon and rank. Send any
+  reorder or horizon-change proposal through `work ask <slug> "<proposal>"`
+  for the owner to apply. An approval response alone does not authorize an
+  agent to perform the move. Expedite is a boolean flag with at most one
+  item; it does not grant permission to change order or horizon.
+  `--expedite` / `--no-expedite` express booleans, but the token API rejects
+  changes to this owner-only flag. Expedite does not override rank order.
+- At each quota reset and at the weekly planning check, present Next
+  candidates with context to the owner in chat. The owner chooses what moves
+  into Now and its order. The app needs no reprioritization schedule.
+- After the coordinator's one-off import, queue files are generated read-only
+  copies: `work plan --format queue > queue.txt` (or `QUEUE.md`). Never edit
+  those copies to prioritize, and never dispatch from an old file instead of
+  reading `work next`. The coordinator runs `manage.py import_plan_queues`
+  after deployment with an explicit JSON mapping for Atlas prose (and any
+  Codex legacy label overrides). It previews by default; `--apply` appends
+  existing unplanned items to Next atomically, Codex then Atlas, deduplicating
+  at first occurrence. Missing/unmapped/already planned items abort. It keeps
+  stages and checked times, including completed entries; it never creates
+  items or promotes them to Now. See the work-ledger README for mapping and
+  database setup. Workers never run it.
+
 ## Stage ladder
 
 Each stage is a distinct claim. Never write "done"; pick the strongest stage you

@@ -59,6 +59,39 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   branches (for example security fixes touching the same files), base each on the previous unmerged branch and
   state the merge order in the request.
 
+## Planning and dispatch order
+
+`/plan/` and the planning CLI are merged in work-ledger main but work only
+after the owner deploys the work app (not yet deployed as of 2026-11-07); until
+then dispatch from the current queue files. After deployment the owner sets the
+plan on `/plan/` (Now / Next / Later); use the rollout and command contract in
+`work-ledger`. Before dispatch, read `work next [--project P] [--topic T]
+[--limit N]` and take available Now items in rank order, subject to dependencies,
+same-repo sequencing and quota capacity. If no Now item fits, report why and
+ask the owner; do not promote a Next item yourself. A Now count over six is
+only a WIP warning and does not stop `work next`. The default limit is one;
+filtering happens before the limit. Eligibility is `designed`/`prototype`, no
+open owner request, owner `jochen`/`claude`/`codex`/`pi`; named worker or unknown
+owners are excluded. This snapshot does not claim work or replace checking for
+a running worker.
+
+Coordinators and clerks append newly discovered work at the end of Next or
+Later (`work upsert ... --horizon next`, without rank or neighbours). Agents
+never reorder, including within Next, and never move items into Now. Route
+reorder and horizon proposals through `work ask` for the owner to apply;
+claiming work changes stage to `implementing` and owner to the worker, not
+horizon or rank. Re-read and use the lost-update guard before claiming.
+
+At every quota reset and weekly, present the Next candidates and their context
+to the owner **in chat** for reprioritization. The owner chooses the order and
+promotions; no app-side schedule is needed. After deployment, the coordinator
+runs the preview-first `manage.py import_plan_queues` script with explicit
+Atlas prose mappings (Codex then Atlas source order, all entries into Next;
+`--apply` writes atomically and refuses already planned items).
+Thereafter `coordination/codex/queue.txt` and `coordination/atlas/QUEUE.md` are
+read-only generated copies (`work plan --format queue`), never independent
+sources of dispatch order. Workers do not run the import.
+
 ## Quota pacing
 
 - **Choosing the pool for a worker or review** (owner decision 2026-11-04,
