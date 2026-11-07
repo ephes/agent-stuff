@@ -97,6 +97,46 @@ in `work note`.
 `owner` is who acts next: `claude`, `codex`, `herdr:<workspace label>`,
 `jochen`.
 
+## Planning and picking work
+
+Rollout: the planning commands below require the deployed planning API and CLI;
+`/plan/` requires the owner UI slice too. If either is unavailable, report that
+prerequisite instead of interpreting an error as an empty plan. The coordinator
+runs the one-off queue import only after deployment; workers never run it.
+
+The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
+each horizon, project filters and free topic slugs. Stage still describes
+execution progress; horizon describes the owner's plan.
+
+- Read `work plan` for the ordered plan, or `work plan --json` for structured
+  data. Use `work next [--project P] [--topic T] [--limit N]` to read available
+  work from **Now**, in the same rank order: stage `designed` or `prototype`,
+  no open owner request, and no running worker as owner. Blocked and parked
+  items are excluded. The Now WIP warning above six items is a hint;
+  `work next` still returns available work.
+- A read does not claim an item. Re-read before dispatch, check that no worker
+  already owns it, then claim with `--stage implementing --owner <worker>`
+  and `--expect-updated-at` from `work show <slug> --json`.
+- Agents create new items only at the **end of Next or Later**:
+  `work upsert <slug> --title "..." --project P --stage idea --horizon next
+  --topics security,infra --checked-at now`. Omit rank and neighbours; the
+  server appends. `--topics` supplies at most five slug-validated free topics
+  (no Topic table). Use existing suggestions where they fit.
+- **Agents never reorder existing items or move items into Now**, including
+  within Next. Routine stage/owner updates omit horizon and rank. Send any
+  reorder or horizon-change proposal through `work ask <slug> "<proposal>"`
+  for the owner to apply. An approval response alone does not authorize an
+  agent to perform the move. Expedite is a boolean flag with at most one
+  item; it does not grant permission to change order or horizon.
+- At each quota reset and at the weekly planning check, present Next
+  candidates with context to the owner in chat. The owner chooses what moves
+  into Now and its order. The app needs no reprioritization schedule.
+- After the coordinator's one-off import, queue files are generated read-only
+  copies: `work plan --format queue > queue.txt` (or `QUEUE.md`). Never edit
+  those copies to prioritize, and never dispatch from an old file instead of
+  reading `work next`. The import preserves source order and puts everything
+  into Next; the owner then promotes items to Now.
+
 ## Stage ladder
 
 Each stage is a distinct claim. Never write "done"; pick the strongest stage you
