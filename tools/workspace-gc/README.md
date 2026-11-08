@@ -347,6 +347,15 @@ Expected keeps are not failed attempts. JSON includes prune_errors and skipped
 cleanup outcomes; text reports the same errors. Independent safe cleanup
 continues after a prune failure. Removed clone paths are not pruned afterward.
 
+Git safety commands remove inherited repository/object/index/namespace redirection
+and command-line config injection variables. Explicit global/system config-file
+selection and transport settings (GIT_SSH_COMMAND, GIT_SSH, SSH_AUTH_SOCK) remain
+supported; each command receives its own environment copy. Caller alternates
+are supplied only through the explicit wrapper argument. Local file URLs decode
+URL paths once, accept empty/localhost authority, and refuse remote authorities,
+queries, fragments, ambiguous double-leading-slash URL paths or invalid UTF-8/NUL paths.
+Plain filesystem paths retain their existing semantics.
+
 ## Changes
 
 See [CHANGELOG.md](CHANGELOG.md).

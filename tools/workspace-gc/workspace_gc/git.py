@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+from urllib.parse import urlsplit, unquote
 
 LS_REMOTE_TIMEOUT = 45
 GIT_TIMEOUT = 120
@@ -34,10 +35,14 @@ def base_env() -> dict[str, str]:
             env["LC_ALL"] = "C"
             # Replacement refs could make an unpushed commit look contained.
             env["GIT_NO_REPLACE_OBJECTS"] = "1"
-            env.pop("GIT_DIR", None)
-            env.pop("GIT_WORK_TREE", None)
-            env.pop("GIT_INDEX_FILE", None)
-            env.pop("GIT_ALTERNATE_OBJECT_DIRECTORIES", None)
+            redirectors = {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                           "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                           "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE",
+                           "GIT_REPLACE_REF_BASE", "GIT_CONFIG"}
+            for key in list(env):
+                if key in redirectors or (key.startswith("GIT_CONFIG_") and key not in
+                        {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"}):
+                    env.pop(key)
             if "GIT_SSH_COMMAND" not in env and not _configured_ssh_command(env):
                 env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=15"
             _base_env = env
@@ -107,7 +112,15 @@ def is_network_url(url: str) -> bool:
 def local_url_path(url: str, repo: str) -> str:
     u = url.strip()
     if u.startswith("file://"):
-        u = u[len("file://"):]
+        try:
+            parsed = urlsplit(u)
+            if parsed.netloc.lower() not in ("", "localhost") or parsed.query or parsed.fragment or parsed.path.startswith("//"):
+                raise ValueError("nonlocal or ambiguous file URL")
+            u = unquote(parsed.path, encoding="utf-8", errors="strict")
+            if "\0" in u:
+                raise ValueError("NUL in file URL path")
+        except ValueError as exc:
+            raise GitError("unsupported local file URL") from exc
     u = os.path.expanduser(u)
     if not os.path.isabs(u):
         u = os.path.join(repo, u)
