@@ -135,3 +135,22 @@ frames, including an entirely idle run. Capture-wide missing-marker anomalies
 use frame="all" in both JSON and TSV.
 Per-frame one-sided marker absence still detects parity mismatches. Zero targets
 is a configuration error.
+
+Plain text and ANSI evidence derive from one ANSI capture, preserving physical
+rows (no capture-pane -J joining). Comparisons use viewport rows: captured marker
+rows are shifted by pane height minus captured line count, excluding history
+hits outside the viewport. Raw capture metrics retain captured row indices.
+Cursor metadata records pane height/history size and capture origin. Missing
+cursor coordinates are null and are not treated as row -1 displacements.
+Capture and cursor sampling have separate monotonic timestamps and cursor_atomic
+is false: redraw/resize can occur between tmux commands, so this is an inferred
+coordinate basis, not an atomic terminal snapshot.
+
+Unavailable pane height produces coordinate_basis_unavailable, not a false
+missing-marker diagnosis. Unknown visible presence is null in frame metrics;
+raw counts remain available. Use cursor-metrics.json for detailed sampling
+metadata and missing values. Physical rows split only at LF; Unicode line
+separator characters within a terminal row do not shift coordinates.
+
+Needles must fit within one physical pane row; text crossing a soft-wrap boundary
+does not match a single needle. Use shorter markers or a wider pane.
