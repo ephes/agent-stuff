@@ -85,7 +85,16 @@ def main():
         with open(os.path.join(cwd, "a.py"), "w") as fh:
             fh.write("REVIEWER_WROTE = 1\n")
     emit({"type": "system", "subtype": "init"})
-    if mode == "clean":
+    if mode == "nonfinite_tool":
+        emit({"type": "assistant", "message": {"content": [{
+            "type": "tool_use", "name": "Agent", "input": {"offset": float("nan")}}]}})
+        emit(result("REVIEW: CLEAN"))
+    elif mode == "nonfinite":
+        event = result("REVIEW: CLEAN")
+        event["total_cost_usd"] = float("nan")
+        event["structured_output"] = {"verdict": "X", "findings": float("nan")}
+        emit(event)
+    elif mode == "clean":
         emit(assistant("REVIEW: CLEAN"))
         emit(result("REVIEW: CLEAN"))
     elif mode == "issues":

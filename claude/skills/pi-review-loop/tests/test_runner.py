@@ -24,6 +24,22 @@ class TestRunner(unittest.TestCase):
         defaults.update(kw)
         return runner.run_review(cmd=FAKE + [mode], run_dir=self.run_dir, **defaults)
 
+    def test_serialization_failure_writes_degraded_receipt(self):
+        import json
+        real = runner.ReviewResult.write
+        calls = []
+        def write(receipt, path):
+            calls.append(receipt.state)
+            if len(calls) == 1:
+                raise ValueError("synthetic serialization failure")
+            return real(receipt, path)
+        with mock.patch.object(runner.ReviewResult, "write", write):
+            result = self._run("clean")
+        self.assertEqual(calls, [CLEAN, CRASHED])
+        self.assertEqual(result.state, CRASHED)
+        with open(os.path.join(self.run_dir, "result.json")) as fh:
+            self.assertEqual(json.load(fh)["state"], CRASHED)
+
     def test_clean(self):
         r = self._run("clean")
         self.assertEqual(r.state, CLEAN)

@@ -477,3 +477,9 @@ file directly under `/private/tmp`, a Bash write and a `Write`-tool write into
 the source worktree, a `Read` of the source worktree - to be recorded and to
 return nothing: no planted marker may appear in the output, and neither write
 may land. Verified with Claude Code 2.1.284 on macOS.
+
+Result publication serializes portable JSON (no NaN or Infinity) before creating
+a sibling temporary file, then replaces result.json atomically after close.
+Serialization, write, flush or replacement failure preserves an earlier receipt.
+Receipts use owner-only permissions. If reviewer data cannot be serialized,
+runners record a failed portable receipt while retaining available tool evidence.

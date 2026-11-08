@@ -24,6 +24,24 @@ class TestRunner(unittest.TestCase):
         defaults.update(kw)
         return runner.run_review(cmd=FAKE + [mode], run_dir=self.run_dir, **defaults)
 
+    def test_nonfinite_stream_writes_degraded_portable_receipt(self):
+        import json
+        result = self._run("nonfinite")
+        self.assertEqual(result.state, CRASHED)
+        with open(os.path.join(self.run_dir, "result.json")) as fh:
+            data = json.load(fh, parse_constant=lambda value: self.fail(value))
+        self.assertEqual(data["state"], CRASHED)
+        self.assertIsNone(data["structured_output"])
+
+    def test_nonfinite_tool_input_keeps_portable_failure_evidence(self):
+        import json
+        receipt = self._run("nonfinite_tool")
+        self.assertEqual(receipt.state, CRASHED)
+        with open(os.path.join(self.run_dir, "result.json")) as fh:
+            data = json.load(fh, parse_constant=lambda value: self.fail(value))
+        self.assertEqual(data['forbidden_tool_uses'][0]['tool'], 'Agent')
+        self.assertIsNone(data['forbidden_tool_uses'][0]['input']['offset'])
+
     def test_clean(self):
         r = self._run("clean")
         self.assertEqual(r.state, CLEAN)

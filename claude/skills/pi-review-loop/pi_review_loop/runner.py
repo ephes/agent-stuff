@@ -238,6 +238,6 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         )
         try:
             result.write(paths["result"])
-        except OSError:
+        except (OSError, ValueError, TypeError):
             pass
     return result

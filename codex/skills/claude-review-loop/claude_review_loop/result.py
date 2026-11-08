@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field, asdict
 from .states import CLEAN, PASSING
 
@@ -56,5 +58,17 @@ class ReviewResult:
         return d
 
     def write(self, path):
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(self.to_dict(), fh, indent=2, sort_keys=True)
+        # Preflight the complete portable JSON before touching any receipt.
+        payload = json.dumps(self.to_dict(), indent=2, sort_keys=True, allow_nan=False)
+        fd, temporary = tempfile.mkstemp(prefix=".result-", dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fd = None
+                fh.write(payload)
+                fh.flush()
+            os.replace(temporary, path)
+        finally:
+            if fd is not None:
+                os.close(fd)
+            if os.path.exists(temporary):
+                os.unlink(temporary)

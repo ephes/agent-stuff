@@ -162,7 +162,7 @@ def main():
     if mode == "reroute":
         records.append({"type": "event_msg", "payload": {
             "type": "model_reroute", "from_model": MODEL, "to_model": "gpt-5.6-sol"}})
-    if mode == "spawn_record":
+    if mode in ("spawn_record", "nonfinite_forbidden"):
         records.append({"type": "response_item", "payload": {
             "type": "function_call", "name": "spawn_agent",
             "namespace": "collaboration", "arguments": "{}"}})
@@ -200,7 +200,9 @@ def main():
         final = {"verdict": "ISSUES", "findings": [
             {"severity": "Warning", "path": "a.py", "message": "tidy this"}]}
     text = json.dumps(final)
-    if mode == "bad_json":
+    if mode in ("nonfinite_verdict", "nonfinite_forbidden"):
+        text = '{"verdict":"X","findings":NaN}'
+    elif mode == "bad_json":
         text = "Looks fine to me.\nREVIEW: CLEAN"
     elif mode == "clean_with_findings":
         text = json.dumps({"verdict": "CLEAN", "findings": [
