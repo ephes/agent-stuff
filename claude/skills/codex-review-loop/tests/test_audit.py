@@ -114,6 +114,51 @@ class TestAudit(unittest.TestCase):
         self.assertIn("not JSON", audit.judge(audit.audit_session(self.path),
                                               model="gpt-6.1-sol", effort="high"))
 
+    def test_decode_and_read_errors_are_structured(self):
+        from unittest import mock
+        for suffix in (b'\xff\n', b'{"type":"event_msg","payload":"\xff"}\n'):
+            with open(self.path, 'wb') as fh:
+                fh.write(json.dumps(TURN).encode() + b'\n' + suffix)
+            result = audit.audit_session(self.path)
+            self.assertIn('UTF-8', result.error)
+            self.assertIsNotNone(audit.judge(result, model='gpt-6.1-sol', effort='high'))
+        with mock.patch('builtins.open', side_effect=OSError('synthetic')):
+            self.assertIn('cannot read', audit.audit_session(self.path).error)
+
+    def test_malformed_tool_fields_fail_closed(self):
+        for kind in ('function_call', 'custom_tool_call'):
+            for field in ('name', 'namespace'):
+                for value in ([], {}, None):
+                    if field == 'namespace' and value is None:
+                        continue  # absent/null namespace is the supported plain-tool form
+                    with self.subTest(kind=kind, field=field, value=value):
+                        entry = call('exec', kind=kind)
+                        entry['payload'][field] = value
+                        result, reason = self.judged(TURN, entry)
+                        self.assertIn('malformed', result.error)
+                        self.assertIsNotNone(reason)
+
+    def test_other_malformed_fields_and_nested_json_fail_closed(self):
+        for entry in ({'type': []}, {'type': {}},
+                      {'type': 'event_msg', 'payload': {'type': 'item_completed',
+                         'item': {'type': []}}}):
+            result, reason = self.judged(TURN, entry)
+            self.assertIn('malformed', result.error)
+            self.assertIsNotNone(reason)
+        from unittest import mock
+        record(self.path, TURN)
+        with mock.patch.object(audit.json, 'loads', side_effect=RecursionError('nested')):
+            self.assertIn('not JSON', audit.audit_session(self.path).error)
+
+    def test_mid_read_io_error_is_structured(self):
+        from unittest import mock
+        handle = mock.MagicMock()
+        handle.__enter__.return_value = handle
+        handle.__iter__.side_effect = OSError('synthetic read error')
+        with mock.patch('builtins.open', return_value=handle):
+            self.assertIn('I/O failure', audit.audit_session(self.path).error)
+        handle.__exit__.assert_called_once()
+
     def test_find_session_record_requires_exactly_one_match(self):
         day = os.path.join(self.tmp.name, "sessions", "2026", "09", "23")
         os.makedirs(day)
