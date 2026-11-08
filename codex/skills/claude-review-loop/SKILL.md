@@ -274,7 +274,9 @@ are not allowed. Separate harness invocations may run concurrently.
    untrusted even if file content imitates a heading. The artifact remains the
    exact repository review input. An unreadable, non-regular, oversized, binary,
    non-UTF-8, or secret-named explicit context file fails the run with exit `2`;
-   it is never silently omitted or replacement-decoded.
+   it is never silently omitted or replacement-decoded. Inspection and reading
+   use the same verified regular-file descriptor, with no-follow opens and an
+   identity check. The byte ceiling also rejects growth during preparation.
 
    `--run-dir` must be new or empty so no unrelated local content can enter the
    reviewer's workspace. Every concurrent invocation must use a distinct
