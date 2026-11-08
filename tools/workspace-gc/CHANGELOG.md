@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Isolate Git repository/config injection environment variables and decode
+  local file URLs correctly, including escaped spaces and Unicode.
+
 - Preserve partial-run receipts after prune errors and return failure for
   attempted empty/husk cleanup that could not complete; expected keeps stay successful.
 

@@ -450,7 +450,10 @@ class Inspector:
             if git.is_network_url(url):
                 urls.append(url)
                 continue
-            local = git.local_url_path(url, repo)
+            try:
+                local = git.local_url_path(url, repo)
+            except GitError:
+                continue
             if not os.path.exists(local) or keep_match(local, self.keep_patterns):
                 continue  # keep-listed repositories are never inspected
             try:
@@ -1188,7 +1191,10 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
         for line in cfg.splitlines():
             parts = line.split(None, 1)
             if len(parts) == 2 and not git.is_network_url(parts[1]):
-                target = os.path.realpath(git.local_url_path(parts[1], c.path))
+                try:
+                    target = os.path.realpath(git.local_url_path(parts[1], c.path))
+                except GitError:
+                    continue
                 if target in by_path:
                     by_path[target].notes.append(f"local remote of {c.path}")
     return Inventory(roots=rroots, checkouts=cos, signals=sig, keep_patterns=patterns)
