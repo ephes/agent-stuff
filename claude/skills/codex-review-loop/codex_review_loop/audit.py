@@ -73,6 +73,16 @@ def _tool_label(payload):
 
 def audit_session(path):
     audit = Audit(path=path)
+    try:
+        return _audit_session(path, audit)
+    except UnicodeError:
+        audit.error = "session record is not UTF-8"
+    except OSError:
+        audit.error = "cannot read session record: I/O failure"
+    return audit
+
+
+def _audit_session(path, audit):
     if path is None:
         audit.error = "no session record found for this review"
         return audit
@@ -87,12 +97,15 @@ def audit_session(path):
                 continue
             try:
                 record = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):
                 audit.error = f"session record line {number} is not JSON"
                 return audit
             if not isinstance(record, dict):
                 continue
             kind = record.get("type")
+            if not isinstance(kind, str):
+                audit.error = f"malformed record type at line {number}"
+                return audit
             payload = record.get("payload")
             payload = payload if isinstance(payload, dict) else {}
             # Structural, never a substring search: tool output in the record
@@ -112,6 +125,10 @@ def audit_session(path):
                 audit.forbidden.append(kind)
             elif kind == "response_item" and payload.get("type") in (
                     "function_call", "custom_tool_call"):
+                if (not isinstance(payload.get("name"), str) or not payload["name"]
+                        or not isinstance(payload.get("namespace"), (str, type(None)))):
+                    audit.error = f"malformed tool fields at line {number}"
+                    return audit
                 label = _tool_label(payload)
                 audit.tool_uses.append(label)
                 if (payload.get("namespace") in FORBIDDEN_NAMESPACES
@@ -120,6 +137,9 @@ def audit_session(path):
                     audit.forbidden.append(label)
             elif kind == "event_msg" and payload.get("type") == "item_completed":
                 item = payload.get("item")
+                if isinstance(item, dict) and not isinstance(item.get("type"), str):
+                    audit.error = f"malformed item type at line {number}"
+                    return audit
                 if isinstance(item, dict) and item.get("type") in DELEGATION_ITEMS:
                     audit.forbidden.append(item["type"])
             error = payload.get("error") if kind == "event_msg" else None

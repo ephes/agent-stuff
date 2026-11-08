@@ -482,3 +482,7 @@ reviewer that left a directory with mode 000 in it (that round is still
 recorded in the slice ledger). The fake refuses to
 run against the real `~/.codex`, and it reaches the CLI only through
 `tests/harness_entry.py`.
+
+Session audit decoding and read failures produce INVALID/model-unproven receipts.
+Malformed tool names or namespaces are refused as incomplete proof, with bounded
+diagnostics that do not quote session content.

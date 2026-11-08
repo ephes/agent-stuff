@@ -234,6 +234,23 @@ class TestCliFailsClosed(unittest.TestCase):
         self.assertFalse(os.path.exists(ledger_mod.path_for(self.fx.ledger, "s1")))
 
 
+class TestMalformedAudit(unittest.TestCase):
+    def test_bad_session_produces_failed_receipt_and_releases_slot(self):
+        for mode in ('invalid_utf8', 'malformed_tool'):
+            with self.subTest(mode=mode):
+                fx = RepoFixture()
+                try:
+                    proc, result, _ = fx.run(mode)
+                    self.assertEqual(proc.returncode, 2, proc.stderr)
+                    self.assertEqual(result['state'], 'INVALID')
+                    self.assertEqual(result['failure_kind'], 'model_unproven')
+                    self.assertNotIn('Traceback', proc.stderr)
+                    proc, result, _ = fx.run('clean', '--max-concurrent', '1')
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                finally:
+                    fx.cleanup()
+
+
 class TestCliLifecycle(unittest.TestCase):
     def setUp(self):
         self.fx = RepoFixture()

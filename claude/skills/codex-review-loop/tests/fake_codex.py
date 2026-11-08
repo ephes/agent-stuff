@@ -170,6 +170,10 @@ def main():
         records.append({"type": "response_item", "payload": {
             "type": "function_call", "name": "web_search", "arguments": "{}"}})
 
+    if mode == "malformed_tool":
+        records.append({"type": "response_item", "payload": {
+            "type": "function_call", "name": [], "namespace": {}}})
+
     def write_record():
         with open(record_path, "w") as fh:
             for rec in records:
@@ -177,6 +181,9 @@ def main():
 
     if mode != "no_record":
         write_record()
+        if mode == "invalid_utf8":
+            with open(record_path, "ab") as fh:
+                fh.write(b"\xff\n")
     if mode == "silent_recording":
         silence = float(os.environ.get("FAKE_CODEX_SILENCE", "3"))
         end = time.time() + silence
