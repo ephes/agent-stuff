@@ -370,18 +370,17 @@ def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
            sig: Signals, min_idle_hours: float = 48.0,
            min_stale_hours: float = 72.0) -> None:
     """Remove the stale husks (whole directory) and the caches of the
-    cache-only ones, each re-checked right before, with the process working
-    directories read afresh for every one. Updates the entries."""
+    cache-only ones, each re-checked right before, with all ownership sources
+    read afresh for every one. Updates the entries."""
     for h in entries:
         if not (h.removable or h.stale):
             continue
-        cwds, status = sig_mod.read_process_cwds()
-        if status.status not in ("ok", "absent"):
-            h.outcome = f"process working directories unreadable now ({status.detail})"
+        live = sig_mod.refresh(sig)
+        blockers = live.apply_blockers()
+        if blockers:
+            h.outcome = "in-use signals unreadable now: " + "; ".join(blockers)
             h.removable = h.stale = False
             continue
-        live = Signals(herdr_cwds=sig.herdr_cwds, work_refs=sig.work_refs,
-                       process_cwds=sorted(set(sig.process_cwds) | set(cwds)))
         h.outcome = _remove_one(h, roots, keep_patterns, live, min_idle_hours,
                                 min_stale_hours)
         h.removed = not h.outcome

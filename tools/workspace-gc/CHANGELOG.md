@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refresh process, pane and read-only work ownership before each removal;
+  retain earlier claims and refuse incomplete refreshes across all removal kinds.
+
 - The built-in keep entry for `ws-echoport-retention-race` is removed (its work
   is saved on a branch); the keep list is now empty unless configured.
 

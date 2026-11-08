@@ -100,6 +100,7 @@ def parser() -> argparse.ArgumentParser:
 
 def _signals(a, sig=None) -> sig_mod.Signals:
     if sig is not None:
+        sig.work_env, sig.work_ledger = a.work_env, a.work_ledger
         return sig
     return sig_mod.gather(herdr=not a.no_herdr, processes=not a.no_processes,
                           work=not a.no_work, work_env=a.work_env, work_ledger=a.work_ledger)
@@ -166,7 +167,7 @@ def _apply(a, inv) -> inv_mod.Run:
     for co in sorted((c for c in inv.checkouts if c.cls == "A"), key=lambda c: c.path):
         try:
             outcome = rm_mod.remove_checkout(co, roots, mains, inv.keep_patterns,
-                                             _regenerable(a), fetch=not a.no_fetch)
+                                             _regenerable(a), fetch=not a.no_fetch, signals=inv.signals)
             run.removed.append(co)
         except rm_mod.Refused as exc:
             run.skipped += 1
@@ -258,7 +259,7 @@ def cmd_remove(a, sig, out) -> int:
         return 2
     try:
         out.write(rm_mod.remove_checkout(co, roots, _main_roots(a), inv.keep_patterns,
-                                         _regenerable(a), fetch=not a.no_fetch) + "\n")
+                                         _regenerable(a), fetch=not a.no_fetch, signals=inv.signals) + "\n")
     except rm_mod.Refused as exc:
         out.write(f"REFUSED {desc}: {exc}\n")
         return 1

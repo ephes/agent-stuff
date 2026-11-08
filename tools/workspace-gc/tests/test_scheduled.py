@@ -355,17 +355,16 @@ class TestEmptyDirs(Scheduled):
         self.assertIn("ws-cwd - kept: in use (working directory", text)
         self.assertIn("ws-item - kept: active work item: active-item", text)
 
-    @unittest.skipUnless(shutil.which("lsof") or os.path.exists("/usr/sbin/lsof"), "needs lsof")
     def test_process_that_entered_after_the_inventory_keeps_it(self):
         d = self.empty("ws-d")
         self.later()
         sig = ok_signals()
         entries = empties.scan([self.ws], [], sig)
         self.assertTrue(entries[0].removable)
-        proc = subprocess.Popen(["sleep", "60"], cwd=d)
-        self.addCleanup(proc.wait)
-        self.addCleanup(proc.kill)
-        empties.remove(entries, [], sig)
+        from unittest import mock
+        with mock.patch.object(empties.sig_mod, "read_process_cwds",
+                               return_value=([d], SourceStatus("ok"))):
+            empties.remove(entries, [], sig)
         self.assertTrue(os.path.isdir(d))
         self.assertIn("in use (working directory", entries[0].reason)
 
