@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import time
@@ -18,7 +19,7 @@ def parse_label_value(raw: str, *, option: str) -> tuple[str, str]:
     if "=" not in raw:
         raise argparse.ArgumentTypeError(f"{option} must be LABEL=VALUE")
     label, value = raw.split("=", 1)
-    if not label or not LABEL_RE.match(label):
+    if not label or not LABEL_RE.fullmatch(label):
         raise argparse.ArgumentTypeError(
             f"{option} label must match {LABEL_RE.pattern}"
         )
@@ -123,6 +124,7 @@ def row_delta_metrics(
     metrics: list[dict[str, object]],
     cursor_metrics: list[dict[str, object]],
     labels: list[str],
+    required_needles: set[str] | None = None,
 ) -> list[dict[str, object]]:
     if len(labels) < 2:
         return []
@@ -165,6 +167,7 @@ def row_delta_metrics(
                         "label": target_label,
                         "reference_label": reference,
                         "name": needle,
+                        "required": needle in (required_needles or set()),
                         "reference_row": left_first,
                         "target_row": right_first,
                         "delta": delta,
@@ -197,7 +200,7 @@ def row_delta_anomalies(
     for item in row_deltas:
         reference_row = item["reference_row"]
         target_row = item["target_row"]
-        if reference_row is None and target_row is None:
+        if reference_row is None and target_row is None and not item.get("required", False):
             continue
         if reference_row is None or target_row is None:
             anomalies.append(
@@ -231,6 +234,16 @@ def row_delta_anomalies(
                 }
             )
     return anomalies
+
+
+def required_marker_anomalies(metrics, labels, required_needles):
+    reference = labels[0]
+    return [{"label": reference, "frame": "all", "kind": "missing_marker",
+             "needle": needle, "count": 0, "rows": "",
+             "detail": "required marker absent from reference throughout capture"}
+            for needle in sorted(required_needles)
+            if not any(item["label"] == reference and item["needle"] == needle
+                       and item.get("visible", item["count"] > 0) for item in metrics)]
 
 
 def main() -> int:
@@ -267,18 +280,25 @@ def main() -> int:
     parser.add_argument("--max-row-delta", type=int, default=0)
     args = parser.parse_args()
 
+    if args.max_row_delta < 0:
+        parser.error("--max-row-delta must be >= 0")
     if not args.target:
         parser.error("at least one --target LABEL=TMUX_TARGET is required")
     if args.frames < 1:
         parser.error("--frames must be >= 1")
-    if args.interval < 0:
-        parser.error("--interval must be >= 0")
+    if not math.isfinite(args.interval) or args.interval < 0:
+        parser.error("--interval must be finite and >= 0")
 
+    if len({label for label, _ in args.target}) != len(args.target):
+        parser.error("duplicate --target labels")
+    if len({label for label, _ in args.send}) != len(args.send):
+        parser.error("duplicate --send labels")
     transient_needles = args.transient if args.transient else ["Working..."]
-    needles = args.needle if args.needle else list(transient_needles)
+    needles = list(args.needle) if args.needle else list(transient_needles)
     for needle in transient_needles:
         if needle not in needles:
             needles.append(needle)
+    required_needles = set(args.needle or []) - set(transient_needles)
     targets = dict(args.target)
     target_labels = [label for label, _target in args.target]
     sends = dict(args.send)
@@ -337,10 +357,12 @@ def main() -> int:
         metrics=metrics,
         cursor_metrics=cursor_metrics,
         labels=target_labels,
+        required_needles=set(),
     )
     anomalies.extend(
         row_delta_anomalies(row_deltas, max_row_delta=args.max_row_delta)
     )
+    anomalies.extend(required_marker_anomalies(metrics, target_labels, required_needles))
     (args.out / "anomalies.json").write_text(
         json.dumps(anomalies, indent=2) + "\n"
     )

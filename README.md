@@ -58,6 +58,11 @@ skill suites use `discover -s tests` from the skill directory). Use Python
 importing the harness they select the newest working `python3.1x` on PATH
 (3.19 down to 3.10), or exit with a one-line prerequisite error.
 
+The synthetic tmux sampler suite runs explicitly with
+`cd codex/skills/tmux-transient-ui-verify && python3.14 -m unittest discover -s tests`.
+It exercises both sampler copies without live panes or prompt sends. The workflow
+is unchanged under the owner’s no-new-Actions policy; run this suite locally.
+
 ## Repo structure
 
 ```text

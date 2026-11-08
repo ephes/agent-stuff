@@ -100,3 +100,7 @@ State clearly:
 - which active raw frames or screenshots were inspected manually;
 - known product-specific differences that are acceptable;
 - limitations, such as provider-generated answer wording or missed frames.
+
+Sampler labels must match the entire safe label pattern and be unique within
+--target and --send. Intervals must be finite and nonnegative; Codex row tolerance
+must also be nonnegative. Invalid configuration fails before sends or files.
