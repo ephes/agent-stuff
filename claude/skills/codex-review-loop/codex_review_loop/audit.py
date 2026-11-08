@@ -36,6 +36,37 @@ DELEGATION_ITEMS = frozenset({"SubAgentActivity", "CollabAgentToolCall"})
 DELEGATION_RECORDS = frozenset({"inter_agent_communication_metadata"})
 
 
+MAX_RECORD_BYTES = 1024 * 1024
+MAX_EVIDENCE = 4096
+MAX_FIELD_CHARS = 512
+
+
+def _records(fh):
+    number = 0
+    while True:
+        raw = fh.readline(MAX_RECORD_BYTES + 1)
+        if not raw:
+            return
+        number += 1
+        oversized = len(raw) > MAX_RECORD_BYTES
+        if oversized:
+            while raw and not raw.endswith(b"\n"):
+                raw = fh.readline(MAX_RECORD_BYTES + 1)
+            yield number, None
+        else:
+            yield number, raw
+
+
+def _remember(audit, field, value):
+    target = getattr(audit, field)
+    if (value is not None and (not isinstance(value, str) or len(value) > MAX_FIELD_CHARS)):
+        audit.error = audit.error or "malformed or oversized audit field"
+    elif len(target) >= MAX_EVIDENCE:
+        audit.error = audit.error or "incomplete audit: evidence ceiling exceeded"
+    else:
+        target.append(value)
+
+
 @dataclass
 class Audit:
     path: str | None = None
@@ -76,76 +107,97 @@ def audit_session(path):
     try:
         return _audit_session(path, audit)
     except UnicodeError:
-        audit.error = "session record is not UTF-8"
+        audit.error = audit.error or "session record is not UTF-8"
     except OSError:
-        audit.error = "cannot read session record: I/O failure"
+        audit.error = audit.error or "cannot read session record: I/O failure"
     return audit
 
 
 def _audit_session(path, audit):
     if path is None:
-        audit.error = "no session record found for this review"
+        audit.error = audit.error or "no session record found for this review"
         return audit
     try:
-        fh = open(path, encoding="utf-8")
+        fh = open(path, "rb")
     except OSError as exc:
-        audit.error = f"cannot read session record: {exc}"
+        audit.error = audit.error or f"cannot read session record: {exc}"
         return audit
     with fh:
-        for number, line in enumerate(fh, start=1):
+        for number, raw in _records(fh):
+            if raw is None:
+                audit.error = audit.error or f"incomplete audit: oversized record at line {number}"
+                continue
+            try:
+                line = raw.decode("utf-8")
+            except UnicodeError:
+                audit.error = audit.error or f"session record line {number} is not UTF-8"
+                continue
             if not line.strip():
                 continue
             try:
                 record = json.loads(line)
             except (ValueError, RecursionError):
-                audit.error = f"session record line {number} is not JSON"
-                return audit
+                audit.error = audit.error or f"session record line {number} is not JSON"
+                continue
             if not isinstance(record, dict):
                 continue
             kind = record.get("type")
             if not isinstance(kind, str):
-                audit.error = f"malformed record type at line {number}"
-                return audit
+                audit.error = audit.error or f"malformed record type at line {number}"
+                continue
             payload = record.get("payload")
+            if kind in ("session_meta", "turn_context", "response_item", "event_msg") and not isinstance(payload, dict):
+                audit.error = audit.error or f"malformed relevant envelope at line {number}"
+                continue
             payload = payload if isinstance(payload, dict) else {}
+            if kind in ("response_item", "event_msg") and not isinstance(payload.get("type"), str):
+                audit.error = audit.error or f"malformed payload type at line {number}"
+                continue
             # Structural, never a substring search: tool output in the record
             # carries the reviewed code, which may itself say "reroute".
             if _is_reroute(kind) or _is_reroute(payload.get("type")):
-                audit.reroutes.append(f"line {number}: {kind}/{payload.get('type')}")
+                _remember(audit, "reroutes", f"line {number}: {kind}/{payload.get('type')}")
             if kind == "session_meta":
-                audit.cli_version = payload.get("cli_version") or audit.cli_version
+                version = payload.get("cli_version")
+                if isinstance(version, str) and len(version) <= MAX_FIELD_CHARS:
+                    audit.cli_version = version or audit.cli_version
                 source = payload.get("source")
                 if isinstance(source, dict) and "subagent" in source:
-                    audit.forbidden.append("session is a subagent thread")
+                    _remember(audit, "forbidden", "session is a subagent thread")
             elif kind == "turn_context":
-                audit.models.append(payload.get("model"))
-                audit.efforts.append(payload.get("effort"))
-                audit.access_programs.append(payload.get("cyber_access_program"))
+                _remember(audit, "models", payload.get("model"))
+                _remember(audit, "efforts", payload.get("effort"))
+                _remember(audit, "access_programs", payload.get("cyber_access_program"))
             elif kind in DELEGATION_RECORDS:
-                audit.forbidden.append(kind)
+                _remember(audit, "forbidden", kind)
             elif kind == "response_item" and payload.get("type") in (
                     "function_call", "custom_tool_call"):
                 if (not isinstance(payload.get("name"), str) or not payload["name"]
                         or not isinstance(payload.get("namespace"), (str, type(None)))):
-                    audit.error = f"malformed tool fields at line {number}"
-                    return audit
+                    if payload.get("namespace") == "collaboration":
+                        _remember(audit, "forbidden", "collaboration.<malformed>")
+                    audit.error = audit.error or f"malformed tool fields at line {number}"
+                    continue
                 label = _tool_label(payload)
-                audit.tool_uses.append(label)
+                if len(label) > MAX_FIELD_CHARS:
+                    label = label[:MAX_FIELD_CHARS - 1] + "…"
+                    audit.error = audit.error or f"oversized tool label at line {number}"
+                _remember(audit, "tool_uses", label)
                 if (payload.get("namespace") in FORBIDDEN_NAMESPACES
                         or payload.get("name") not in ALLOWED_TOOLS
                         or payload.get("namespace") not in (None, "functions")):
-                    audit.forbidden.append(label)
+                    _remember(audit, "forbidden", label)
             elif kind == "event_msg" and payload.get("type") == "item_completed":
                 item = payload.get("item")
-                if isinstance(item, dict) and not isinstance(item.get("type"), str):
-                    audit.error = f"malformed item type at line {number}"
-                    return audit
+                if not isinstance(item, dict) or not isinstance(item.get("type"), str):
+                    audit.error = audit.error or f"malformed item type at line {number}"
+                    continue
                 if isinstance(item, dict) and item.get("type") in DELEGATION_ITEMS:
-                    audit.forbidden.append(item["type"])
+                    _remember(audit, "forbidden", item["type"])
             error = payload.get("error") if kind == "event_msg" else None
             if isinstance(error, dict) and isinstance(
                     error.get("codex_error_info"), str):
-                audit.error_infos.append(error["codex_error_info"])
+                _remember(audit, "error_infos", error["codex_error_info"])
     return audit
 
 

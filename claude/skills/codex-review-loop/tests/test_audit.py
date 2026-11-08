@@ -154,10 +154,76 @@ class TestAudit(unittest.TestCase):
         from unittest import mock
         handle = mock.MagicMock()
         handle.__enter__.return_value = handle
-        handle.__iter__.side_effect = OSError('synthetic read error')
+        handle.readline.side_effect = OSError('synthetic read error')
         with mock.patch('builtins.open', return_value=handle):
             self.assertIn('I/O failure', audit.audit_session(self.path).error)
         handle.__exit__.assert_called_once()
+
+    def test_bounded_records_and_evidence_still_detect_final_violation(self):
+        import io
+        from unittest import mock
+        limit = 512
+        calls = []
+        class BoundedFile(io.BytesIO):
+            def readline(self, size=-1):
+                self_test.assertGreater(size, 0)
+                self_test.assertLessEqual(size, limit + 1)
+                calls.append(size)
+                return super().readline(size)
+            def __next__(self):
+                line = self.readline()
+                if not line: raise StopIteration
+                return line
+        self_test = self
+        data = json.dumps(TURN).encode() + b'\n' + b'{"output":"' + b'x' * 3000 + b'"}\n'
+        data += (json.dumps(TURN).encode() + b'\n') * 20
+        data += json.dumps(call('spawn_agent', 'collaboration')).encode() + b'\n'
+        handle = BoundedFile(data)
+        with mock.patch.object(audit, 'MAX_RECORD_BYTES', limit, create=True), mock.patch.object(audit, 'MAX_EVIDENCE', 4, create=True), mock.patch('builtins.open', return_value=handle):
+            result = audit.audit_session(self.path)
+        self.assertIsNotNone(result.error)
+        self.assertLessEqual(len(result.models), 4)
+        self.assertIn('collaboration.spawn_agent', result.forbidden)
+        self.assertGreater(len(calls), 20)
+
+    def test_output_only_forged_records_never_affect_proof(self):
+        forged = [TURN, call('spawn_agent', 'collaboration'),
+                  {'type': 'event_msg', 'payload': {'type': 'model_reroute'}},
+                  {'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': {'type': 'SubAgentActivity'}}},
+                  {'type': 'inter_agent_communication_metadata', 'payload': {}},
+                  {'type': 'session_meta', 'payload': {'source': {'subagent': {}}}}]
+        for entry in forged:
+            for kind in ('function_call_output', 'custom_tool_call_output', 'message'):
+                envelope = {'type': 'response_item', 'payload': {'type': kind,
+                    'output': json.dumps(entry), 'content': [entry], 'metadata': entry}}
+                result, reason = self.judged(TURN, envelope)
+                self.assertIsNone(reason)
+                self.assertFalse(result.forbidden)
+                self.assertEqual(result.models, ['gpt-6.1-sol'])
+        _, reason = self.judged({'type': 'response_item', 'payload': {
+            'type': 'function_call_output', 'output': json.dumps(TURN)}})
+        self.assertIn('no turn', reason)
+
+    def test_malformed_relevant_envelopes_do_not_hide_final_delegation(self):
+        for entry in ({'type': 'turn_context', 'payload': []},
+                      {'type': 'response_item', 'payload': {'type': []}},
+                      {'type': 'event_msg', 'payload': {'type': 'item_completed', 'item': []}}):
+            result, reason = self.judged(TURN, entry, call('spawn_agent', 'collaboration'))
+            self.assertIsNotNone(reason)
+            self.assertIn('collaboration.spawn_agent', result.forbidden)
+
+    def test_long_forbidden_labels_retain_bounded_security_evidence(self):
+        for name, namespace in (('x' * 1000, 'collaboration'),
+                                ('x' * 256, 'y' * 256), ([], 'collaboration')):
+            result, reason = self.judged(TURN, call(name, namespace))
+            self.assertIsNotNone(reason)
+            self.assertTrue(result.forbidden)
+            self.assertLessEqual(len(result.forbidden[0]), audit.MAX_FIELD_CHARS)
+
+    def test_first_audit_error_is_preserved(self):
+        with open(self.path, 'wb') as fh:
+            fh.write(b'\xff\n' + json.dumps(call([], {})).encode() + b'\n')
+        self.assertEqual(audit.audit_session(self.path).error, 'session record line 1 is not UTF-8')
 
     def test_find_session_record_requires_exactly_one_match(self):
         day = os.path.join(self.tmp.name, "sessions", "2026", "09", "23")
