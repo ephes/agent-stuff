@@ -91,7 +91,7 @@ class QuotaGuardTest(unittest.TestCase):
         self.assertTrue(status.blocked)
         self.assertIn("5-hour", status.message)
 
-    def test_last_event_in_a_file_wins(self):
+    def test_newer_event_time_in_a_file_wins(self):
         self.write(event(100, stamp="2026-11-01T10:00:00Z"), event(20, stamp="2026-11-01T11:00:00Z"))
         self.assertFalse(self.check().blocked)
 
@@ -130,6 +130,39 @@ class QuotaGuardTest(unittest.TestCase):
             self.assertTrue(json.loads(out.getvalue())["blocked"])
         with mock.patch.dict(os.environ, {**env, guard.MAX_PERCENT_ENV: "x"}, clear=True), redirect_stderr(io.StringIO()):
             self.assertEqual(guard.main([]), guard.EXIT_USAGE)
+
+    def test_event_time_beats_physical_order_and_equal_times_keep_first(self):
+        self.write(event(100), 'garbage rate_limits',
+                   event(10, stamp='2026-11-01T10:00:00Z'), event(20))
+        self.assertTrue(self.check().blocked)
+
+    def test_unrepresentable_utc_timestamps_are_ignored(self):
+        for stamp in ('0001-01-01T00:00:00+01:00', '9999-12-31T23:59:59-01:00'):
+            self.write(event(100, stamp=stamp))
+        self.assertIsNone(self.check().observed_at)
+        self.write(event(100, stamp='2026-11-01T12:00:00+01:00'))
+        self.assertTrue(self.check().blocked)
+        self.assertEqual(self.check().observed_at.utcoffset(), timedelta(0))
+
+    def test_bounded_scanner_drains_long_line_and_keeps_next_reading(self):
+        class BoundedFile(io.BytesIO):
+            def readline(self, size=-1):
+                self_test.assertGreater(size, 0, 'unbounded record read')
+                self_test.assertLessEqual(size, 513)
+                calls.append(size)
+                return super().readline(size)
+            def __next__(self):
+                line = self.readline()
+                if not line: raise StopIteration
+                return line
+        self_test = self
+        calls = []
+        payload = b'{"image":"' + b'x' * 3000 + b'"}\n' + json.dumps(event(100)).encode() + b'\n'
+        handle = BoundedFile(payload)
+        with mock.patch.object(guard, 'MAX_RECORD_BYTES', 512, create=True), mock.patch.object(Path, 'open', return_value=handle):
+            found = guard._reading(Path('synthetic'))
+        self.assertEqual(found[1][0].used_percent, 100)
+        self.assertGreater(len(calls), 2)
 
 
 if __name__ == "__main__":

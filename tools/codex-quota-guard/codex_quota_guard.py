@@ -23,6 +23,7 @@ ALLOW_ENV = "CODEX_QUOTA_ALLOW_CREDITS"
 MAX_PERCENT_ENV = "CODEX_QUOTA_MAX_PERCENT"
 DEFAULT_MAX_PERCENT = 100.0
 MAX_SESSION_FILES = 20
+MAX_RECORD_BYTES = 1024 * 1024
 EXIT_OK = 0
 EXIT_BLOCKED = 3
 EXIT_USAGE = 2
@@ -57,9 +58,9 @@ def _timestamp(value) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+    except (ValueError, OverflowError):
         return None
-    return parsed if parsed.tzinfo else None
 
 
 def _window(raw) -> Window | None:
@@ -80,15 +81,25 @@ def _window(raw) -> Window | None:
 
 
 def _reading(path: Path) -> tuple[datetime, list[Window]] | None:
-    """The last event in ``path`` that carries a usable rate-limit reading."""
+    """Newest event timestamp; equal-time observations keep the first record."""
     found = None
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
+    with path.open("rb") as handle:
+        while True:
+            raw = handle.readline(MAX_RECORD_BYTES + 1)
+            if not raw:
+                break
+            if len(raw) > MAX_RECORD_BYTES:
+                while raw and not raw.endswith(b"\n"):
+                    raw = handle.readline(MAX_RECORD_BYTES + 1)
+                continue
+            if b"rate_limits" not in raw:
+                continue
+            line = raw.decode("utf-8", errors="replace")
             if "rate_limits" not in line:
                 continue
             try:
                 event = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
             if not isinstance(event, dict):
                 continue
@@ -102,7 +113,7 @@ def _reading(path: Path) -> tuple[datetime, list[Window]] | None:
             if limits is None or observed is None:
                 continue
             windows = [w for w in (_window(limits.get(k)) for k in ("primary", "secondary")) if w]
-            if windows:
+            if windows and (found is None or observed > found[0]):
                 found = (observed, windows)
     return found
 
