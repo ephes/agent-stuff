@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import time
@@ -18,7 +19,7 @@ def parse_label_value(raw: str, *, option: str) -> tuple[str, str]:
     if "=" not in raw:
         raise argparse.ArgumentTypeError(f"{option} must be LABEL=VALUE")
     label, value = raw.split("=", 1)
-    if not label or not LABEL_RE.match(label):
+    if not label or not LABEL_RE.fullmatch(label):
         raise argparse.ArgumentTypeError(
             f"{option} label must match {LABEL_RE.pattern}"
         )
@@ -134,11 +135,15 @@ def main() -> int:
         parser.error("at least one --target LABEL=TMUX_TARGET is required")
     if args.frames < 1:
         parser.error("--frames must be >= 1")
-    if args.interval < 0:
-        parser.error("--interval must be >= 0")
+    if not math.isfinite(args.interval) or args.interval < 0:
+        parser.error("--interval must be finite and >= 0")
 
+    if len({label for label, _ in args.target}) != len(args.target):
+        parser.error("duplicate --target labels")
+    if len({label for label, _ in args.send}) != len(args.send):
+        parser.error("duplicate --send labels")
     transient_needles = args.transient if args.transient else ["Working..."]
-    needles = args.needle if args.needle else list(transient_needles)
+    needles = list(args.needle) if args.needle else list(transient_needles)
     for needle in transient_needles:
         if needle not in needles:
             needles.append(needle)

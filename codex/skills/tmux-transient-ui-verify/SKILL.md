@@ -123,3 +123,15 @@ State clearly:
 - which active raw frames or screenshots were inspected manually;
 - known product-specific differences that are acceptable;
 - limitations, such as provider-generated answer wording or missed frames.
+
+Sampler labels must match the entire safe label pattern and be unique within
+--target and --send. Intervals must be finite and nonnegative; Codex row tolerance
+must also be nonnegative. Invalid configuration fails before sends or files.
+Explicit --needle comparison markers must appear at least once in the reference
+(or sole pane) during the run; absence throughout the capture fails even when
+both panes lack them. Markers may appear partway through. Markers also listed
+as --transient (including the default Working...) are optional during idle
+frames, including an entirely idle run. Capture-wide missing-marker anomalies
+use frame="all" in both JSON and TSV.
+Per-frame one-sided marker absence still detects parity mismatches. Zero targets
+is a configuration error.
