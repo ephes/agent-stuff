@@ -271,6 +271,14 @@ unpushed work that makes it class B or C.
 
 ## Removal guards
 
+Checkout removal repeats local dirty/HEAD/hidden/ignored/stash/worktree
+preconditions after remote and ownership verification; clones also compare
+branch/tag refs. Linked worktrees do not compare shared sibling refs. Clone deletion binds the
+inspected device/inode to an opened parent/child descriptor, empties only that
+pinned directory, and checks its name again before rmdir. These guards refuse
+substitutions and late local changes; they do not make concurrent filesystem
+writes atomic.
+
 `--apply`, `report --apply` and `remove --apply` remove class A checkouts only
 (the first two also empty workspace directories). Each removal re-checks the
 following immediately before acting, and skips the checkout if any check fails:
@@ -295,7 +303,7 @@ following immediately before acting, and skips the checkout if any check fails:
 
 Worktrees are removed with `git worktree remove` (never `--force`), so git also
 refuses one that changed in the meantime. The branch stays in the owning
-repository. Clones are deleted with `shutil.rmtree`, which does not follow
+repository. Clones are emptied through pinned directory descriptors and then removed with `rmdir`, which does not follow
 symlinks. After removals, `git worktree prune` runs on the repositories that
 own the inventoried worktrees and on the clones under the roots.
 

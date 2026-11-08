@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Bind clone deletion to inspected directory identity and repeat local dirt,
+  HEAD, hidden-state and ignored-file checks after remote/ownership reads;
+  branch/tag ref comparisons apply only to clones.
+
 - Refresh process, pane and read-only work ownership before each removal;
   retain earlier claims and refuse incomplete refreshes across all removal kinds.
 
