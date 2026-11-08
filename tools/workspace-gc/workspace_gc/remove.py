@@ -19,17 +19,20 @@ acting:
 Any git error, unreachable remote or missing remote tip refuses the removal.
 
 Worktrees go through `git worktree remove` without --force, so git itself
-refuses one that gained changes in between. Standalone clones are deleted with
-shutil.rmtree, which does not follow symlinks.
+refuses one that gained changes in between. Standalone clones are emptied through inspected directory descriptors, then
+removed by name after an identity check. Local safety checks run again after
+remote and ownership verification.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import stat
 
 from . import git
 from . import signals as sig_mod
+from .husks import _fd_path
 from .git import GitError
 from .inventory import (Checkout, Inspector, _is_under, borrowers_of, deletion_scan,
                         hidden_state, keep_match, lending_scope, project_names, scan_ignored)
@@ -39,8 +42,8 @@ class Refused(Exception):
     pass
 
 
-def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
-             keep_patterns: list[str], regenerable: list[str], fetch: bool = True) -> None:
+def _recheck_local(co: Checkout, roots: list[str], main_roots: list[str],
+             keep_patterns: list[str], regenerable: list[str]) -> str:
     path = co.path
     if keep_match(path, keep_patterns) or (co.owner_repo and keep_match(co.owner_repo,
                                                                          keep_patterns)):
@@ -72,11 +75,40 @@ def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
     head = git.out(["rev-parse", "--verify", "HEAD"], path).strip()
     if head != co.head:
         raise Refused("HEAD moved since the inventory")
+    _check_payload_state(co, path, real, regenerable, co.network_remotes)
+    return real
+
+
+def _check_payload_state(co, path, real, regenerable, urls):
+    _, unique = scan_ignored(path, regenerable, project_names(urls))
+    if unique:
+        raise Refused("ignored files that are not regenerable: " + ", ".join(unique[:3]))
+    if co.kind == "clone":
+        if git.out(["stash", "list"], path).strip():
+            raise Refused("stash present")
+        listed = git.out(["worktree", "list", "--porcelain"], path)
+        if any(block.strip() and os.path.realpath(block.splitlines()[0].split(" ", 1)[-1]) != real
+               and "\nprunable" not in "\n" + block for block in listed.split("\n\n")):
+            raise Refused("clone owns linked worktrees")
+
+
+def _refs(path):
+    return git.out(["for-each-ref", "--format=%(refname) %(objectname)",
+                    "refs/heads", "refs/tags"], path)
+
+
+def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
+             keep_patterns: list[str], regenerable: list[str], fetch: bool = True) -> str | None:
+    real = _recheck_local(co, roots, main_roots, keep_patterns, regenerable)
+    refs = _refs(co.path) if co.kind == "clone" else None
+    path = co.path
     fresh = Inspector(main_roots, use_cache=False, keep_patterns=keep_patterns, fetch=fetch)
     try:
         _recheck_remote(co, path, real, fresh, roots, main_roots, keep_patterns, regenerable)
     finally:
         fresh.close()
+
+    return refs
 
 
 def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots: list[str],
@@ -88,18 +120,8 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
             urls.append(u)
     if not urls:
         raise Refused("no network remote")
-    _, unique = scan_ignored(path, regenerable, project_names(urls))
-    if unique:
-        raise Refused("ignored files that are not regenerable: " + ", ".join(unique[:3]))
+    _check_payload_state(co, path, real, regenerable, urls)
     if co.kind == "clone":
-        if git.out(["stash", "list"], path).strip():
-            raise Refused("stash present")
-        wl = git.out(["worktree", "list", "--porcelain"], path)
-        others = [b for b in wl.split("\n\n") if b.strip()
-                  and os.path.realpath(b.splitlines()[0].split(" ", 1)[-1]) != real
-                  and "\nprunable" not in "\n" + b]
-        if others:
-            raise Refused("clone owns linked worktrees")
         lenders, unreadable = lending_scope(roots, main_roots, keep_patterns)
         if unreadable:
             raise Refused("cannot tell who borrows its objects: " + unreadable[0])
@@ -122,6 +144,35 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
         raise Refused(f"{count} commit(s) not on a network remote" + (f" ({why})" if why else ""))
 
 
+def _delete_clone(path, expected):
+    if not shutil.rmtree.avoids_symlink_attacks:
+        raise Refused("descriptor-safe deletion unavailable")
+    parent, name = os.path.split(path)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(parent, flags)
+    try:
+        if _fd_path(parent_fd) != parent:
+            raise Refused("parent changed since inspection")
+        child_fd = os.open(name, flags, dir_fd=parent_fd)
+        try:
+            current = os.fstat(child_fd)
+            if (current.st_dev, current.st_ino) != expected:
+                raise Refused("clone replaced since inspection")
+            for entry in os.listdir(child_fd):
+                if stat.S_ISDIR(os.stat(entry, dir_fd=child_fd, follow_symlinks=False).st_mode):
+                    shutil.rmtree(entry, dir_fd=child_fd)
+                else:
+                    os.unlink(entry, dir_fd=child_fd)
+            current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != expected:
+                raise Refused("clone replaced during deletion")
+            os.rmdir(name, dir_fd=parent_fd)
+        finally:
+            os.close(child_fd)
+    finally:
+        os.close(parent_fd)
+
+
 def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
                     keep_patterns: list[str], regenerable: list[str] | None = None,
                     fetch: bool = True, signals: sig_mod.Signals | None = None) -> str:
@@ -129,7 +180,9 @@ def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
     if co.cls != "A":
         raise Refused(f"class {co.cls}, only class A is removed")
     try:
-        _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch)
+        initial = os.stat(co.path, follow_symlinks=False)
+        expected = (initial.st_dev, initial.st_ino)
+        refs = _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch)
         live = sig_mod.refresh(signals or sig_mod.Signals())
         blockers = live.apply_blockers()
         if blockers:
@@ -137,10 +190,13 @@ def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
         reason = sig_mod.protection_reason(co.workspace, live, work_path=co.path)
         if reason:
             raise Refused(reason)
+        if co.kind == "clone" and _refs(co.path) != refs:
+            raise Refused("refs moved during remote or ownership verification")
+        _recheck_local(co, roots, main_roots, keep_patterns, regenerable or [])
         if co.kind == "worktree":
             git.out(["worktree", "remove", co.path], co.owner_repo)
             return f"removed worktree {co.path} (git worktree remove)"
-        shutil.rmtree(co.path)
+        _delete_clone(co.path, expected)
         return f"removed clone {co.path}"
     except GitError as exc:
         raise Refused(str(exc)) from exc
