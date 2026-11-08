@@ -371,6 +371,19 @@ class TestCliReviewRoot(unittest.TestCase):
                       result["redactions"])
         self.assertTrue(result["scoped_clean"])
 
+    def test_later_invalid_evidence_never_starts_reviewer(self):
+        first = os.path.join(self.fx.root, "first.txt")
+        second = os.path.join(self.fx.root, "second.txt")
+        with open(first, "w") as fh:
+            fh.write("ordinary text")
+        with open(second, "wb") as fh:
+            fh.write(b"bad\0text")
+        proc, result, run_dir = self.fx.run(
+            "clean", "--evidence-file", first, "--evidence-file", second)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
+        self.assertFalse(os.path.exists(os.path.join(run_dir, "review-root", "evidence")))
+
     def test_a_secret_named_evidence_file_is_refused(self):
         secret = os.path.join(self.fx.root, "prod.env")
         with open(secret, "w") as fh:

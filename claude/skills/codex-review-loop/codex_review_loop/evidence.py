@@ -8,6 +8,7 @@ repository data rather than instructions. Unlike `--context-file`, which is the
 caller's own trusted text, evidence is always untrusted.
 """
 import os
+import shutil
 
 from ._shared import bundle, redact
 
@@ -27,24 +28,28 @@ def copy_evidence(paths, review_root, *, max_size):
     if not paths:
         return entries, redactions
     target_dir = os.path.join(review_root, EVIDENCE_DIR)
-    os.makedirs(target_dir, mode=0o700, exist_ok=True)
-    for index, path in enumerate(paths, start=1):
-        if redact.is_secret_path(path):
-            raise ValueError(f"evidence file has a secret-looking path: {path}")
-        data = bundle.read_regular_file(path, max_size)
-        if b"\0" in data:
-            raise ValueError(f"evidence file is binary: {path}")
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"evidence file is not UTF-8: {path}") from exc
-        text, changed = redact.redact_text(text)
-        name = _safe_name(index, path)
-        with open(os.path.join(target_dir, name), "w", encoding="utf-8") as fh:
-            fh.write(text)
-        label = f"{EVIDENCE_DIR}/{name}"
-        if changed:
-            redactions.append({"path": label, "section": "evidence file"})
-        entries.append({"source": os.path.abspath(path), "file": label,
-                        "redacted": changed})
+    os.mkdir(target_dir, mode=0o700)
+    try:
+        for index, path in enumerate(paths, start=1):
+            if redact.is_secret_path(path):
+                raise ValueError(f"evidence file has a secret-looking path: {path}")
+            data = bundle.read_regular_file(path, max_size)
+            if b"\0" in data:
+                raise ValueError(f"evidence file is binary: {path}")
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"evidence file is not UTF-8: {path}") from exc
+            text, changed = redact.redact_text(text)
+            name = _safe_name(index, path)
+            with open(os.path.join(target_dir, name), "w", encoding="utf-8") as fh:
+                fh.write(text)
+            label = f"{EVIDENCE_DIR}/{name}"
+            if changed:
+                redactions.append({"path": label, "section": "evidence file"})
+            entries.append({"source": os.path.abspath(path), "file": label,
+                            "redacted": changed})
+    except BaseException:
+        shutil.rmtree(target_dir)
+        raise
     return entries, redactions

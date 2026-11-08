@@ -115,7 +115,11 @@ With no reading at all (a fresh machine) the guard does not block.
    A secret-looking name, a non-regular, binary, non-UTF-8, or oversized
    (`--max-evidence-file-size`, default 512KB) file fails the run before Codex
    starts; nothing is silently dropped. Reads verify descriptor identity and
-   enforce the byte ceiling even when a file grows during preparation.
+   enforce the byte ceiling even when a file grows during preparation. Evidence
+   is strict UTF-8 text without NUL; CRLF and Unicode are preserved, except for
+   secret redactions recorded in the manifest. Ordinal names prevent collisions.
+   The destination evidence directory must not exist. A failed batch removes
+   its owned copies and never starts the reviewer; unrelated files stay intact.
 
    For a re-review, pass the previous round's `baseline_commit`:
 
