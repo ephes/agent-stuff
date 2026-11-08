@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
+import os
+import tempfile
 import re
 import subprocess
 import time
 from pathlib import Path
 
+
+TMUX_TIMEOUT = 10
 
 LABEL_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -29,7 +34,7 @@ def parse_label_value(raw: str, *, option: str) -> tuple[str, str]:
 
 
 def run_tmux(args: list[str]) -> bytes:
-    return subprocess.check_output(["tmux", *args])
+    return subprocess.check_output(["tmux", *args], timeout=TMUX_TIMEOUT)
 
 
 def capture(target: str, *, ansi: bool, history_start: str) -> str:
@@ -43,8 +48,8 @@ ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))
 
 
 def send_prompt(target: str, prompt: str) -> None:
-    subprocess.check_call(["tmux", "send-keys", "-t", target, "-l", prompt])
-    subprocess.check_call(["tmux", "send-keys", "-t", target, "Enter"])
+    subprocess.check_call(["tmux", "send-keys", "-t", target, "-l", prompt], timeout=TMUX_TIMEOUT)
+    subprocess.check_call(["tmux", "send-keys", "-t", target, "Enter"], timeout=TMUX_TIMEOUT)
 
 
 def pane_lines(text):
@@ -108,6 +113,21 @@ def frame_metrics(
     return metrics, anomalies
 
 
+def write_receipt(path: Path, receipt: dict) -> None:
+    payload = json.dumps(receipt, indent=2, allow_nan=False) + "\n"
+    fd, temporary = tempfile.mkstemp(prefix=".run-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = None
+            fh.write(payload)
+        os.replace(temporary, path)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sample tmux panes and summarize transient UI markers."
@@ -164,69 +184,76 @@ def main() -> int:
         parser.error(f"--send label has no matching --target: {unknown_send_labels}")
 
     frames_dir = args.out / "frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if args.out.is_symlink() or (args.out.exists() and any(args.out.iterdir())):
+            parser.error("--out must be absent or an empty real directory")
+        args.out.mkdir(parents=True, exist_ok=True)
+        frames_dir.mkdir()  # exclusive run ownership, before any prompt
+    except OSError as exc:
+        parser.error(f"cannot prepare --out: {type(exc).__name__}")
 
-    for label, prompt in sends.items():
-        send_prompt(targets[label], prompt)
+    receipt = {"state": "INCOMPLETE", "frames_requested": args.frames,
+               "frames_completed": 0, "samples_completed": 0, "errors": [], "anomalies": 0}
+    summary, metrics, anomalies = [], [], []
+    try:
+        write_receipt(args.out / "run.json", receipt)
+    except OSError as exc:
+        print(f"cannot initialize capture receipt: {type(exc).__name__}")
+        return 3
+    phase = "send"
+    try:
+        for label, prompt in sends.items():
+            phase = f"send {label}"
+            send_prompt(targets[label], prompt)
+        for frame_index in range(args.frames):
+            frame_name = f"{frame_index:02d}"
+            for label, target in targets.items():
+                phase = f"capture {label} frame {frame_index}"
+                ansi = capture(target, ansi=True, history_start=args.history_start)
+                plain = ANSI_RE.sub("", ansi)
+                (frames_dir / f"{label}-{frame_name}.log").write_text(plain, encoding="utf-8")
+                (frames_dir / f"{label}-{frame_name}.ansi").write_text(ansi, encoding="utf-8")
 
-    summary: list[dict[str, object]] = []
-    metrics: list[dict[str, object]] = []
-    anomalies: list[dict[str, object]] = []
-    for frame_index in range(args.frames):
-        frame_name = f"{frame_index:02d}"
-        for label, target in targets.items():
-            ansi = capture(target, ansi=True, history_start=args.history_start)
-            plain = ANSI_RE.sub("", ansi)
-            (frames_dir / f"{label}-{frame_name}.log").write_text(plain)
-            (frames_dir / f"{label}-{frame_name}.ansi").write_text(ansi)
-            hits = row_hits(plain, needles)
-            for hit in hits:
-                summary.append({"label": label, "frame": frame_index, **hit})
-            frame_metric_rows, frame_anomalies = frame_metrics(
-                label=label,
-                frame_index=frame_index,
-                text=plain,
-                needles=needles,
-                transient_needles=transient_needles,
-            )
-            metrics.extend(frame_metric_rows)
-            anomalies.extend(frame_anomalies)
-        if frame_index != args.frames - 1:
-            time.sleep(args.interval)
+                for hit in row_hits(plain, needles):
+                    summary.append({"label": label, "frame": frame_index, **hit})
+                rows, found = frame_metrics(label=label, frame_index=frame_index,
+                    text=plain, needles=needles, transient_needles=transient_needles)
 
-    (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    (args.out / "frame-metrics.json").write_text(
-        json.dumps(metrics, indent=2) + "\n"
-    )
-    (args.out / "anomalies.json").write_text(
-        json.dumps(anomalies, indent=2) + "\n"
-    )
-    with (args.out / "summary.tsv").open("w", encoding="utf-8") as handle:
-        handle.write("label\tframe\tneedle\trow\tline\n")
-        for item in summary:
-            line = str(item["line"]).replace("\t", " ").replace("\n", " ")
-            handle.write(
-                f"{item['label']}\t{item['frame']}\t{item['needle']}"
-                f"\t{item['row']}\t{line}\n"
-            )
-    with (args.out / "frame-metrics.tsv").open("w", encoding="utf-8") as handle:
-        handle.write("label\tframe\tneedle\tcount\trows\n")
-        for item in metrics:
-            handle.write(
-                f"{item['label']}\t{item['frame']}\t{item['needle']}"
-                f"\t{item['count']}\t{item['rows']}\n"
-            )
-    with (args.out / "anomalies.tsv").open("w", encoding="utf-8") as handle:
-        handle.write("label\tframe\tkind\tneedle\tcount\trows\tdetail\n")
-        for item in anomalies:
-            handle.write(
-                f"{item['label']}\t{item['frame']}\t{item['kind']}"
-                f"\t{item['needle']}\t{item['count']}\t{item['rows']}"
-                f"\t{item['detail']}\n"
-            )
+                metrics.extend(rows)
+                anomalies.extend(found)
+                receipt["samples_completed"] += 1
+            receipt["frames_completed"] += 1
+            if frame_index != args.frames - 1:
+                phase = f"interval after frame {frame_index}"
+                time.sleep(args.interval)
+    except (OSError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+        receipt["errors"].append(f"{phase}: {type(exc).__name__}")
+
+    exports = [("summary", summary, ["label", "frame", "needle", "row", "line"]),
+               ("frame-metrics", metrics, ["label", "frame", "needle", "count", "rows"])]
+    exports.append(("anomalies", anomalies, ["label", "frame", "kind", "needle", "count", "rows", "detail"]))
+    try:
+        for name, records, defaults in exports:
+            (args.out / f"{name}.json").write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
+            rows = records
+            fields = list(dict.fromkeys(defaults + [key for item in rows for key in item]))
+            with (args.out / f"{name}.tsv").open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fields, dialect="excel-tab", lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(rows)
+    except OSError as exc:
+        receipt["errors"].append(f"export: {type(exc).__name__}")
+    if not receipt["errors"]:
+        receipt["state"] = "COMPLETE"
+    receipt["anomalies"] = len(anomalies)
+    try:
+        write_receipt(args.out / "run.json", receipt)
+    except OSError as exc:
+        print(f"cannot finalize capture receipt: {type(exc).__name__}")
+        return 3
     print(f"wrote {args.out}")
-    print(f"anomalies: {len(anomalies)}")
-    return 0
+    print(f"{receipt['state']}: {len(anomalies)} anomalies")
+    return 3 if receipt["errors"] else 1 if anomalies else 0
 
 
 if __name__ == "__main__":

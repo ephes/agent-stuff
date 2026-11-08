@@ -49,6 +49,8 @@ python3 /path/to/tmux-transient-ui-verify/scripts/sample_tmux_frames.py \
 
 The script writes:
 
+- `run.json`: `state`, `frames_requested`, `frames_completed`,
+  `samples_completed`, `errors`, `anomalies`.
 - `frames/<label>-NN.log`: plain captured frame;
 - `frames/<label>-NN.ansi`: ANSI-preserved captured frame;
 - `summary.tsv`: every frame/needle row hit;
@@ -109,3 +111,20 @@ Plain and ANSI evidence derive from one ANSI capture, with physical LF rows.
 
 Needles must fit within one physical pane row; text crossing a soft-wrap boundary
 does not match a single needle. Use shorter markers or a wider pane.
+
+Every tmux command has a 10-second deadline. Send/capture failures preserve
+collected evidence with run.json state INCOMPLETE and exit 3; prompt sends are
+never retried automatically. A complete capture has state COMPLETE, exiting 0
+when checks pass or 1 for anomalies. Output must be absent or an empty real
+directory; populated destinations are refused before sends, preserving prior
+captures. Interrupted runs retain an INCOMPLETE receipt. Use a fresh
+output directory for each rerun. All exports use explicit UTF-8; TSV uses the
+standard quoted excel-tab dialect, preserving tabs/newlines/quotes in values.
+JSON null is an empty TSV cell; other scalar values use their text form.
+
+Exit codes distinguish configuration/refusal (2, no new receipt) from started-run
+capture/publication failure (3, INCOMPLETE receipt when writable). A refusal never
+makes a prior receipt current. COMPLETE runs exit 0 when clean or 1 for anomalies.
+TSV columns include all JSON metadata; parse headers rather than fixed offsets.
+Boolean cells use True/False text. The Claude sampler exports summary,
+frame-metrics, anomalies and the run receipt; it has no cursor/delta exports.

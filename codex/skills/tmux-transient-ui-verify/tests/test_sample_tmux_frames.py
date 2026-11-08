@@ -179,3 +179,118 @@ class TestFrameCoordinates(unittest.TestCase):
                 self.assertEqual(module.main(),0)
             self.assertEqual(capture.call_count,1)
             self.assertEqual((out/'frames/a-00.log').read_text(),'Working...\n')
+
+class TestSamplerPublication(unittest.TestCase):
+    def test_existing_run_survives_rerun_before_any_prompt(self):
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            with self.subTest(agent=agent), tempfile.TemporaryDirectory() as tmp:
+                out=Path(tmp)/'out'; out.mkdir()
+                sentinel=out/'summary.json'; sentinel.write_bytes(b'previous complete run')
+                frame=out/'old-frame'; frame.write_bytes(b'previous frame')
+                with mock.patch.object(sys,'argv',['sampler','--out',str(out),'--target','a=one','--send','a=prompt','--frames','1']), mock.patch.object(module,'run_tmux',return_value=b'0\t0\t1\t1\t0\n') as run, mock.patch.object(module,'send_prompt') as send:
+                    with self.assertRaises(SystemExit) as error: module.main()
+                self.assertEqual(error.exception.code,2)
+                send.assert_not_called(); run.assert_not_called()
+                self.assertEqual(sentinel.read_bytes(),b'previous complete run')
+                self.assertEqual(frame.read_bytes(),b'previous frame')
+
+    def test_command_deadlines_and_incomplete_receipts(self):
+        import subprocess
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            with mock.patch.object(module.subprocess,'check_output',side_effect=subprocess.TimeoutExpired('synthetic',1)) as output:
+                with self.assertRaises(subprocess.TimeoutExpired): module.run_tmux(['capture-pane'])
+            self.assertGreater(output.call_args.kwargs['timeout'],0)
+            with mock.patch.object(module.subprocess,'check_call') as send:
+                module.send_prompt('synthetic','synthetic prompt')
+            self.assertEqual(len(send.call_args_list),2)
+            self.assertTrue(all(call.kwargs['timeout']>0 for call in send.call_args_list))
+            for phase in ('capture','send','interrupt'):
+                with self.subTest(agent=agent,phase=phase), tempfile.TemporaryDirectory() as tmp:
+                    out=Path(tmp)/'out'
+                    argv=['sampler','--out',str(out),'--target','a=one','--frames','2','--interval','0']
+                    if phase=='send': argv+=['--send','a=prompt']
+                    calls=[]
+                    def capture(*a,**kw):
+                        calls.append(True)
+                        # Both copies derive each frame from one ANSI payload.
+                        if len(calls) > 1:
+                            raise KeyboardInterrupt() if phase=='interrupt' else subprocess.CalledProcessError(1,['synthetic'])
+                        return 'Working...\n'
+                    with mock.patch.object(sys,'argv',argv), mock.patch.object(module,'capture',side_effect=capture), mock.patch.object(module,'send_prompt',side_effect=subprocess.TimeoutExpired('synthetic',1) if phase=='send' else None) as send:
+                        if agent=='codex':
+                            with mock.patch.object(module,'cursor_position',return_value={'cursor_x':0,'cursor_y':0,'pane_active':True,'pane_height':1,'history_size':0}):
+                                code=module.main()
+                        else: code=module.main()
+                    self.assertEqual(code,3)
+                    status=json.loads((out/'run.json').read_text(encoding='utf-8'))
+                    self.assertEqual(status['state'],'INCOMPLETE')
+                    self.assertTrue(status['errors'])
+                    if phase!='send': self.assertTrue((out/'frames/a-00.log').exists())
+                    else: self.assertEqual(send.call_count,1)
+
+    def test_tsv_round_trip_matches_json_without_losing_quoted_text(self):
+        import csv
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            with tempfile.TemporaryDirectory() as tmp:
+                out=Path(tmp)/'out'
+                argv=['sampler','--out',str(out),'--target','a=one','--target','b=two','--frames','1','--needle','λ\t"quote"','--needle','missing\nmarker']
+                payload='λ\t"quote" Working...\n'
+                with mock.patch.object(sys,'argv',argv), mock.patch.object(module,'capture',return_value=payload), mock.patch.object(module,'run_tmux',return_value=b'0\t0\t1\t1\t0\n'):
+                    code=module.main()
+                self.assertEqual(code,1 if agent=='codex' else 0)
+                for name in ('summary','frame-metrics','anomalies') + (('cursor-metrics','row-deltas') if agent=='codex' else ()):
+                    records=json.loads((out/(name+'.json')).read_text(encoding='utf-8'))
+                    with (out/(name+'.tsv')).open(encoding='utf-8',newline='') as fh:
+                        rows=list(csv.DictReader(fh,dialect='excel-tab'))
+                    self.assertEqual(len(rows),len(records))
+                    for record,row in zip(records,rows):
+                        for key,value in record.items():
+                            header='target_label' if name=='row-deltas' and key=='label' else key
+                            expected=str(int(value)) if name=='cursor-metrics' and key=='pane_active' else '' if value is None else str(value)
+                            self.assertEqual(row[header],expected)
+                status=json.loads((out/'run.json').read_text(encoding='utf-8'))
+                self.assertEqual(status['state'],'COMPLETE')
+                self.assertEqual(status['frames_completed'],1)
+
+    def test_enter_failure_never_resends_the_prompt(self):
+        import subprocess
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            with tempfile.TemporaryDirectory() as tmp:
+                out=Path(tmp)/'out'
+                argv=['sampler','--out',str(out),'--target','a=one','--send','a=synthetic prompt','--frames','1']
+                with mock.patch.object(sys,'argv',argv), mock.patch.object(module.subprocess,'check_call',side_effect=[None,subprocess.CalledProcessError(1,['synthetic'])]) as send, mock.patch.object(module,'run_tmux') as capture:
+                    self.assertEqual(module.main(),3)
+                self.assertEqual(send.call_count,2)
+                capture.assert_not_called()
+                self.assertEqual(json.loads((out/'run.json').read_text())['state'],'INCOMPLETE')
+
+    def test_multiline_anomaly_details_round_trip(self):
+        import csv
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            record={'label':'a','frame':0,'kind':'synthetic','needle':'λ\tmarker','count':1,'rows':'0','detail':'first\t"quoted"\nsecond λ'}
+            with tempfile.TemporaryDirectory() as tmp:
+                out=Path(tmp)/'out'
+                argv=['sampler','--out',str(out),'--target','a=one','--frames','1']
+                with mock.patch.object(sys,'argv',argv), mock.patch.object(module,'frame_metrics',return_value=([],[record])), mock.patch.object(module,'run_tmux',side_effect=lambda args: b'0\t0\t1\t1\t0\n' if args[0]=='display-message' else b'Working...\n'):
+                    self.assertEqual(module.main(),1)
+                self.assertEqual(json.loads((out/'anomalies.json').read_text()),[record])
+                with (out/'anomalies.tsv').open(encoding='utf-8',newline='') as fh:
+                    rows=list(csv.DictReader(fh,dialect='excel-tab'))
+                self.assertEqual(rows,[{key:str(value) for key,value in record.items()}])
+
+    def test_interval_interrupt_is_recorded_as_interval_not_capture(self):
+        for agent in ('codex','claude'):
+            module=sampler(agent)
+            with tempfile.TemporaryDirectory() as tmp:
+                out=Path(tmp)/'out'
+                argv=['sampler','--out',str(out),'--target','a=one','--frames','2','--interval','0.1']
+                with mock.patch.object(sys,'argv',argv), mock.patch.object(module,'run_tmux',side_effect=lambda args: b'0\t0\t1\t1\t0\n' if args[0]=='display-message' else b'Working...\n'), mock.patch.object(module.time,'sleep',side_effect=KeyboardInterrupt):
+                    self.assertEqual(module.main(),3)
+                receipt=json.loads((out/'run.json').read_text())
+                self.assertEqual(receipt['frames_completed'],1)
+                self.assertTrue(receipt['errors'][0].startswith('interval after frame 0:'))
