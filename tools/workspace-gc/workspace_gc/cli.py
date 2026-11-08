@@ -157,7 +157,8 @@ def _apply(a, inv) -> inv_mod.Run:
     an in-use source is incomplete; otherwise remove class A (each removal
     re-checked), prune stale worktree entries and remove empty workspace
     directories. Removed checkouts leave inv.checkouts; skipped ones stay in
-    class A with the reason."""
+    class A with the reason. Outcomes also include failed attempted empty/husk
+    cleanup; skipped counts those attempts and prune failures as well."""
     run = inv.run = inv_mod.Run(refused=inv.signals.apply_blockers())
     if run.refused:
         _preview_prune(inv)
@@ -176,12 +177,26 @@ def _apply(a, inv) -> inv_mod.Run:
         run.outcomes.append({"path": co.path, "outcome": outcome})
     inv.checkouts = [c for c in inv.checkouts if c not in run.removed]
     for repo in targets:
-        lines = rm_mod.prune(repo)
-        if lines:
-            inv.prune[repo] = lines
+        # A clone successfully removed above has no worktree metadata left.
+        if any(co.path == repo for co in run.removed):
+            continue
+        try:
+            lines = rm_mod.prune(repo)
+            if lines:
+                inv.prune[repo] = lines
+        except rm_mod.GitError as exc:
+            run.prune_errors[repo] = str(exc)
+            run.skipped += 1
+    attempted_empty = [e for e in inv.empty_dirs if e.removable]
+    attempted_husks = [h for h in inv.husks if h.removable or h.stale]
     empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals)
     husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours,
                  a.min_stale_hours)
+    for entry in attempted_empty + attempted_husks:
+        if not entry.removed:
+            run.skipped += 1
+            reason = entry.reason if isinstance(entry, empties.EmptyDir) else entry.outcome
+            run.outcomes.append({"path": entry.path, "outcome": "skipped: " + reason})
     return run
 
 
@@ -203,6 +218,7 @@ def cmd_scan(a, sig, out) -> int:
     gone = [e for e in inv.empty_dirs if e.removed]
     if a.json:
         out.write(json.dumps({"removed": run.outcomes, "pruned": inv.prune,
+                              "prune_errors": run.prune_errors,
                               "empty_dirs_removed": [e.path for e in gone],
                               "husks_removed": [{"path": h.path, "what": h.removed_what,
                                                  "kb": h.removed_kb}
@@ -216,6 +232,8 @@ def cmd_scan(a, sig, out) -> int:
                 out.write(f"SKIP {rep.short(r['path'])}: {r['outcome']}\n")
         for repo, lines in inv.prune.items():
             out.write(f"pruned {len(lines)} stale worktree entr{'y' if len(lines) == 1 else 'ies'} in {rep.short(repo)}\n")
+        for repo, error in run.prune_errors.items():
+            out.write(f"prune failed {rep.short(repo)}: {error}\n")
         for e in gone:
             out.write(f"removed empty directory {e.path}\n")
         for h in inv.husks:
@@ -264,7 +282,11 @@ def cmd_remove(a, sig, out) -> int:
         out.write(f"REFUSED {desc}: {exc}\n")
         return 1
     if co.kind == "worktree" and co.owner_repo:
-        rm_mod.prune(co.owner_repo)
+        try:
+            rm_mod.prune(co.owner_repo)
+        except rm_mod.GitError as exc:
+            out.write(f"prune failed {rep.short(co.owner_repo)}: {exc}\n")
+            return 1
     return 0
 
 

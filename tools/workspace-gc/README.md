@@ -341,6 +341,12 @@ virtualenvs), the scratch fetch (resolves containment without touching the
 checkout, also in the removal re-check), supersession hints, and the
 workspace directories without a checkout.
 
+Partial apply runs retain successful removals and report each failed prune or
+attempted empty/husk cleanup. Such runs exit 1; initial signal refusal exits 2.
+Expected keeps are not failed attempts. JSON includes prune_errors and skipped
+cleanup outcomes; text reports the same errors. Independent safe cleanup
+continues after a prune failure. Removed clone paths are not pruned afterward.
+
 ## Changes
 
 See [CHANGELOG.md](CHANGELOG.md).

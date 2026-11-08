@@ -1113,8 +1113,9 @@ class Run:
     be read) means nothing was removed."""
     refused: list[str] = field(default_factory=list)
     removed: list[Checkout] = field(default_factory=list)
-    outcomes: list[dict] = field(default_factory=list)   # path, outcome; one per class-A checkout
+    outcomes: list[dict] = field(default_factory=list)   # path/outcome for checkout attempts and failed empty/husk cleanup
     skipped: int = 0
+    prune_errors: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

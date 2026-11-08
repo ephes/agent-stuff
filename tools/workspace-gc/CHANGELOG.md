@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserve partial-run receipts after prune errors and return failure for
+  attempted empty/husk cleanup that could not complete; expected keeps stay successful.
+
 - Bind clone deletion to inspected directory identity and repeat local dirt,
   HEAD, hidden-state and ignored-file checks after remote/ownership reads;
   branch/tag ref comparisons apply only to clones.
