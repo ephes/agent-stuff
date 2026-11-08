@@ -63,6 +63,8 @@ class Signals:
     process_cwds: list[str] = field(default_factory=list)
     work_refs: list[WorkRef] = field(default_factory=list)
     status: dict[str, SourceStatus] = field(default_factory=dict)
+    work_env: str = ""
+    work_ledger: str = ""
 
     def apply_blockers(self) -> list[str]:
         return [f"{name}: {st.status}{' (' + st.detail + ')' if st.detail else ''}"
@@ -267,7 +269,7 @@ def read_work_items(env_file: str, ledger_dir: str) -> tuple[list[WorkRef], Sour
 
 def gather(*, herdr: bool = True, processes: bool = True, work: bool = True,
            work_env: str = "", work_ledger: str = "") -> Signals:
-    s = Signals()
+    s = Signals(work_env=work_env, work_ledger=work_ledger)
     if herdr:
         s.herdr_cwds, s.status["herdr"] = read_herdr()
     else:
@@ -281,3 +283,39 @@ def gather(*, herdr: bool = True, processes: bool = True, work: bool = True,
     else:
         s.status["work"] = SourceStatus("skipped")
     return s
+
+
+def refresh(previous: Signals) -> Signals:
+    """Read all ownership sources again, retaining every earlier protection."""
+    live = Signals(work_env=previous.work_env, work_ledger=previous.work_ledger)
+    readers = (("work", lambda: read_work_items(previous.work_env, previous.work_ledger), "work_refs"),
+               ("herdr", read_herdr, "herdr_cwds"),
+               ("processes", read_process_cwds, "process_cwds"))
+    for name, reader, field_name in readers:
+        old = previous.status.get(name)
+        if old is not None and old.status == "skipped":
+            values, status = [], old
+        else:
+            values, status = reader()
+        if old is not None and old.status not in ("ok", "absent"):
+            status = old
+        live.status[name] = status
+        combined = list(getattr(previous, field_name))
+        for value in values:
+            if value not in combined:
+                combined.append(value)
+        setattr(live, field_name, combined)
+    return live
+
+
+def protection_reason(path: str, sig: Signals, *, work_path: str | None = None) -> str:
+    def under(child, parent):
+        return child == parent or child.startswith(parent + os.sep)
+    for cwd in sig.process_cwds + sig.herdr_cwds:
+        if under(cwd, path):
+            return f"in use (working directory {cwd})"
+    work_path = work_path or path
+    for ref in sig.work_refs:
+        if ref.active and (under(work_path, ref.worktree) or under(ref.worktree, work_path)):
+            return f"active work item: {ref.slug}"
+    return ""

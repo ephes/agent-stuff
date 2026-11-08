@@ -33,6 +33,13 @@ def ok_signals(**kw):
 
 class GitFixture(unittest.TestCase):
     def setUp(self):
+        from unittest import mock
+        from workspace_gc import signals as sig_mod
+        # Ownership fixtures never query installed panes or the real work app.
+        for name in ('read_process_cwds', 'read_herdr', 'read_work_items'):
+            patcher = mock.patch.object(sig_mod, name, return_value=([], SourceStatus('ok')))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="wsgc-test-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.net = os.path.join(self.tmp, "net")

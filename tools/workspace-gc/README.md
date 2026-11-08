@@ -159,6 +159,15 @@ consequence: a keep-listed clone that borrows objects from a candidate clone
 would go unseen. Keep-list whole workspaces, not single repositories, when
 that matters.
 
+At each destructive boundary, checkout, empty-directory and husk removal refresh
+read-only work claims, herdr panes and finally process working directories.
+Earlier protections are retained conservatively, including workspace-parent
+claims; incomplete sources refuse removal. Each candidate costs a full work-item
+list read and a pane read: there is deliberately no stale refresh cache. Older
+work servers may require one detail read per item. Dry runs use one snapshot.
+Direct remove_checkout callers must supply Signals with work configuration to
+include work-claim protection; the CLI always does so.
+
 ## Empty workspace directories
 
 Removing a checkout leaves its workspace directory (`~/workspaces/ws-x/`)
@@ -179,9 +188,8 @@ An empty directory is kept, and listed with the reason, when
 - it is named `ws-work-planning`, or it, a directory in it, or a path below it
   (a plain path, existing or not; a glob such as `ws-*/repo` when its leading
   segments match the directory and more follow) is on the keep-list;
-- a process or herdr pane has its working directory in it. The process list is
-  read again before each directory is removed, and a directory is kept when
-  that read fails;
+- a process or herdr pane has its working directory in it. All three ownership sources
+  are read again before each directory is removed; any failed read keeps it;
 - an active work item names a worktree in it;
 - it, or a directory in it, was created or changed less than 6 hours ago
   (`EMPTY_DIR_MIN_AGE_HOURS` in `workspace_gc/empties.py`). A worker may be
@@ -211,7 +219,7 @@ file, no git repository inside, nothing unreadable), is not kept for any of the
 reasons above and has had no directory change for `--min-idle-hours` (default
 48h) is `cache-only, removable`. With `--apply` the run deletes its cache
 directories (`.cache/uv`, `.cache/uv-tools`, `.cache/prek`, `node_modules`),
-each re-checked right before (fresh inspection, process working directories
+each re-checked right before (fresh inspection and all ownership sources
 read again). The empty shell stays and is removed by the empty-directory rule
 once it is 6 hours old.
 
@@ -221,7 +229,7 @@ naming anything inside it counts), has nothing unreadable, and nothing in it
 (files and directories) changed for `--min-stale-hours` (default 72; 0
 disables the rule). With `--apply` the run deletes the whole directory,
 review logs and notes included, after a fresh inspection and a fresh read of
-the process working directories, through directory descriptors that do not
+all ownership sources, through directory descriptors that do not
 follow symlinks. Directories with a git repository elsewhere are never
 touched. Every removed path and size is listed under "Removed in this run" in
 `latest.txt` and in `husks_removed` in `latest.json`.

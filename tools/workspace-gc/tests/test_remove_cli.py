@@ -601,12 +601,21 @@ class TestReviewRound1(GitFixture):
         self._refused(co, "remote check failed")
 
 
-class TestLsof(GitFixture):
+class TestLsof(unittest.TestCase):
+    def test_successful_process_snapshot_uses_synthetic_lsof_output(self):
+        from unittest import mock
+        from workspace_gc import signals
+        fake = mock.Mock(returncode=0, stdout="p42\nn/synthetic/cwd\n")
+        with mock.patch.object(signals.subprocess, "run", return_value=fake), mock.patch.object(signals.shutil, "which", return_value="/synthetic/lsof"), mock.patch.object(signals.os, "getpid", return_value=99):
+            cwds, status = signals.read_process_cwds()
+        self.assertEqual(cwds, ['/synthetic/cwd'])
+        self.assertEqual(status.status, 'ok')
+
     def test_partial_lsof_output_is_an_error(self):
         from unittest import mock
         from workspace_gc import signals
         fake = mock.Mock(returncode=1, stdout="p1\nn/tmp\n")
-        with mock.patch.object(signals.subprocess, "run", return_value=fake):
+        with mock.patch.object(signals.subprocess, "run", return_value=fake), mock.patch.object(signals.shutil, "which", return_value="/synthetic/lsof"):
             cwds, st = signals.read_process_cwds()
         self.assertEqual(st.status, "error")
         self.assertIn(os.path.realpath("/tmp"), cwds)

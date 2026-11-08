@@ -29,6 +29,7 @@ import os
 import shutil
 
 from . import git
+from . import signals as sig_mod
 from .git import GitError
 from .inventory import (Checkout, Inspector, _is_under, borrowers_of, deletion_scan,
                         hidden_state, keep_match, lending_scope, project_names, scan_ignored)
@@ -123,12 +124,19 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
 
 def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
                     keep_patterns: list[str], regenerable: list[str] | None = None,
-                    fetch: bool = True) -> str:
+                    fetch: bool = True, signals: sig_mod.Signals | None = None) -> str:
     """Remove one class-A checkout. Returns a one-line outcome; raises Refused."""
     if co.cls != "A":
         raise Refused(f"class {co.cls}, only class A is removed")
     try:
         _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch)
+        live = sig_mod.refresh(signals or sig_mod.Signals())
+        blockers = live.apply_blockers()
+        if blockers:
+            raise Refused("in-use signals incomplete now: " + "; ".join(blockers))
+        reason = sig_mod.protection_reason(co.workspace, live, work_path=co.path)
+        if reason:
+            raise Refused(reason)
         if co.kind == "worktree":
             git.out(["worktree", "remove", co.path], co.owner_repo)
             return f"removed worktree {co.path} (git worktree remove)"

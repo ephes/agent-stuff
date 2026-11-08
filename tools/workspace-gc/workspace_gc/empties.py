@@ -205,13 +205,12 @@ def scan(roots: list[str], keep_patterns: list[str], sig: Signals) -> list[Empty
 
 def _remove_one(e: EmptyDir, keep_patterns: list[str], sig: Signals) -> str:
     """Remove one entry; returns "" or why it stays. Everything is checked
-    again now: the process working directories are read afresh, and the tree
+    again now: all ownership sources are read afresh, and the tree
     is inspected again, and only what that inspection saw is removed."""
-    cwds, status = sig_mod.read_process_cwds()
-    if status.status not in ("ok", "absent"):
-        return f"process working directories unreadable now ({status.detail})"
-    live = Signals(herdr_cwds=sig.herdr_cwds, work_refs=sig.work_refs,
-                   process_cwds=sorted(set(sig.process_cwds) | set(cwds)))
+    live = sig_mod.refresh(sig)
+    blockers = live.apply_blockers()
+    if blockers:
+        return "in-use signals unreadable now: " + "; ".join(blockers)
     root, name = os.path.split(e.path)
     try:
         root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
