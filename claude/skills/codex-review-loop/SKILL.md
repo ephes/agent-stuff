@@ -114,7 +114,8 @@ With no reading at all (a fresh machine) the guard does not block.
    review root under `evidence/` and labelled as untrusted repository data.
    A secret-looking name, a non-regular, binary, non-UTF-8, or oversized
    (`--max-evidence-file-size`, default 512KB) file fails the run before Codex
-   starts; nothing is silently dropped.
+   starts; nothing is silently dropped. Reads verify descriptor identity and
+   enforce the byte ceiling even when a file grows during preparation.
 
    For a re-review, pass the previous round's `baseline_commit`:
 

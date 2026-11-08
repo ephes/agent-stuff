@@ -8,9 +8,8 @@ repository data rather than instructions. Unlike `--context-file`, which is the
 caller's own trusted text, evidence is always untrusted.
 """
 import os
-import stat
 
-from ._shared import redact
+from ._shared import bundle, redact
 
 EVIDENCE_DIR = "evidence"
 
@@ -32,17 +31,7 @@ def copy_evidence(paths, review_root, *, max_size):
     for index, path in enumerate(paths, start=1):
         if redact.is_secret_path(path):
             raise ValueError(f"evidence file has a secret-looking path: {path}")
-        try:
-            info = os.lstat(path)
-        except OSError as exc:
-            raise OSError(f"cannot read evidence file {path}: {exc}") from exc
-        if not stat.S_ISREG(info.st_mode):
-            raise OSError(f"cannot read evidence file {path}: not a regular file")
-        if info.st_size > max_size:
-            raise ValueError(
-                f"evidence file exceeds {max_size} bytes: {path} ({info.st_size} bytes)")
-        with open(path, "rb") as fh:
-            data = fh.read()
+        data = bundle.read_regular_file(path, max_size)
         if b"\0" in data:
             raise ValueError(f"evidence file is binary: {path}")
         try:

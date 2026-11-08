@@ -77,6 +77,44 @@ def _open_within_repo(repo, path):
         os.close(dir_fd)
 
 
+def read_regular_file(path, limit):
+    """Read at most limit bytes from the inspected regular file.
+
+    Resolve existing parent aliases first (e.g. /tmp on macOS), then walk the
+    canonical path without following links. Compare the opened file to lstat
+    before reading, so a substituted regular file is refused too.
+    """
+    path = os.path.abspath(path)
+    path = os.path.join(os.path.realpath(os.path.dirname(path)),
+                        os.path.basename(path))
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError(f"not a regular file: {path}")
+    if before.st_size > limit:
+        raise ValueError(f"file exceeds {limit} bytes: {path}")
+    try:
+        fd = _open_within_repo(os.path.sep, path.lstrip(os.path.sep))
+    except PermissionError:
+        # Some platforms cannot open search-only ancestors as descriptors.
+        # The final no-follow open and dev/ino check below still bind the read
+        # to the inspected file, even if an ancestor changed meanwhile.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        after = os.fstat(fd)
+        if (not stat.S_ISREG(after.st_mode) or
+                (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+            raise OSError(f"file changed before read: {path}")
+        with os.fdopen(fd, "rb") as fh:
+            fd = None
+            data = fh.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError(f"file exceeds {limit} bytes: {path}")
+        return data
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def _git(repo, *args, replacement_log, env_extra=None, input_bytes=None):
     env = dict(os.environ, LC_ALL="C", LANG="C")
     if env_extra:
