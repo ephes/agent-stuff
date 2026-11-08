@@ -38,3 +38,10 @@ the owner's Codex worker launcher (`coordination/codex/run.sh` in the
 work-planning folder, not in this repo) does.
 
 Tests: `cd tools/codex-quota-guard && python3.14 -m unittest discover -s tests -t .`
+
+Observations are ordered by their UTC event time within each file and across
+files, among the 20 most recently modified session files, independent of
+physical line order. Equal times retain the
+first observation (files are considered in descending mtime/name order).
+Unrepresentable UTC instants are ignored. Records larger than 1 MiB including the newline are drained
+with bounded reads and skipped; later valid quota observations remain usable.
