@@ -33,10 +33,13 @@ def run_tmux(args: list[str]) -> bytes:
 
 
 def capture(target: str, *, ansi: bool, history_start: str) -> str:
-    args = ["capture-pane", "-t", target, "-p", "-J", "-S", history_start]
+    args = ["capture-pane", "-t", target, "-p", "-S", history_start]
     if ansi:
         args.insert(3, "-e")
     return run_tmux(args).decode("utf-8", errors="replace")
+
+
+ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
 
 
 def send_prompt(target: str, prompt: str) -> None:
@@ -44,9 +47,16 @@ def send_prompt(target: str, prompt: str) -> None:
     subprocess.check_call(["tmux", "send-keys", "-t", target, "Enter"])
 
 
+def pane_lines(text):
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def row_hits(text: str, needles: list[str]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for row_index, line in enumerate(text.splitlines()):
+    for row_index, line in enumerate(pane_lines(text)):
         for needle in needles:
             if needle in line:
                 rows.append(
@@ -67,7 +77,7 @@ def frame_metrics(
     needles: list[str],
     transient_needles: list[str],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    lines = text.splitlines()
+    lines = pane_lines(text)
     metrics: list[dict[str, object]] = []
     anomalies: list[dict[str, object]] = []
     for needle in needles:
@@ -165,8 +175,8 @@ def main() -> int:
     for frame_index in range(args.frames):
         frame_name = f"{frame_index:02d}"
         for label, target in targets.items():
-            plain = capture(target, ansi=False, history_start=args.history_start)
             ansi = capture(target, ansi=True, history_start=args.history_start)
+            plain = ANSI_RE.sub("", ansi)
             (frames_dir / f"{label}-{frame_name}.log").write_text(plain)
             (frames_dir / f"{label}-{frame_name}.ansi").write_text(ansi)
             hits = row_hits(plain, needles)

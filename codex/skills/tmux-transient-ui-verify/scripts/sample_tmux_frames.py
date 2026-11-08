@@ -33,7 +33,7 @@ def run_tmux(args: list[str]) -> bytes:
 
 
 def capture(target: str, *, ansi: bool, history_start: str) -> str:
-    args = ["capture-pane", "-t", target, "-p", "-J", "-S", history_start]
+    args = ["capture-pane", "-t", target, "-p", "-S", history_start]
     if ansi:
         args.insert(3, "-e")
     return run_tmux(args).decode("utf-8", errors="replace")
@@ -46,18 +46,52 @@ def cursor_position(target: str) -> dict[str, object]:
             "-p",
             "-t",
             target,
-            "#{cursor_x}\t#{cursor_y}\t#{pane_active}",
+            "#{cursor_x}\t#{cursor_y}\t#{pane_active}\t#{pane_height}\t#{history_size}",
         ]
     ).decode("utf-8", errors="replace")
     parts = raw.rstrip("\n").split("\t")
-    cursor_x = int(parts[0]) if len(parts) >= 1 and parts[0].isdigit() else -1
-    cursor_y = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else -1
+    cursor_x = int(parts[0]) if len(parts) >= 1 and parts[0].isdigit() else None
+    cursor_y = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else None
     pane_active = parts[2] == "1" if len(parts) >= 3 else False
     return {
         "cursor_x": cursor_x,
         "cursor_y": cursor_y,
         "pane_active": pane_active,
+        "pane_height": int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() and int(parts[3]) > 0 else None,
+        "history_size": int(parts[4]) if len(parts) >= 5 and parts[4].isdigit() else None,
     }
+
+
+ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
+
+
+def sample_frame(target: str, history_start: str):
+    started = time.monotonic()
+    ansi = capture(target, ansi=True, history_start=history_start)
+    captured = time.monotonic()
+    plain = ANSI_RE.sub("", ansi)
+    cursor_started = time.monotonic()
+    cursor = cursor_position(target)
+    cursor_finished = time.monotonic()
+    height = cursor.get("pane_height")
+    cursor.update(capture_started_s=started, capture_finished_s=captured,
+                  cursor_started_s=cursor_started, cursor_finished_s=cursor_finished,
+                  cursor_atomic=False, coordinate_basis="viewport" if height else "unavailable",
+                  capture_origin=height - len(pane_lines(plain)) if height else None)
+    return plain, ansi, cursor
+
+
+def _first_viewport_row(item, cursor):
+    origin = cursor.get("capture_origin", 0)
+    if origin is None:
+        return None
+    height = cursor.get("pane_height")
+    for raw in str(item["rows"]).split(","):
+        if raw:
+            row = int(raw) + origin
+            if height is None or 0 <= row < height:
+                return row
+    return None
 
 
 def send_prompt(target: str, prompt: str) -> None:
@@ -65,9 +99,16 @@ def send_prompt(target: str, prompt: str) -> None:
     subprocess.check_call(["tmux", "send-keys", "-t", target, "Enter"])
 
 
+def pane_lines(text):
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def row_hits(text: str, needles: list[str]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for row_index, line in enumerate(text.splitlines()):
+    for row_index, line in enumerate(pane_lines(text)):
         for needle in needles:
             if needle in line:
                 rows.append(
@@ -88,7 +129,7 @@ def frame_metrics(
     needles: list[str],
     transient_needles: list[str],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    lines = text.splitlines()
+    lines = pane_lines(text)
     metrics: list[dict[str, object]] = []
     anomalies: list[dict[str, object]] = []
     for needle in needles:
@@ -147,14 +188,8 @@ def row_delta_metrics(
                 right = metric_by_key.get((target_label, frame_index, needle))
                 if left is None or right is None:
                     continue
-                left_rows = str(left["rows"])
-                right_rows = str(right["rows"])
-                left_first = (
-                    int(left_rows.split(",", 1)[0]) if left_rows else None
-                )
-                right_first = (
-                    int(right_rows.split(",", 1)[0]) if right_rows else None
-                )
+                left_first = _first_viewport_row(left, cursor_by_key.get((reference, frame_index), {}))
+                right_first = _first_viewport_row(right, cursor_by_key.get((target_label, frame_index), {}))
                 delta = (
                     None
                     if left_first is None or right_first is None
@@ -168,6 +203,8 @@ def row_delta_metrics(
                         "reference_label": reference,
                         "name": needle,
                         "required": needle in (required_needles or set()),
+                        "coordinate_available": all(cursor_by_key.get((label, frame_index), {}).get("capture_origin", 0) is not None
+                                                    for label in (reference, target_label)),
                         "reference_row": left_first,
                         "target_row": right_first,
                         "delta": delta,
@@ -176,8 +213,10 @@ def row_delta_metrics(
             left_cursor = cursor_by_key.get((reference, frame_index))
             right_cursor = cursor_by_key.get((target_label, frame_index))
             if left_cursor is not None and right_cursor is not None:
-                left_row = int(left_cursor["cursor_y"])
-                right_row = int(right_cursor["cursor_y"])
+                left_row = left_cursor.get("cursor_y")
+                right_row = right_cursor.get("cursor_y")
+                left_row = left_row if isinstance(left_row, int) and left_row >= 0 else None
+                right_row = right_row if isinstance(right_row, int) and right_row >= 0 else None
                 rows.append(
                     {
                         "frame": frame_index,
@@ -187,7 +226,7 @@ def row_delta_metrics(
                         "name": "cursor_y",
                         "reference_row": left_row,
                         "target_row": right_row,
-                        "delta": right_row - left_row,
+                        "delta": right_row - left_row if left_row is not None and right_row is not None else None,
                     }
                 )
     return rows
@@ -200,6 +239,10 @@ def row_delta_anomalies(
     for item in row_deltas:
         reference_row = item["reference_row"]
         target_row = item["target_row"]
+        if not item.get("coordinate_available", True):
+            continue
+        if item["kind"] == "cursor" and (reference_row is None or target_row is None):
+            continue
         if reference_row is None and target_row is None and not item.get("required", False):
             continue
         if reference_row is None or target_row is None:
@@ -243,7 +286,7 @@ def required_marker_anomalies(metrics, labels, required_needles):
              "detail": "required marker absent from reference throughout capture"}
             for needle in sorted(required_needles)
             if not any(item["label"] == reference and item["needle"] == needle
-                       and item.get("visible", item["count"] > 0) for item in metrics)]
+                       and item.get("visible", item["count"] > 0) in (True, None) for item in metrics)]
 
 
 def main() -> int:
@@ -319,9 +362,7 @@ def main() -> int:
     for frame_index in range(args.frames):
         frame_name = f"{frame_index:02d}"
         for label, target in targets.items():
-            plain = capture(target, ansi=False, history_start=args.history_start)
-            ansi = capture(target, ansi=True, history_start=args.history_start)
-            cursor = cursor_position(target)
+            plain, ansi, cursor = sample_frame(target, args.history_start)
             (frames_dir / f"{label}-{frame_name}.log").write_text(plain)
             (frames_dir / f"{label}-{frame_name}.ansi").write_text(ansi)
             cursor_metrics.append(
@@ -341,6 +382,13 @@ def main() -> int:
                 needles=needles,
                 transient_needles=transient_needles,
             )
+            if cursor.get("capture_origin") is None:
+                frame_anomalies.append({"label": label, "frame": frame_index,
+                    "kind": "coordinate_basis_unavailable", "needle": "", "count": "", "rows": "",
+                    "detail": "pane height unavailable; viewport alignment cannot be compared"})
+            for metric in frame_metric_rows:
+                metric["visible"] = (None if cursor.get("capture_origin") is None and metric["count"]
+                                     else _first_viewport_row(metric, cursor) is not None)
             metrics.extend(frame_metric_rows)
             anomalies.extend(frame_anomalies)
         if frame_index != args.frames - 1:

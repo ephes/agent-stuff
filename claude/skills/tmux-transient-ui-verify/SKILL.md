@@ -104,3 +104,8 @@ State clearly:
 Sampler labels must match the entire safe label pattern and be unique within
 --target and --send. Intervals must be finite and nonnegative; Codex row tolerance
 must also be nonnegative. Invalid configuration fails before sends or files.
+
+Plain and ANSI evidence derive from one ANSI capture, with physical LF rows.
+
+Needles must fit within one physical pane row; text crossing a soft-wrap boundary
+does not match a single needle. Use shorter markers or a wider pane.
