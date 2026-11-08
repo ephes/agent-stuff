@@ -492,3 +492,13 @@ a sibling temporary file, then replaces result.json atomically after close.
 Serialization, write, flush or replacement failure preserves an earlier receipt.
 Receipts use owner-only permissions. If reviewer data cannot be serialized,
 runners record a failed portable receipt while retaining available tool evidence.
+
+The session audit reads records up to 1 MiB including the newline, retaining at most 4096 values per
+provenance/tool category and 512 characters per field. Oversized records and
+retention overflow make proof incomplete; scanning continues to detect later
+violations. Only top-level session_meta, turn_context, response_item calls,
+event_msg completed delegation items/errors and delegation metadata count as
+proof; top-level record/payload type reroute markers also invalidate it. JSON embedded in outputs, messages or arbitrary metadata remains data.
+Malformed relevant envelopes fail proof. Codex receipt provenance and optional
+fields are specified by tests/test_result.py; publication faults are covered by
+tests/test_publication.py.
