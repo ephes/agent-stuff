@@ -657,22 +657,11 @@ def build_bundle(repo, out_path, *, max_file_size, max_diff_bytes_per_file,
                 f"explicit context file has a secret-looking path: {context_path}"
             )
         try:
-            context_stat = os.lstat(context_path)
-        except OSError as exc:
-            raise OSError(f"cannot read explicit context file {context_path}: {exc}") from exc
-        if not stat.S_ISREG(context_stat.st_mode):
+            raw = read_regular_file(context_path, max_context_file_size)
+        except ValueError as exc:
             raise OSError(
-                f"cannot read explicit context file {context_path}: not a regular file"
-            )
-        size = context_stat.st_size
-        if size > max_context_file_size:
-            raise OSError(
-                f"explicit context file exceeds {max_context_file_size} bytes: "
-                f"{context_path} ({size} bytes)"
-            )
-        try:
-            with open(context_path, "rb") as fh:
-                raw = fh.read()
+                f"explicit context file exceeds {max_context_file_size} bytes: {context_path}"
+            ) from exc
         except OSError as exc:
             raise OSError(f"cannot read explicit context file {context_path}: {exc}") from exc
         if b"\x00" in raw:
