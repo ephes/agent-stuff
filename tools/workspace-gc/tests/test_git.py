@@ -1,3 +1,4 @@
+import unittest
 import os
 from pathlib import Path
 from unittest import mock
@@ -47,3 +48,120 @@ class TestGitEnvironment(GitFixture):
             inspector.close()
         self.assertIn(url,urls)
         self.assertIn(str(Path(sibling)/'.git/objects'),alternates)
+
+
+class TestGitWrapper(unittest.TestCase):
+    def setUp(self):
+        self.saved = git._base_env
+        git._base_env = {'GIT_OPTIONAL_LOCKS':'0', 'GIT_TERMINAL_PROMPT':'0'}
+        self.addCleanup(setattr, git, '_base_env', self.saved)
+
+    def test_owned_group_is_terminated_and_reaped_on_timeout_or_interrupt(self):
+        import signal
+        import subprocess
+        for fault in (subprocess.TimeoutExpired('git',1), KeyboardInterrupt()):
+            proc = mock.MagicMock(pid=4242,returncode=None)
+            proc.__enter__.return_value = proc
+            proc.communicate.side_effect = [fault, ('','')]
+            with self.subTest(fault=type(fault).__name__), mock.patch.object(git.subprocess,'Popen',return_value=proc) as popen, mock.patch.object(git.os,'killpg') as kill:
+                if isinstance(fault, KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt): git.run(['status'],timeout=1)
+                else:
+                    with self.assertRaisesRegex(git.GitError,'timed out'): git.run(['status'],timeout=1)
+            self.assertTrue(popen.call_args.kwargs['start_new_session'])
+            self.assertEqual(kill.call_args_list,[mock.call(4242,signal.SIGTERM),mock.call(4242,signal.SIGKILL)])
+            self.assertEqual(proc.communicate.call_count,1)
+            proc.wait.assert_called_once_with(timeout=1)
+
+    def test_argv_alternates_and_failure_diagnostics(self):
+        from subprocess import CompletedProcess
+        proc = mock.MagicMock(returncode=1)
+        proc.__enter__.return_value = proc
+        proc.communicate.return_value = ('', 'first line\n' + 'x'*2000)
+        cwd='/synthetic/path with spaces'
+        with mock.patch.object(git.subprocess,'Popen',return_value=proc) as popen:
+            with self.assertRaises(git.GitError) as caught:
+                git.run(['show','argument with spaces'],cwd,alternates=['/synthetic/object dir'])
+        self.assertLess(len(str(caught.exception)),700)
+        cmd=popen.call_args.args[0]
+        self.assertEqual(cmd[-2:], ['show','argument with spaces'])
+        self.assertEqual(cmd[cmd.index('-C')+1],cwd)
+        self.assertIn('core.fsmonitor=false',cmd)
+        self.assertIn('core.untrackedCache=false',cmd)
+        self.assertEqual(popen.call_args.kwargs['env']['GIT_ALTERNATE_OBJECT_DIRECTORIES'],'/synthetic/object dir')
+        self.assertNotIn('GIT_ALTERNATE_OBJECT_DIRECTORIES',git.base_env())
+        proc.returncode=0
+        proc.communicate.return_value=('safe','')
+        with mock.patch.object(git.subprocess,'Popen',return_value=proc) as popen:
+            result=git.run(['status'])
+        self.assertEqual(result.stdout,'safe')
+        self.assertNotIn('GIT_ALTERNATE_OBJECT_DIRECTORIES',popen.call_args.kwargs['env'])
+
+    def test_concurrent_environment_copies_cannot_mutate_cached_state(self):
+        from concurrent.futures import ThreadPoolExecutor
+        def mutate(i):
+            env=git.base_env()
+            env['GIT_OPTIONAL_LOCKS']=str(i+1)
+            env['private']=str(i)
+            return env
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results=list(pool.map(mutate,range(12)))
+        self.assertEqual(len({id(env) for env in results}),12)
+        self.assertEqual(git.base_env()['GIT_OPTIONAL_LOCKS'],'0')
+        self.assertNotIn('private',git.base_env())
+
+    def test_zombie_group_errors_preserve_original_and_still_reap(self):
+        import subprocess
+        for fault in (subprocess.TimeoutExpired('git',1), KeyboardInterrupt()):
+            proc=mock.MagicMock(pid=4242,returncode=None)
+            proc.communicate.side_effect=fault
+            with mock.patch.object(git.subprocess,'Popen',return_value=proc), mock.patch.object(git.os,'killpg',side_effect=PermissionError('synthetic zombie group')):
+                if isinstance(fault,KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt): git.run(['status'],timeout=1)
+                else:
+                    with self.assertRaisesRegex(git.GitError,'timed out'): git.run(['status'],timeout=1)
+            proc.wait.assert_called_once_with(timeout=1)
+            self.assertEqual(proc.communicate.call_count,1)
+
+    def test_real_transport_descendant_gets_graceful_cleanup(self):
+        import shlex, signal, sys, tempfile, time
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); helper=root/'helper.py'; pids=root/'pids'; receipt=root/'reaped'
+            helper.write_text("""import os, signal, subprocess, sys, time
+from pathlib import Path
+root=Path(sys.argv[1])
+child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'])
+def stop(*args):
+    child.terminate()
+    child.wait(timeout=1)
+    (root/'reaped').write_text('reaped')
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM,stop)
+(root/'pids').write_text(str(os.getpid())+' '+str(child.pid))
+time.sleep(30)
+""",encoding='utf-8')
+            git._base_env.update(PATH=os.environ['PATH'],GIT_CONFIG_GLOBAL=os.devnull,
+                GIT_CONFIG_NOSYSTEM='1',GIT_SSH_VARIANT='ssh',
+                GIT_SSH_COMMAND=shlex.join([sys.executable,str(helper),str(root)]))
+            try:
+                with self.assertRaisesRegex(git.GitError,'timed out'):
+                    git.run(['ls-remote','ssh://synthetic.invalid/repo'],timeout=1)
+                self.assertTrue(pids.exists(),'synthetic transport did not start')
+                self.assertEqual(receipt.read_text(),'reaped')
+                _, descendant=map(int,pids.read_text().split())
+                with self.assertRaises(ProcessLookupError): os.kill(descendant,0)
+            finally:
+                if pids.exists():
+                    for pid in map(int,pids.read_text().split()):
+                        try: os.kill(pid,signal.SIGTERM)
+                        except ProcessLookupError: pass
+
+    def test_check_false_returns_failed_command_without_signalling(self):
+        proc=mock.MagicMock(returncode=7)
+        proc.communicate.return_value=('synthetic output','synthetic failure')
+        with mock.patch.object(git.subprocess,'Popen',return_value=proc), mock.patch.object(git.os,'killpg') as kill:
+            result=git.run(['status'],check=False)
+        self.assertEqual(result.returncode,7)
+        self.assertEqual(result.stdout,'synthetic output')
+        self.assertEqual(result.stderr,'synthetic failure')
+        kill.assert_not_called()

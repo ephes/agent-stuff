@@ -8,8 +8,10 @@ a checkout it only inspects.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import threading
+import time
 from urllib.parse import urlsplit, unquote
 
 LS_REMOTE_TIMEOUT = 45
@@ -60,6 +62,29 @@ def _configured_ssh_command(env: dict[str, str]) -> bool:
     return out.returncode == 0 and bool(out.stdout.strip())
 
 
+def _stop_group(child):
+    # Keep an unreaped leader while signalling, so its group id cannot be
+    # recycled between graceful and final signals. Never drain inherited pipes.
+    if child.returncode is not None:
+        return
+    try:
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except OSError:
+            pass  # includes macOS EPERM for a zombie-only group
+        time.sleep(0.2)
+    finally:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            child.kill()
+        except OSError:
+            pass
+        child.wait(timeout=1)
+
+
 def run(args: list[str], cwd: str | None = None, *, input: str | None = None,
         alternates: list[str] | None = None, check: bool = True,
         timeout: int = GIT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -72,15 +97,33 @@ def run(args: list[str], cwd: str | None = None, *, input: str | None = None,
         cmd += ["-C", cwd]
     cmd += args
     try:
-        proc = subprocess.run(cmd, env=env, input=input, capture_output=True,
-                              text=True, timeout=timeout, errors="replace")
+        child = subprocess.Popen(cmd, env=env, stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, errors="replace", start_new_session=True)
+        try:
+            try:
+                stdout, stderr = child.communicate(input=input, timeout=timeout)
+            except BaseException:
+                try:
+                    _stop_group(child)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass  # cleanup must never replace the original interruption
+                raise
+            proc = subprocess.CompletedProcess(cmd, child.returncode, stdout, stderr)
+        finally:
+            for pipe in (child.stdin, child.stdout, child.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
     except subprocess.TimeoutExpired as exc:
-        raise GitError(f"timed out: git {' '.join(args[:2])}") from exc
+        raise GitError(f"timed out: git {' '.join(args[:2])[:160]}") from exc
     except OSError as exc:
         raise GitError(f"cannot run git: {exc}") from exc
     if check and proc.returncode != 0:
         msg = (proc.stderr or proc.stdout).strip().splitlines()
-        raise GitError(f"git {' '.join(args[:2])}: {msg[-1] if msg else proc.returncode}")
+        raise GitError(f"git {' '.join(args[:2])[:160]}: {msg[-1][:500] if msg else proc.returncode}")
     return proc
 
 
