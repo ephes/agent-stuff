@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Terminate and reap owned Git process groups on timeout/interruption and
+  bound failure diagnostics; add hermetic direct wrapper contracts.
+
 - Isolate Git repository/config injection environment variables and decode
   local file URLs correctly, including escaped spaces and Unicode.
 

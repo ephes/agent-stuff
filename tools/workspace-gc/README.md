@@ -356,6 +356,13 @@ URL paths once, accept empty/localhost authority, and refuse remote authorities,
 queries, fragments, ambiguous double-leading-slash URL paths or invalid UTF-8/NUL paths.
 Plain filesystem paths retain their existing semantics.
 
+Timed Git commands run in an owned process group. Timeout or interruption sends
+SIGTERM, allows a short lock-cleanup grace period, then kills remaining group
+members and performs a bounded wait for Git (without draining inherited pipes); the caller's process group is never
+signalled. Diagnostics are bounded. Direct wrapper contracts (environment copies,
+argv boundaries, alternates and failures) run with `python3.14 -m unittest
+tests.test_git` from this directory.
+
 ## Changes
 
 See [CHANGELOG.md](CHANGELOG.md).
