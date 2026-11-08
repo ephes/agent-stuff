@@ -94,6 +94,7 @@ def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
         "apply_blockers": inv.signals.apply_blockers(),
         "checkouts": [co.to_dict() for co in sorted(inv.checkouts, key=lambda c: (c.cls, c.path))],
         "prune": inv.prune,
+        "prune_errors": run.prune_errors if run else {},
         "empty_dirs": [e.to_dict() for e in inv.empty_dirs],
         "husks": [h.to_dict() for h in inv.husks],
         "husks_removed": [{"path": h.path, "what": h.removed_what, "kb": h.removed_kb}
@@ -219,6 +220,11 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
                   + (f", ... (+{len(ents) - 8} more)" if len(ents) > 8 else ""))
             if h.note:
                 w(f"  - note: {h.note}")
+    if run and run.prune_errors:
+        w("")
+        w("## Prune failures")
+        for repo, error in sorted(run.prune_errors.items()):
+            w(f"- {short(repo)}: {error}")
     if inv.prune:
         w("")
         w("## Stale worktree entries" + (" (pruned)" if applied else ""))

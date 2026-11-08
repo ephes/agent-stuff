@@ -205,5 +205,5 @@ def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
 
 
 def prune(repo: str) -> list[str]:
-    proc = git.run(["worktree", "prune", "-v"], repo, check=False)
+    proc = git.run(["worktree", "prune", "-v"], repo)
     return [ln for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
