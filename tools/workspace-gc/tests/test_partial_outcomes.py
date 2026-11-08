@@ -12,6 +12,7 @@ class TestPartialOutcomes(unittest.TestCase):
         co = inventory.Checkout(path='/synthetic/ws/repo', root='/synthetic', workspace='/synthetic/ws', kind='clone', cls='A', size_kb=10)
         inv = inventory.Inventory(roots=['/synthetic'], checkouts=[co], signals=ok_signals())
         args = cli.parser().parse_args(['scan','--root','/synthetic','--main-root','/synthetic/main','--apply'])
+        args.regenerable_file=None
         return args, inv
 
     def test_prune_failure_keeps_partial_receipt_and_continues_cleanup(self):
@@ -63,6 +64,7 @@ class TestPartialOutcomes(unittest.TestCase):
         args, inv = self.fixture()
         with tempfile.TemporaryDirectory() as tmp:
             args = cli.parser().parse_args(['report','--out-dir',tmp,'--apply','--root','/synthetic'])
+            args.regenerable_file=None
             with mock.patch.object(cli, '_build', return_value=inv), mock.patch.object(inventory, 'prune_targets', return_value=['/synthetic/owner']), mock.patch.object(remove, 'remove_checkout', return_value='removed clone /synthetic/ws/repo'), mock.patch.object(remove, 'prune', side_effect=GitError('synthetic prune failure')), mock.patch.object(empties, 'remove'), mock.patch.object(husks, 'remove'):
                 self.assertEqual(cli.cmd_report(args,inv.signals,io.StringIO()),1)
             data=json.loads(Path(tmp,'latest.json').read_text())

@@ -213,7 +213,7 @@ def cmd_scan(a, sig, out) -> int:
     run = _apply(a, inv)
     if run.refused:
         out.write(rep.to_text(inv))
-        out.write("REFUSED --apply: in-use signals incomplete: " + "; ".join(run.refused) + "\n")
+        out.write("REFUSED --apply: in-use signals incomplete: " + rep.escape("; ".join(run.refused)) + "\n")
         return 2
     gone = [e for e in inv.empty_dirs if e.removed]
     if a.json:
@@ -227,18 +227,18 @@ def cmd_scan(a, sig, out) -> int:
     else:
         for r in run.outcomes:
             if r["outcome"].startswith("removed"):
-                out.write(r["outcome"] + "\n")
+                out.write(rep.escape(r["outcome"]) + "\n")
             else:
-                out.write(f"SKIP {rep.short(r['path'])}: {r['outcome']}\n")
+                out.write(f"SKIP {rep.short(r['path'])}: {rep.escape(r['outcome'])}\n")
         for repo, lines in inv.prune.items():
             out.write(f"pruned {len(lines)} stale worktree entr{'y' if len(lines) == 1 else 'ies'} in {rep.short(repo)}\n")
         for repo, error in run.prune_errors.items():
-            out.write(f"prune failed {rep.short(repo)}: {error}\n")
+            out.write(f"prune failed {rep.short(repo)}: {rep.escape(error)}\n")
         for e in gone:
-            out.write(f"removed empty directory {e.path}\n")
+            out.write(f"removed empty directory {rep.short(e.path)}\n")
         for h in inv.husks:
             if h.removed:
-                out.write(f"removed {h.removed_what} of workspace directory {h.path} "
+                out.write(f"removed {h.removed_what} of workspace directory {rep.short(h.path)} "
                           f"({rep.human_kb(h.removed_kb)})\n")
         out.write(f"{len(run.removed)} removed, {run.skipped} skipped, {len(gone)} empty "
                   f"director{'y' if len(gone) == 1 else 'ies'} removed; untouched: "
@@ -249,23 +249,23 @@ def cmd_scan(a, sig, out) -> int:
 def cmd_remove(a, sig, out) -> int:
     target = os.path.realpath(os.path.abspath(os.path.expanduser(a.path)))
     if os.path.islink(os.path.abspath(os.path.expanduser(a.path))):
-        out.write(f"REFUSED {a.path}: is a symlink\n")
+        out.write(f"REFUSED {rep.escape(a.path)}: is a symlink\n")
         return 1
     roots = _roots(a)
     if not any(target.startswith(r + os.sep) for r in roots):
-        out.write(f"REFUSED {target}: not inside a root ({', '.join(rep.short(r) for r in roots)})\n")
+        out.write(f"REFUSED {rep.escape(target)}: not inside a root ({', '.join(rep.short(r) for r in roots)})\n")
         return 1
     inv = _build(a, sig, only=target)
     if not inv.checkouts:
-        out.write(f"REFUSED {target}: not a git checkout found under the roots\n")
+        out.write(f"REFUSED {rep.escape(target)}: not a git checkout found under the roots\n")
         return 1
     co = inv.checkouts[0]
     desc = f"{rep.short(co.path)} [{co.kind}, class {co.cls}: {inv_mod.CLASS_NAMES[co.cls]}]"
     if co.cls != "A":
-        out.write(f"REFUSED {desc}\n" + "".join(f"  - {r}\n" for r in co.reasons))
+        out.write(f"REFUSED {desc}\n" + "".join(f"  - {rep.escape(r)}\n" for r in co.reasons))
         for i, line in enumerate(co.unpushed_commits):
             hint = co.unpushed_hints[i] if i < len(co.unpushed_hints) else ""
-            out.write(f"    - {line}" + (f" [{hint}]" if hint else "") + "\n")
+            out.write(f"    - {rep.escape(line)}" + (f" [{rep.escape(hint)}]" if hint else "") + "\n")
         return 1
     if not a.apply:
         verb = "git worktree remove" if co.kind == "worktree" else "guarded delete"
@@ -273,19 +273,19 @@ def cmd_remove(a, sig, out) -> int:
         return 0
     blockers = inv.signals.apply_blockers()
     if blockers:
-        out.write(f"REFUSED {desc}: in-use signals incomplete: {'; '.join(blockers)}\n")
+        out.write(f"REFUSED {desc}: in-use signals incomplete: {rep.escape('; '.join(blockers))}\n")
         return 2
     try:
-        out.write(rm_mod.remove_checkout(co, roots, _main_roots(a), inv.keep_patterns,
-                                         _regenerable(a), fetch=not a.no_fetch, signals=inv.signals) + "\n")
+        out.write(rep.escape(rm_mod.remove_checkout(co, roots, _main_roots(a), inv.keep_patterns,
+                                         _regenerable(a), fetch=not a.no_fetch, signals=inv.signals)) + "\n")
     except rm_mod.Refused as exc:
-        out.write(f"REFUSED {desc}: {exc}\n")
+        out.write(f"REFUSED {desc}: {rep.escape(exc)}\n")
         return 1
     if co.kind == "worktree" and co.owner_repo:
         try:
             rm_mod.prune(co.owner_repo)
         except rm_mod.GitError as exc:
-            out.write(f"prune failed {rep.short(co.owner_repo)}: {exc}\n")
+            out.write(f"prune failed {rep.short(co.owner_repo)}: {rep.escape(exc)}\n")
             return 1
     return 0
 
@@ -341,7 +341,7 @@ def cmd_report(a, sig, out) -> int:
     msg = f"{stamp} {rep.summary_line(inv)}"
     if a.work_item:
         msg += f"; {_upsert_item(a, inv, out_dir)}"
-    out.write(msg + "\n")
+    out.write(rep.escape(msg) + "\n")
     return code
 
 

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Escape control characters in human reports while retaining JSON identities;
+  align partial-run summaries and exclude removed husks from removable counts.
+
 - Terminate and reap owned Git process groups on timeout/interruption and
   bound failure diagnostics; add hermetic direct wrapper contracts.
 

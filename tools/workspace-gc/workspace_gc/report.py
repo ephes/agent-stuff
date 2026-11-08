@@ -11,8 +11,14 @@ from .inventory import CLASS_NAMES, Inventory
 HOME = os.path.expanduser("~")
 
 
+def escape(value: str) -> str:
+    """One-line human projection; JSON identifiers keep their original text."""
+    return "".join(char if char.isprintable() else ascii(char)[1:-1]
+                   for char in str(value))
+
+
 def short(path: str) -> str:
-    return "~" + path[len(HOME):] if path == HOME or path.startswith(HOME + os.sep) else path
+    return escape("~" + path[len(HOME):] if path == HOME or path.startswith(HOME + os.sep) else path)
 
 
 def human_kb(kb: int) -> str:
@@ -42,14 +48,15 @@ def _top_level(inv: Inventory) -> str:
     roughly their content (checkouts plus workspace directories without one,
     caches or directories already removed left out)."""
     n = 0
+    incomplete = False
     for root in inv.roots:
         try:
             n += sum(1 for e in os.scandir(root) if e.is_dir(follow_symlinks=False))
         except OSError:
-            pass
+            incomplete = True
     kb = sum(c.size_kb for c in inv.checkouts) + sum(
         h.kb - h.removed_kb for h in inv.husks if not (h.removed and h.removed_what == "directory"))
-    return f"{n} top-level dirs" + (f" (~{human_kb(kb)})" if kb else "")
+    return (f"at least {n} top-level dirs (roots unreadable)" if incomplete else f"{n} top-level dirs") + (f" (~{human_kb(kb)})" if kb else "")
 
 
 def _stale_removed(inv: Inventory) -> list:
@@ -57,6 +64,10 @@ def _stale_removed(inv: Inventory) -> list:
 
 
 def summary_line(inv: Inventory) -> str:
+    return escape(_summary_line(inv))
+
+
+def _summary_line(inv: Inventory) -> str:
     t = totals(inv)
     left = (f"{t['A']['count']} removable ({human_kb(t['A']['kb'])}), "
             f"{t['B']['count']} removable after push, {t['C']['count']} need you")
@@ -79,6 +90,7 @@ def summary_line(inv: Inventory) -> str:
                f"({human_kb(sum(h.removed_kb for h in gone))})" if gone else "")
             + (f", caches of {len(caches)} workspace director{'y' if len(caches) == 1 else 'ies'} "
                f"({human_kb(sum(h.removed_kb for h in caches))})" if caches else "")
+            + (f"; {run.skipped} skipped" if run.skipped else "")
             + f"; left: {left}" + tail)
 
 
@@ -123,7 +135,7 @@ def _checkout_line(co) -> str:
 
 def to_text(inv: Inventory, generated_at: str | None = None) -> str:
     out = []
-    w = out.append
+    w = lambda value: out.append(escape(value))
     run = inv.run
     applied = run is not None and not run.refused
     mode = "dry run" if run is None else "run, removals applied" if applied \
@@ -199,8 +211,8 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
           f"{human_kb(sum(h.kb for h in inv.husks))}, of which workspace-level caches "
           f"{human_kb(sum(h.payload_kb for h in inv.husks))}; "
           f"{sum(1 for h in inv.husks if h.removed)} removed, "
-          f"{sum(1 for h in inv.husks if h.stale)} stale and removable, "
-          f"{sum(1 for h in inv.husks if h.removable)} cache-only and removable)")
+          f"{sum(1 for h in inv.husks if h.stale and not h.removed)} stale and removable, "
+          f"{sum(1 for h in inv.husks if h.removable and not h.removed)} cache-only and removable)")
         w("")
         for h in sorted(inv.husks, key=lambda x: -x.kb):
             w(f"- {short(h.path)} [{human_kb(h.kb)}, caches {human_kb(h.payload_kb)}, "

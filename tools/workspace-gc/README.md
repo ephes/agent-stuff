@@ -363,6 +363,16 @@ signalled. Diagnostics are bounded. Direct wrapper contracts (environment copies
 argv boundaries, alternates and failures) run with `python3.14 -m unittest
 tests.test_git` from this directory.
 
+Human reports escape terminal controls and line separators in every data field;
+structured JSON retains original paths, reasons and subjects. The human display
+projection is not reversible; use JSON for exact identifiers. Class totals cover
+remaining checkouts; removed_kb covers successfully removed checkouts only, while
+husks_removed records whole-directory and cache-only bytes separately. Removed
+husks are not also counted as remaining stale/cache-only candidates. Skipped
+counts include failed attempted cleanups and prune errors, excluding initial
+keeps. Refused runs report no removals; no-size scans may report zero sizes.
+Report contract tests run with `python3.14 -m unittest tests.test_report`.
+
 ## Changes
 
 See [CHANGELOG.md](CHANGELOG.md).
