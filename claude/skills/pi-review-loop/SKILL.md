@@ -299,3 +299,9 @@ copy's `head`, `tree`, `excluded` paths, `notes`, and whether it was
 `removed`), `events.jsonl` (strict JSONL event stream), `stdout.raw.log`,
 `stderr.log`, and `review-bundle.md` (the redacted starting point Pi was given).
 The copy itself is gone after the run.
+
+Result publication serializes portable JSON (no NaN or Infinity) before creating
+a sibling temporary file, then replaces result.json atomically after close.
+Serialization, write, flush or replacement failure preserves an earlier receipt.
+Receipts use owner-only permissions. If reviewer data cannot be serialized,
+runners record a failed portable receipt while retaining available tool evidence.

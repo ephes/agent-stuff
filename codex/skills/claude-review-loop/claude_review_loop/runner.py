@@ -250,17 +250,20 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
     except Exception:
         # Never leave the caller without a result: degrade to a CRASHED result
         # and best-effort write (a failed write must still not raise).
+        portable_tools = [json.loads(json.dumps(uses), parse_constant=lambda _: None)
+                          for uses in (monitor.tool_uses, monitor.forbidden_tool_uses,
+                                       monitor.denied_tool_uses)]
         result = ReviewResult(
             state=CRASHED, items=[], model=model, cost=None,
             started_at=started, ended_at=_now(),
             error=((error or "") + "\n" + traceback.format_exc()).strip(),
-            effort=effort, structured_output=monitor.structured_output,
-            tool_uses=monitor.tool_uses,
-            forbidden_tool_uses=monitor.forbidden_tool_uses,
-            denied_tool_uses=monitor.denied_tool_uses,
+            effort=effort, structured_output=None,
+            tool_uses=portable_tools[0],
+            forbidden_tool_uses=portable_tools[1],
+            denied_tool_uses=portable_tools[2],
         )
         try:
             result.write(paths["result"])
-        except OSError:
+        except (OSError, ValueError, TypeError):
             pass
     return result

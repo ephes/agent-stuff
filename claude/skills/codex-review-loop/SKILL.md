@@ -486,3 +486,9 @@ run against the real `~/.codex`, and it reaches the CLI only through
 Session audit decoding and read failures produce INVALID/model-unproven receipts.
 Malformed tool names or namespaces are refused as incomplete proof, with bounded
 diagnostics that do not quote session content.
+
+Result publication serializes portable JSON (no NaN or Infinity) before creating
+a sibling temporary file, then replaces result.json atomically after close.
+Serialization, write, flush or replacement failure preserves an earlier receipt.
+Receipts use owner-only permissions. If reviewer data cannot be serialized,
+runners record a failed portable receipt while retaining available tool evidence.

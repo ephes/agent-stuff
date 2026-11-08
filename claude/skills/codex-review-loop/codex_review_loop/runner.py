@@ -383,6 +383,22 @@ def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
     )
     try:
         result.write(paths["result"])
+    except (ValueError, TypeError):
+        result.state = INVALID
+        if result.failure_kind != KIND_FORBIDDEN_TOOL:
+            result.failure_kind = KIND_VERDICT
+        result.items = []
+        result.structured_output = None
+        result.error = (result.error + "; " if result.error else "") + "result serialization failed"
+        # Preserve provenance and security evidence; non-finite observations
+        # cannot prove a model and are represented as missing in this failure.
+        for field in ("observed_models", "observed_efforts", "observed_access_programs"):
+            setattr(result, field, json.loads(json.dumps(getattr(result, field)),
+                                             parse_constant=lambda _: None))
+        try:
+            result.write(paths["result"])
+        except (OSError, ValueError, TypeError):
+            pass
     except OSError:
         pass
     return result

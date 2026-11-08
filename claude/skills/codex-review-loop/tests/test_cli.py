@@ -235,15 +235,28 @@ class TestCliFailsClosed(unittest.TestCase):
 
 
 class TestMalformedAudit(unittest.TestCase):
+    def test_nonfinite_forbidden_receipt_keeps_security_provenance(self):
+        fx = RepoFixture()
+        try:
+            proc, receipt, _ = fx.run('nonfinite_forbidden')
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertEqual(receipt['failure_kind'], 'forbidden_tool')
+            self.assertIn('collaboration.spawn_agent', receipt['forbidden_tool_uses'])
+            self.assertTrue(receipt['thread_id'])
+            self.assertTrue(receipt['session_record'])
+            self.assertEqual(receipt['observed_models'], ['gpt-6.1-sol'])
+        finally:
+            fx.cleanup()
+
     def test_bad_session_produces_failed_receipt_and_releases_slot(self):
-        for mode in ('invalid_utf8', 'malformed_tool'):
+        for mode in ('invalid_utf8', 'malformed_tool', 'nonfinite_verdict'):
             with self.subTest(mode=mode):
                 fx = RepoFixture()
                 try:
                     proc, result, _ = fx.run(mode)
                     self.assertEqual(proc.returncode, 2, proc.stderr)
                     self.assertEqual(result['state'], 'INVALID')
-                    self.assertEqual(result['failure_kind'], 'model_unproven')
+                    self.assertEqual(result['failure_kind'], 'verdict' if mode == 'nonfinite_verdict' else 'model_unproven')
                     self.assertNotIn('Traceback', proc.stderr)
                     proc, result, _ = fx.run('clean', '--max-concurrent', '1')
                     self.assertEqual(proc.returncode, 0, proc.stderr)
