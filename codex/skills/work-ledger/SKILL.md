@@ -100,12 +100,11 @@ in `work note`.
 ## Planning and picking work
 
 Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
-`--expedite` upsert flags are merged in work-ledger main (2026-11-07) but work
-**only after the owner deploys the work app; as of 2026-11-07 it is not yet
-deployed**. Until then the live app and `work` CLI lack them: report that
-prerequisite instead of interpreting an error as an empty plan, and keep using
-the current queue files. The coordinator runs the one-off queue import only
-after deployment; workers never run it.
+`--expedite` upsert flags are live since 2026-11-08: the work app is deployed
+and `work plan` returns horizons. The one-off queue import has run; the
+former codex-q queue items sit in Next with topic `codex-burn`. Read and
+dispatch from `work next`/`work plan`; queue files are only generated copies
+(below), and the import is not rerun.
 
 The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
 each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
