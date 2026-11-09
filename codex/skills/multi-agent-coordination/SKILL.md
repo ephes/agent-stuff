@@ -1,6 +1,6 @@
 ---
 name: multi-agent-coordination
-description: Use when coordinating several agent workers at once - acting as the coordinator of a campaign, dispatching or resuming workers, writing worker briefs, pacing Claude/Codex subscription quota, bundling owner approvals, or closing out worker results. Provider-neutral; shared by Claude, Codex and Pi coordinators. Builds on work-ledger and cross-agent-review-cycle.
+description: Use when coordinating several agent workers at once - acting as the coordinator of a campaign, dispatching or resuming workers, writing worker briefs, pacing Claude/Codex subscription quota, deciding what needs the owner (A/B/C decision classes), or closing out worker results. Provider-neutral; shared by Claude, Codex and Pi coordinators. Builds on work-ledger and cross-agent-review-cycle.
 ---
 
 # Multi-Agent Coordination
@@ -19,7 +19,7 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 - **Clerk** (an optional bookkeeping agent acting for the coordinator, under
   the coordinator's `work-ledger` rules): verifies pushes itself with
   `git ls-remote` before recording them, updates work-app items, creates one
-  request per decision (bulk acceptance may cover several items), reports usage,
+  request per C-class decision (see **Decision classes**), reports usage,
   and summarizes owner responses without consuming them. The coordinator still owns the decisions.
 - **Scouts** are read-only workers that find ready, valuable slices and return
   a ranked list of bundles (see **Bundling** under the brief checklist), not
@@ -48,16 +48,59 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   (for example `grep -E 'SKIP|FAIL|ERROR'`) before closing an item; a summary or
   the tail of a log is not evidence.
 - Owner decisions arrive as work-app responses. Act on one through a worker,
-  record the outcome, then consume it. For bulk acceptance, the owner's
-  *Tested OK* already sets ticked items to `accepted`: read `items` and
-  `accepted_items`, handle any unticked items, then consume; no stage PUT.
-  Ask with `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`
-  (up to 200 items). The owner can also use *Accept selected* for installed
-  items in the UI.
-- Reduce owner load: bundle several branches of one repo into one integration
-  branch so any required owner approval covers the bundle. For stacked
-  branches (for example security fixes touching the same files), base each on the previous unmerged branch and
-  state the merge order in the request.
+  record the outcome, then consume it.
+- **No routine acceptance asks.** For code-only or technically verifiable
+  work, record the evidence and set the strongest verified stage (often
+  `installed`); do not ask the owner for *Tested OK*. Ask for acceptance only
+  when the check is subjective (look and feel, family-facing behaviour), with
+  `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`; his
+  *Tested OK* sets the ticked items to `accepted` (`work-ledger`).
+- For stacked branches (for example security fixes touching the same files),
+  base each on the previous unmerged branch and state the merge order in the
+  brief.
+
+## Decision classes
+
+Owner decision 2026-11-09: **fewer owner approvals, not harder ones.** The
+owner has little time and often cannot judge a request, so a stream of asks
+gets approved unread. That is how UniFi, Minecraft and ollama_proxy were
+removed live on 2026-11-05 without a real decision (incident report
+`~/projects/matters/output/unifi-incident-20261109.md`). Agents may deploy and SSH as
+root on the owner's hosts themselves. Classify every action before it runs:
+
+- **A, do it, then inform**: code, tests, merges after a clean review, and
+  routine deploys on the owner's hosts with a fresh backup and a known
+  rollback path. Workers deploy themselves; no owner ask.
+- **B, independent check, then do it**: new deploy paths, migrations, changes
+  to shared services, and retiring clearly unused non-vital things under an
+  existing owner rule. Before acting, a reviewer of a different model family
+  with fresh context reviews the plan, the evidence and the recovery path
+  adversarially: "why could this be wrong even if implemented correctly?"
+  (`cross-agent-review-cycle` harnesses, plan and evidence as context files).
+  Clean → proceed. After at most 2 rounds that are not clean, park; do not
+  ask the owner.
+- **C, owner decides, rarely**: giving up a capability someone uses,
+  irreversible loss of valuable data, new costs or external commitments,
+  noticeable changes for the family. Each ask is one plain-language sentence
+  saying what changes for him, plus a recommendation and the safe default if
+  he does not answer (e.g. "Retire the Minecraft server? Nobody has played
+  since June. I recommend retiring it; without an answer it keeps running.").
+  Never bundle it with other asks or hide it in design notes or a plan.
+- **Unknown** means investigate or leave it parked. Uncertainty is never a
+  reason to ask the owner.
+- **The order binds execution.** "Port/implement a remove route" never means
+  running it live. Removing a running service needs a reason, a real usage
+  check (logs, logins, clients), a tested restore path, and C-class owner
+  intent for that service.
+- **Vital services are never removed by agents**: UniFi, DNS, mail,
+  Vaultwarden, Home Assistant, backups (Echoport, MinIO), Traefik and the work
+  app. Routine A/B changes to them are fine.
+- **Inform via a short digest** in the owner's chat with the coordinator: at
+  most 5 points per day on what was done and what is parked. Only real outages or failed rollbacks go out
+  immediately.
+- **Answer bursts**: when owner answers arrive seconds apart (e.g. more than 5
+  in a minute), treat the C-class answers in that burst as unconfirmed and
+  re-ask each one separately, later, on its own.
 
 ## Planning and dispatch order
 
@@ -67,8 +110,8 @@ the rollout and command contract in `work-ledger`. Before dispatch, read
 `work next [--project P] [--topic T] [--campaign C] [--limit N]` (`--campaign`
 only once the campaign deploy is live; see the campaign rollout note in
 `work-ledger`) and take available Now items in rank order, subject to dependencies,
-same-repo sequencing and quota capacity. If no Now item fits, report why and
-ask the owner; do not promote a Next item yourself. A Now count over six is
+same-repo sequencing and quota capacity. If no Now item fits, say why in
+the digest and wait; do not promote a Next item yourself. A Now count over six is
 only a WIP warning and does not stop `work next`. The default limit is one;
 filtering happens before the limit. Eligibility is `designed`/`prototype`, no
 open owner request, owner `jochen`/`claude`/`codex`/`pi`; named worker or unknown
@@ -79,8 +122,8 @@ Coordinators and clerks append newly discovered work at the end of Next or
 Later (`work upsert ... --horizon next`, without rank or neighbours). Mark a
 campaign's items with `--campaign <slug>` (for example `codex-burn`), never
 with a topic; before the campaign deploy, leave the campaign unset. Agents never reorder, including within Next, and never move items
-into Now. Route
-reorder and horizon proposals through `work ask` for the owner to apply;
+into Now. Raise
+reorder and horizon proposals in the weekly chat check below, not as separate asks;
 claiming work changes stage to `implementing` and owner to the worker, not
 horizon or rank. Re-read and use the lost-update guard before claiming.
 
@@ -154,8 +197,8 @@ sources of dispatch order. Workers do not run the import.
   account; never move running ones. Start them in
   herdr panes with these functions on a fast, always-awake machine (atlas or
   studio, not the CPU-bound claascraft laptop). Its workers do not see the main
-  account's memory, so their brief must carry the rules. Hosts with the age key
-  and root SSH (atlas, studio): brief them to merge only, never deploy. Its
+  account's memory, so their brief must carry the rules, including the
+  decision classes. Its
   usage is read with `/usage` in a dedicated pane or short session that is
   closed afterwards, never in a working pane (see **Handoffs and herdr
   panes**); once `work usage`
@@ -192,8 +235,7 @@ sources of dispatch order. Workers do not run the import.
 - **Same permission mode**: sessions that message each other (e.g. Claude
   SendMessage) run in the same permission mode (bypass). A message reported
   as held or not delivered is not resent: go through the work app (coordinator
-  or clerk) or herdr `agent prompt` instead, and tell the owner in one
-  sentence.
+  or clerk) or herdr `agent prompt` instead, and note it in the digest.
 
 ## Worker brief checklist
 
@@ -224,13 +266,14 @@ Every brief states the item slug, goal, acceptance criteria, and:
 - **Delivery**: feature branch, push only after
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
   (origin under `github.com/ephes/`; otherwise report, never push), verify with
-  `git ls-remote`. Agents may merge and push a slice themselves once the
-  cross-family review is clean and the tests pass. Deploys and installs still
-  need owner approval.
+  `git ls-remote`. Agents merge and push a slice themselves once the
+  cross-family review is clean and the tests pass. Deploys follow the
+  **Decision classes**: the brief names the class and, for a deploy, the
+  backup and rollback path; A-class deploys the worker runs itself.
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean (unresolved
   Critical/Warning; a Suggestion-only round is not, see that skill), park the
-  slice and ask the owner instead of looping. Use public APIs or allowlists,
+  slice and report why instead of looping; parking is not an owner ask. Use public APIs or allowlists,
   not home-made HTTP, streaming or delete-safety layers. Pass each
   `--evidence-file` and `--context-file` as its own quoted argument; a list
   in one shell variable word-splits into a broken invocation.
@@ -239,11 +282,13 @@ Every brief states the item slug, goal, acceptance criteria, and:
   escalation** (e.g. new Criticals in the same component round after round) is
   re-dispatched one step up (`max` / `high`) with the instruction to treat the
   design as the finding and simplify rather than patch; record the escalation
-  and its reason on the item. It is not a round-cap reset: a round past the
-  park still needs the owner's approval. The next slice starts at the default
+  and its reason on the item. It is not a round-cap reset: a parked slice gets
+  no further round. The coordinator (not the owner) may re-dispatch it as a new
+  slice with a changed design and a fresh `--slice-id`, at the escalated effort
+  and with its own 2-round park; the slice after that starts at the default
   again.
 - **Unclear cases**: if a case does not clearly match the brief's rule, report
-  it instead of acting.
+  it instead of acting; the coordinator investigates or parks it.
 - **Hygiene**: commit messages without AI or tool mentions; docs and changelog
   updated in the same change.
 - **Versions**: in repos with version chains (e.g. ops-library's
@@ -275,20 +320,21 @@ Every brief states the item slug, goal, acceptance criteria, and:
 
 ## Infrastructure and safety
 
-- On hosts, SSH as root only, never a user account plus sudo. Read-only checks
-  are fine; never make manual host changes. All changes go through
-  ops-library/ops-control.
+- On the owner's hosts, agents SSH as root themselves, never a user account
+  plus sudo. Read-only checks are fine; never make manual host changes. All
+  changes go through ops-library/ops-control, classified per **Decision
+  classes**.
 
 - Deploy a new service exactly like the existing ones (homelab: ops-library
   role + ops-control playbook, Traefik routing per
   `ops-control/docs/TRAEFIK_SECURITY.md`, app login, SOPS secret, backup,
-  monitoring check, dashboard tile). Do not invent new mechanisms; ask the owner
-  instead.
+  monitoring check, dashboard tile). Do not invent new mechanisms; a genuinely
+  new deploy path is B-class, and if it is unclear, park it.
 - Dotfiles: edit the chezmoi source and apply only the targets you changed
   (`chezmoi apply <target>`). A full apply reverts unrelated drift.
 - Destructive actions (`rm -rf`, cleanups, remote writes) may be blocked by
-  permission policy. Then write a guarded script that defaults to a dry run and
-  hand it to the owner. The owner's shell is fish: wrap bash syntax in
+  permission policy. Then write a guarded script that defaults to a dry run,
+  park the item and mention the script in the digest. The owner's shell is fish: wrap bash syntax in
   `bash -c '...'`.
 - Cleanup guard rails: check writability first; never remove a clone that
   others borrow objects from (git alternates); check commit containment against

@@ -2,6 +2,24 @@
 
 Status: active log
 
+## 2026-11-09 — Fewer owner approvals: A/B/C decision classes
+
+On 2026-11-05 UniFi, Minecraft and ollama_proxy were removed live after a code-only
+task to port their remove routes. The owner's approvals came as 15 clicks in 77
+seconds; the requests named no reason. A stream of asks gets approved unread, so
+the owner decided on fewer asks, not harder ones. Actions are now classified: A
+(code, merges after a clean review, routine deploys with backup and rollback: do,
+then inform), B (new deploy paths, migrations, shared services, retiring clearly
+unused non-vital things under an existing owner rule: different-family adversarial check, then do or park), C (lost
+capability, irreversible data loss, costs, family-visible change: one
+plain-language owner ask with recommendation and safe default). Unknown means
+investigate or park. Vital services are never removed by agents; orders bind
+execution; no routine acceptance asks; a daily digest of at most 5 points;
+answer bursts are re-asked.
+
+Promotion: promoted - `multi-agent-coordination` (**Decision classes**),
+`work-ledger`, `cross-agent-review-cycle`
+
 ## 2026-10-06 — Redact age keys, Token/Basic auth and credential files
 
 A probe of the shared redaction (`claude_review_loop/redact.py`, used by all

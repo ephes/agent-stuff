@@ -124,13 +124,16 @@ operator (**Judging the evidence a repair offers**); a model-tier escalation
 from the table above stays a deliberate, recorded choice.
 
 De-escalate at the slice boundary: the next slice starts at the role's default
-effort again.
+effort again, except an escalated re-dispatch of a parked slice (below).
 
 Escalation is not a round-cap reset. Rounds at the higher effort belong to the
 same slice: the `--slice-id` ledger keeps counting and exit `4` still ends the
-loop, and in a coordinated campaign the 2-non-clean-round park still applies, so
-a further round needs the owner's approval - ask for it together with the
-escalated re-dispatch.
+loop, and in a coordinated campaign the 2-non-clean-round park still applies.
+A parked slice gets no further round. The coordinator either leaves it parked
+or re-dispatches the work as a new slice with a changed design and a fresh
+`--slice-id`: it starts at the escalated effort, has its own 2-round park, and
+de-escalation happens at the slice after it. Record the choice on the work
+item; neither is an owner ask.
 
 Reviewer effort does not escalate. `codex-review-loop` already runs at `high`,
 the highest effort its session-record check proves for `gpt-6.1-sol`; no higher
@@ -207,8 +210,18 @@ Do not continue merely because the verdict is not `CLEAN`, and do not stop
 merely because an arbitrary round count was reached.
 
 Exception for coordinated campaigns (`multi-agent-coordination`): after 2
-review rounds that are not clean, a worker parks the slice and reports to the
-owner instead of opening a third round.
+review rounds that are not clean, a worker parks the slice and reports to its
+coordinator instead of opening a third round. A Warning that would need user
+acceptance before commit parks the slice too. Parking is not an owner ask; the
+coordinator investigates or leaves the slice parked.
+
+The same harnesses run the B-class pre-action check in
+`multi-agent-coordination` (**Decision classes**): before a new deploy path,
+migration, shared-service change or retirement, a different-family reviewer
+with fresh context gets the plan, the evidence and the recovery path as context
+files and answers "why could this be wrong even if implemented correctly?".
+The round and park rules above apply unchanged; a parked check never proceeds
+on the same plan, only a changed plan gets a new check.
 
 A round is **not clean** when it leaves an unresolved Critical or Warning.
 A Suggestion-only round is not "not clean": once its Suggestion dispositions

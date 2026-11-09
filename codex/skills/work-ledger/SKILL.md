@@ -60,8 +60,10 @@ max 40) or `--agent <name>` on any command, which overrides it.
   exists.
 - **Note progress** (`work note <slug> "<text>" [--link URL]`) to append to the
   item's history without touching its fields; `work notes <slug>` lists them.
-- **Ask** (`work ask <slug> "<text>" --kind question|approval|acceptance`) when
-  only the owner can decide or check something.
+- **Ask** (`work ask <slug> "<text>" --kind question|approval|acceptance`)
+  rarely: only for C-class decisions and subjective acceptance checks
+  (`multi-agent-coordination`, **Decision classes**). Unknown means
+  investigate or park, not ask.
 - **Pick up answers** (`work responses`) at the start of a coordination turn;
   act on each one, then `work consume <id>`.
 - **Report usage** (`work usage report --provider claude --window "Weekly ·
@@ -151,9 +153,9 @@ execution progress; horizon describes the owner's plan.
   burn-down work; `--campaign ""` clears it) and list them with
   `work items --campaign <slug>`. Never write `--topics codex-burn`.
 - **Agents never reorder existing items or move items into Now**, including
-  within Next. Routine stage/owner updates omit horizon and rank. Send any
-  reorder or horizon-change proposal through `work ask <slug> "<proposal>"`
-  for the owner to apply. An approval response alone does not authorize an
+  within Next. Routine stage/owner updates omit horizon and rank. Raise any
+  reorder or horizon-change proposal in the weekly chat check for the owner to
+  apply, not as a separate request. An approval response alone does not authorize an
   agent to perform the move. Expedite is a boolean flag with at most one
   item; it does not grant permission to change order or horizon.
   `--expedite` / `--no-expedite` express booleans, but the token API rejects
@@ -204,14 +206,27 @@ Items with history cannot be deleted; retire them as `dropped`.
   you could not verify.
 - **`checked_at` is when the facts were checked** (`--checked-at now` only if
   you just re-verified them), not when you edited the item.
-- **Owner requests** are one concrete, answerable question each
-  (`Merge f26cc99 into main?`). Check `work show <slug>` first and do not
-  re-ask something already open or answered; withdraw requests that became
-  moot (`work withdraw <id>`).
+- **Owner requests** are only C-class decisions (`multi-agent-coordination`,
+  **Decision classes**) and subjective acceptance checks (below): merges,
+  routine deploys, parked reviews and planning proposals are never asked. Each request is one plain-language sentence saying what changes for
+  the owner, plus a recommendation and the safe default if he does not answer
+  (`Retire the Minecraft server? Nobody has played since June. I recommend
+  retiring it; without an answer it keeps running.`). One decision per
+  request, never bundled with others or hidden in notes. Check `work show
+  <slug>` first and do not re-ask something already open or answered;
+  withdraw requests that became moot (`work withdraw <id>`).
 - **Owner responses are decisions, not commands to the app.** The app does not merge or deploy. Act on a response in your own session, within the permissions the
   owner gave, record the outcome on the item, then consume the response.
-- **Only the owner signs off `accepted`.** For a batch ready for hands-on
-  checks, use `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`.
+  When answers arrive seconds apart (e.g. more than 5 in a minute), treat
+  C-class answers in that burst as unconfirmed: do not act on them, and re-ask
+  each one separately.
+- **No routine acceptance asks.** For code-only or technically verifiable
+  work, record the evidence and set the strongest verified stage (often
+  `installed`); that is the end state, not a wait on the owner. Ask for
+  acceptance only when the check is subjective (look and feel, family-facing
+  behaviour).
+- **Only the owner signs off `accepted`.** For a batch ready for subjective
+  hands-on checks, use `work ask <slug> "<what to test>" --kind acceptance --also slug2,slug3`.
   `--also` is repeatable and comma-separated, only for acceptance; API field
   `items`, up to 200 items total including `<slug>`. Requests and responses
   carry `items` (all covered slugs, `<slug>` first) and `accepted_items` (the
@@ -233,9 +248,9 @@ Items with history cannot be deleted; retire them as `dropped`.
   the stage also voids the answer. Re-sending `accepted` for an already
   accepted item is allowed; token stage changes do not void the answer.
 - **Only the owner reopens `dropped`.** A token cannot move an item out of
-  `dropped` (400). If a dropped item should come back, ask with
-  `work ask --kind approval` and wait for the owner to reopen it in the UI; an
-  approve answer does not reopen it. Tokens may still drop items and update
+  `dropped` (400). If a dropped item should come back, raise it in the weekly
+  chat check (as a C-class ask only if it is one) and wait for the owner to
+  reopen it in the UI; an approve answer does not reopen it. Tokens may still drop items and update
   other fields of a dropped item.
 - **Avoid lost updates.** Many agents write the same items. Use `work note`
   for progress (notes never conflict and do not change `updated_at`). When
@@ -273,7 +288,7 @@ Items with history cannot be deleted; retire them as `dropped`.
   `git worktree remove <path>` without `--force` is the fallback. Never use
   `--force` and never `rm -rf` a checkout. If removal is refused (dirty,
   unpushed, stash, device backups, in use), leave the checkout and say why in
-  the item's `notes`, or ask the owner.
+  the item's `notes`.
 - Record the removal on the item: clear `worktree` (`--worktree ""`) and add
   `work note <slug> "worktree removed <date>"`.
 - A daily job on the Studio (`workspace-gc report --apply`, 08:00) removes
@@ -291,6 +306,6 @@ Items with history cannot be deleted; retire them as `dropped`.
 
 ```sh
 work upsert podcast-main-integration \
-  --stage merged --commit f26cc99 --next-action "Owner hands-on check" \
+  --stage merged --commit f26cc99 --next-action "Deploy (A-class) and record installed" \
   --evidence "Commit=https://github.com/ephes/podcast/commit/f26cc99" --checked-at now
 ```
