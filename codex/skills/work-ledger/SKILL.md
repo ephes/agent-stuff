@@ -102,12 +102,21 @@ in `work note`.
 Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
 `--expedite` upsert flags are live since 2026-11-08: the work app is deployed
 and `work plan` returns horizons. The one-off queue import has run; the
-former codex-q queue items sit in Next with campaign `codex-burn` (work-ledger
-migration 0021 moved it out of their topics; a campaign is not a topic). Until
-that deploy is live, `--campaign` is rejected and the items still show the
-topic. Read
-and dispatch from `work next`/`work plan`; queue files are only generated copies
-(below), and the import is not rerun.
+former codex-q queue items sit in Next. Read and dispatch from `work next`/
+`work plan`; queue files are only generated copies (below), and the import is
+not rerun.
+
+Campaign rollout: the separate work-ledger campaign deploy (migration 0021,
+merged 2026-11-09, deployed by the owner afterwards) adds the `campaign` field
+and moves `codex-burn` out of the codex-q items' topics into their campaign.
+Check with `work show <slug> --json`: a `campaign` key means it is live. Before
+that deploy upsert answers 400 "Unknown fields" for `--campaign`, and the old
+server silently ignores `?campaign=` (the CLI notices and `items`/`plan`/`next
+--campaign` exit 1; a direct API read would return unfiltered items). The
+codex-q items still carry topic `codex-burn` until then: leave new items
+without a campaign, never add `codex-burn` as a topic, and read the existing
+ones with `--topic codex-burn`.
+After the deploy use `--campaign codex-burn` only.
 
 The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
 each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
