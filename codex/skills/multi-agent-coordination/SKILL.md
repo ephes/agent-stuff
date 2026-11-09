@@ -118,6 +118,11 @@ open owner request, owner `jochen`/`claude`/`codex`/`pi`; named worker or unknow
 owners are excluded. This snapshot does not claim work or replace checking for
 a running worker.
 
+Before creating an item or proposing work (scout bundles included), run
+`work rejected --search "<key words>"`. If the owner already marked a matching
+idea *Not wanted*, do not re-propose it unless something materially changed,
+and then say what changed in the item's notes (`work-ledger`, **Planning and picking work**, "Check the owner's rejections first").
+
 Coordinators and clerks append newly discovered work at the end of Next or
 Later (`work upsert ... --horizon next`, without rank or neighbours). Mark a
 campaign's items with `--campaign <slug>` (for example `codex-burn`), never

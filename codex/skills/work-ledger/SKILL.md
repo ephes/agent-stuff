@@ -55,6 +55,10 @@ max 40) or `--agent <name>` on any command, which overrides it.
   and `next_cursor: null`. Treat a stderr warning (`showing N of M`, or a
   server that does not report totals) or `truncated: true` as an incomplete
   read: run it again before concluding that an item or answer does not exist.
+- **Check rejections** (`work rejected --search "<words>" [--project P]
+  [--json]`) before creating an item or proposing work: the owner's *Not
+  wanted* decisions, with date and reason (rule under **Planning and picking
+  work**).
 - **Update** (`work upsert <slug> ...`) when an item changes stage, owner or
   next action, becomes blocked, or new evidence (commit, receipt, install)
   exists.
@@ -152,6 +156,18 @@ execution progress; horizon describes the owner's plan.
   with `--campaign <slug>` (one slug, e.g. `--campaign codex-burn` for Codex
   burn-down work; `--campaign ""` clears it) and list them with
   `work items --campaign <slug>`. Never write `--topics codex-burn`.
+- **Check the owner's rejections first.** Before creating an item or proposing
+  work, run `work rejected --search "<key words of the title>"` (add
+  `--project P` to narrow it). The owner marks unwanted ideas *Not wanted* in the
+  app; a match means he already said no. Do not re-propose it unless something
+  materially changed, and then say in the item's notes what changed since the
+  rejection (date and reason are in the listing). `work upsert` also warns on
+  stderr (`previously_rejected` in the API answer) when an item matches a
+  rejection; the write has already happened, so act on it: if nothing material
+  changed, retire a new item with `--stage dropped` and a `work note` naming
+  the matched rejection; otherwise record what changed in its notes (`--notes`
+  overwrites the summary, so use `--expect-updated-at` on an existing item).
+  Only the owner rejects; tokens can only read rejections.
 - **Agents never reorder existing items or move items into Now**, including
   within Next. Routine stage/owner updates omit horizon and rank. Raise any
   reorder or horizon-change proposal in the weekly chat check for the owner to
