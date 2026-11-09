@@ -102,8 +102,11 @@ in `work note`.
 Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
 `--expedite` upsert flags are live since 2026-11-08: the work app is deployed
 and `work plan` returns horizons. The one-off queue import has run; the
-former codex-q queue items sit in Next with topic `codex-burn`. Read and
-dispatch from `work next`/`work plan`; queue files are only generated copies
+former codex-q queue items sit in Next with campaign `codex-burn` (work-ledger
+migration 0021 moved it out of their topics; a campaign is not a topic). Until
+that deploy is live, `--campaign` is rejected and the items still show the
+topic. Read
+and dispatch from `work next`/`work plan`; queue files are only generated copies
 (below), and the import is not rerun.
 
 The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
@@ -112,8 +115,9 @@ each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
 execution progress; horizon describes the owner's plan.
 
 - Read `work plan` for the ordered plan, or `work plan --json` for structured
-  data. The plan includes Now, Next, Later and Unplanned, with `--project P`
-  and `--topic T` filters. Use `work next [--project P] [--topic T] [--limit N]` to read available
+  data. The plan includes Now, Next, Later and Unplanned, with `--project P`,
+  `--topic T` and `--campaign C` filters. Use
+  `work next [--project P] [--topic T] [--campaign C] [--limit N]` to read available
   work from **Now**, in the same rank order: stage `designed` or `prototype`,
   no open owner request (including bulk acceptance), and owner exactly
   `jochen`, `claude`, `codex` or `pi` (the owner/coordinator pool identities).
@@ -132,7 +136,11 @@ execution progress; horizon describes the owner's plan.
   --topics security,infra --checked-at now`. Omit rank and neighbours; the
   server appends. `--topics` supplies at most five slug-validated free topics
   (no Topic table); `--topics ""` clears the list. Omitted fields stay unchanged.
-  Reuse topic slugs already shown by `work plan` where they fit.
+  Reuse topic slugs already shown by `work plan` where they fit. Topics name
+  themes (`infra`, `podcast`), never a campaign, queue or source: mark those
+  with `--campaign <slug>` (one slug, e.g. `--campaign codex-burn` for Codex
+  burn-down work; `--campaign ""` clears it) and list them with
+  `work items --campaign <slug>`. Never write `--topics codex-burn`.
 - **Agents never reorder existing items or move items into Now**, including
   within Next. Routine stage/owner updates omit horizon and rank. Send any
   reorder or horizon-change proposal through `work ask <slug> "<proposal>"`
@@ -151,7 +159,8 @@ execution progress; horizon describes the owner's plan.
   after deployment with an explicit JSON mapping for Atlas prose (and any
   Codex legacy label overrides). It previews by default; `--apply` appends
   existing unplanned items to Next atomically, Codex then Atlas, deduplicating
-  at first occurrence. Missing/unmapped/already planned items abort. It keeps
+  at first occurrence; `--campaign codex-burn` also tags the Codex-queue items
+  with that campaign. Missing/unmapped/already planned items abort. It keeps
   stages and checked times, including completed entries; it never creates
   items or promotes them to Now. See the work-ledger README for mapping and
   database setup. Workers never run it.
