@@ -57,6 +57,26 @@ def _is_permission_denial(block, tool):
     return content in (head, head + PERMISSION_DENIAL_GUIDANCE)
 
 
+def _provider_error_text(event):
+    """Describe a failed result event as text.
+
+    Claude Code reports ``api_error_status`` as an integer (401 for a revoked
+    token), and the error is later joined into a string, so coerce it here. The
+    result text, when present, carries the provider's own explanation.
+    """
+    status = (event.get("api_error_status")
+              or event.get("terminal_reason")
+              or event.get("subtype")
+              or "claude review failed")
+    text = str(status)
+    detail = event.get("result")
+    if isinstance(detail, str) and detail.strip():
+        first_line = detail.strip().splitlines()[0][:300]
+        if first_line != text:
+            text = f"{text}: {first_line}"
+    return text
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str          # "continue" | "kill" | "finish"
@@ -193,12 +213,7 @@ class Monitor:
             self.assistant_text = extract_claude_assistant_text(event)
         elif etype == "result":
             if event.get("is_error") or event.get("subtype") != "success":
-                self.provider_error = (
-                    event.get("api_error_status")
-                    or event.get("terminal_reason")
-                    or event.get("subtype")
-                    or "claude review failed"
-                )
+                self.provider_error = _provider_error_text(event)
                 return
             self.structured_output = extract_claude_structured_output(event)
             self.cost = event.get("total_cost_usd")
@@ -215,7 +230,7 @@ class Monitor:
         elif etype == "auto_retry_end":
             self.retry_until = None
             if event.get("success") is False:
-                self.provider_error = event.get("finalError") or "provider gave up"
+                self.provider_error = str(event.get("finalError") or "provider gave up")
 
     def decide(self, now, proc_alive):
         if self.invalid_error is not None:

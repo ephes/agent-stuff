@@ -93,6 +93,15 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.state, PROVIDER_ERROR)
         self.assertIn("529", r.error or "")
 
+    def test_integer_api_error_status_is_provider_error_not_crash(self):
+        # Claude Code reports api_error_status as an int (401 for a revoked
+        # token); joining it into the error string used to raise TypeError.
+        r = self._run("auth_error")
+        self.assertEqual(r.state, PROVIDER_ERROR)
+        self.assertIsInstance(r.error, str)
+        self.assertIn("401", r.error)
+        self.assertIn("OAuth token revoked", r.error)
+
     def test_forbidden_tool_is_invalid_and_recorded(self):
         r = self._run("forbidden_tool")
         self.assertEqual(r.state, INVALID)

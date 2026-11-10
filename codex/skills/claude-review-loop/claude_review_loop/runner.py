@@ -223,7 +223,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         observed_errors = [e for e in (
             monitor.invalid_error, monitor.provider_error
         ) if e]
-        error = "; ".join(observed_errors) or None
+        error = "; ".join(str(e) for e in observed_errors) or None
     if error is None and state == CRASHED:
         try:
             with open(paths["stderr"], encoding="utf-8") as fh:
