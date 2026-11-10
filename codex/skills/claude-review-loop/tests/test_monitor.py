@@ -92,6 +92,20 @@ class TestMonitor(unittest.TestCase):
         self.assertEqual(m.decide(now=6, proc_alive=False), Decision("kill", PROVIDER_ERROR))
         self.assertEqual(m.provider_error, "529")
 
+    def test_provider_error_is_always_text(self):
+        m = mon()
+        m.on_event({"type": "result", "subtype": "success", "is_error": True,
+                    "api_error_status": 401, "terminal_reason": "api_error",
+                    "result": "Failed to authenticate: OAuth token revoked."},
+                   now=5)
+        self.assertEqual(m.decide(now=6, proc_alive=False), Decision("kill", PROVIDER_ERROR))
+        self.assertEqual(m.provider_error,
+                         "401: Failed to authenticate: OAuth token revoked.")
+        m = mon()
+        m.on_event({"type": "auto_retry_end", "success": False, "finalError": 503},
+                   now=5)
+        self.assertEqual(m.provider_error, "503")
+
     def test_process_exit_without_verdict_is_crashed(self):
         m = mon()
         self.assertEqual(m.decide(now=6, proc_alive=False), Decision("finish", CRASHED))

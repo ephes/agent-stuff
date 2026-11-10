@@ -10,6 +10,7 @@
   crash_whitespace -> write only whitespace to stderr then exit 1
   posthang   -> emit a CLEAN result then sleep forever (exit hang)
   provider_error -> emit an error result then exit 1
+  auth_error -> emit Claude Code's real 401 shape (integer status) then exit 1
   forbidden_tool -> emit a forbidden Agent tool event before a CLEAN result
   forbidden_provider_error -> emit forbidden Agent and a provider error together
   out_of_scope_read -> read /etc/hosts (not denied) before returning CLEAN
@@ -133,6 +134,19 @@ def main():
             "is_error": True,
             "api_error_status": "529 overloaded",
             "terminal_reason": "api_error",
+        })
+        sys.exit(1)
+    elif mode == "auth_error":
+        # Claude Code emits api_error_status as an integer, not a string.
+        message = ("Failed to authenticate: OAuth token revoked. Please log in "
+                   "again or contact your administrator.")
+        emit({"type": "system", "subtype": "api_retry", "attempt": 1,
+              "error_status": 401, "error": "authentication_failed"})
+        emit(assistant(message))
+        emit({
+            "type": "result", "subtype": "success", "is_error": True,
+            "api_error_status": 401, "api_error_origin": "first_party",
+            "terminal_reason": "api_error", "result": message,
         })
         sys.exit(1)
     elif mode == "forbidden_tool":

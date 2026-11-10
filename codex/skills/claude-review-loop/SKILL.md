@@ -314,6 +314,10 @@ are not allowed. Separate harness invocations may run concurrently.
      output or eligible untracked-file content are replaced with U+FFFD, recorded
      in `truncations`, and make a CLEAN result scoped rather than aborting;
      explicit caller context remains strict UTF-8.
+     A PROVIDER_ERROR `error` starts with the provider status and, when Claude
+     supplies one, adds its message, for example `401: Failed to authenticate:
+     OAuth token revoked. ...` when the Claude login the reviewer sees is not
+     valid; log in again in that environment.
      A
      non-empty-run-directory rejection occurs
      before artifacts and has no new result. Fix the cause and re-run with a
