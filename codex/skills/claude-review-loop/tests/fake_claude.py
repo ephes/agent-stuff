@@ -20,7 +20,8 @@
   stdin_prompt -> return CLEAN only when stdin contains "review prompt"
 
 With FAKE_CLAUDE_OUT set, it first records what it finds in its working
-directory (the repository copy) there, then writes into that copy.
+directory (the repository copy) and two environment variables there, then
+writes into that copy.
 """
 import json
 import os
@@ -81,7 +82,8 @@ def main():
                     files[rel] = fh.read()
         with open(out, "w") as fh:
             json.dump({"cwd": cwd, "files": files,
-                       "git_config_global": os.environ.get("GIT_CONFIG_GLOBAL")},
+                       "git_config_global": os.environ.get("GIT_CONFIG_GLOBAL"),
+                       "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR")},
                       fh)
         with open(os.path.join(cwd, "a.py"), "w") as fh:
             fh.write("REVIEWER_WROTE = 1\n")

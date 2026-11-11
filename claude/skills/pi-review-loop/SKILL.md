@@ -119,7 +119,8 @@ implement and fix; Pi reviews with fresh context.
      converging: the same required finding survived two repair rounds, or the
      Critical/Warning count has not fallen across two consecutive rounds. Read
      `convergence.reason`, stop the loop, and report the residual risk to the
-     user. Only `--slice-id` runs can return this.
+     user. Only `--slice-id` runs can return this. `cross-agent-review-cycle`,
+     **Hard-case escalation**, allows one escalation call and one round first.
    - `3` → all bounded review slots are busy. Do not report this as a CLEAN
      review and do not claim a review is queued unless you explicitly run a
      separate wait/retry wrapper. Either retry later, inspect stale slot metadata,
@@ -138,8 +139,8 @@ implement and fix; Pi reviews with fresh context.
 ## Hard rules
 
 - Pi code review uses `openai-codex/gpt-6.1-sol` only. Claude models (Opus,
-  Sonnet, Fable, or any other Anthropic model) must run through Claude Code and
-  `claude-review-loop`, never through Pi.
+  Sonnet, Fable, or any other Anthropic model) must run through Claude Code,
+  and Claude reviews through `claude-review-loop`, never through Pi.
 - Never use OpenRouter or a local model such as Qwen/Ollama/LM Studio for a
   mandatory code-review gate. If the approved GPT model is unavailable or its
   authentication fails, fail closed and report the blocker; do not substitute

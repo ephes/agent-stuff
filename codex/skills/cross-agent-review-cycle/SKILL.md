@@ -43,7 +43,7 @@ choice overrides this default; record same-family reviews accurately.
   unavailable, this gate is blocked. Never ask Pi to run a
   Claude/Anthropic model, a local model such as Qwen/Ollama/LM Studio, an
   OpenRouter model, or any other provider. Claude models run only through
-  Claude Code and `claude-review-loop`.
+  Claude Code, and Claude reviews only through `claude-review-loop`.
 
 Do not silently substitute a same-family reviewer. Honor an explicit user
 choice without asking again. If the requested reviewer
@@ -68,6 +68,7 @@ where the work is mechanical.
 | Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context (raise effort first: **Effort escalation**) |
 | Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
+| Escalation model | not used; on a **Hard-case escalation** trigger `claude-fable-5-2` at `high` on the second Claude account | never; it is the last step |
 
 `REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
 `IMPLEMENTER_MODEL`, and `REVIEWER_MODEL_DELTA` are conventions for the driving
@@ -119,9 +120,10 @@ narrower accepted input, refusing the unsupported case before any side effect)
 rather than patch the next hole, and stop and propose a simpler design if new
 holes appear again. Record the escalation, its trigger and both effort levels in
 the slice's review summary, and on the work item in a campaign. An implementer
-already at its escalation level has no step left: put the design choice to the
-operator (**Judging the evidence a repair offers**); a model-tier escalation
-from the table above stays a deliberate, recorded choice.
+already at its escalation level has no step left: when a **Hard-case
+escalation** trigger holds, make that call; otherwise put the design choice to
+the operator (**Judging the evidence a repair offers**). Any other model-tier
+escalation from the table above stays a deliberate, recorded choice.
 
 De-escalate at the slice boundary: the next slice starts at the role's default
 effort again, except an escalated re-dispatch of a parked slice (below).
@@ -141,6 +143,104 @@ level is offered because none has been proven. `claude-review-loop` and
 `pi-review-loop` stay at their defaults or the campaign's configured value. For
 a Critical repair the reviewer lever is keeping the primary reviewer on the
 delta round, not more effort.
+
+### Hard-case escalation
+
+The **escalation model** is a third role beside implementer and reviewer:
+`claude-fable-5-2` at `high` by default, run on the owner's second Claude
+account (`CLAUDE_CONFIG_DIR=~/.claude-katharina`). It is the exception for
+tricky cases, not a second reviewer and not a faster way to end a loop. The
+top-tier rule above still holds: this section is the opt-in, and every call is
+recorded.
+
+Call it only when one of these holds:
+
+- **Dispute**: implementer and reviewer still disagree on a Critical or
+  Warning after one exchange. One exchange means the implementer rejected the
+  finding with evidence (**Judging a finding**), the next round stated that
+  evidence as a verification goal, and the reviewer raised the finding again.
+- **Not converging**: a `--slice-id` round returned exit `4` (ledger status
+  `escalate`, which means stop; it is a trigger for this call, not the call).
+- **Hard problem**: two consecutive repairs of one finding failed and the
+  failure is reasoning, not missing context; or a design question has no clear
+  answer in the code, the specs and the brief; or a defect is reproduced and
+  its cause is still not found after a real attempt.
+
+Without one of these triggers there is no call: not for an accepted finding
+that has a workable repair, a Suggestion, a style or wording dispute, a first
+failed repair, a failed review (exit `2`), missing context, tooling or access,
+or anything one more ordinary round would settle. For a hard problem, take the
+**Effort escalation** step first when one is left.
+
+Write one escalation file, caller-authored, without secrets or raw transcripts:
+
+- the mode (arbitrate a dispute, or solve a problem) and the question;
+- the reviewer's finding verbatim and the implementer's position;
+- `file:line` excerpts of the code in question;
+- what was tried and how it failed; after exit `4` also the findings that
+  survived and `convergence.reason`.
+
+Ask for evidence with `file:line` and for no edits. For a dispute the last
+line of the answer must be `VERDICT: implementer`, `VERDICT: reviewer` or
+`VERDICT: alternative`. For a problem ask for a concrete repair plan: cause,
+files, the change, and the check that proves it.
+
+Run it from the worktree, in the foreground, with read-only tools and no
+customizations:
+
+```bash
+escalation_model="${ESCALATION_MODEL:-claude-fable-5-2}"
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+  CLAUDE_CONFIG_DIR="${ESCALATION_CONFIG_DIR:-$HOME/.claude-katharina}" \
+  timeout 1800 claude -p --model "$escalation_model" --effort high \
+  --tools "Read,Grep,Glob" --safe-mode --setting-sources "" \
+  --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+  --disable-slash-commands --no-session-persistence \
+  < "$escalation_file" > "$answer_file"
+```
+
+`ESCALATION_MODEL` and `ESCALATION_CONFIG_DIR` are conventions like the
+variables above; a campaign brief may set them. The flags are the review
+harness's: no hooks, MCP servers, skills or settings files, and only the three
+read tools. The model can read the worktree, as any worker session there can,
+and cannot edit or run anything. `env -u` removes the variables that would
+replace the account's login. `timeout` is the coreutils command (Homebrew on
+macOS).
+
+Follow the answer:
+
+- `implementer`: reject the finding and record the answer's evidence. The
+  finding no longer blocks the commit gate.
+- `reviewer`: the finding stands. Repair it.
+- `alternative`, or a repair plan: the implementer applies it.
+
+A repair that follows gets the usual one re-review of its delta by the primary
+reviewer. Read the cited lines before following the answer. An answer whose
+evidence is missing or does not hold, or a dispute answer without the verdict
+line, is a failed call, not a verdict: retry once, then treat the model as
+unavailable.
+
+How it fits the other rules:
+
+- The call is not a review. It adds no round to the ledger, cannot return
+  `CLEAN`, and does not replace the valid review the commit gate needs. Every
+  Claude-family review still runs through `claude-review-loop`.
+- One call per dispute or problem. It does not decide what belongs to the
+  user: scope, accepting a Warning, deferring a Critical, a C-class decision.
+- No fallback. If the model or the account is unavailable or out of quota,
+  proceed as if this section did not exist: stop and report, or park.
+- After exit `4` the answer allows at most one more round on the same
+  `--slice-id`, the re-review of the repair it led to. Any result of that
+  round that is not clean ends the loop as before.
+- In a coordinated campaign the 2-round park is unchanged by default: the
+  worker parks, and the coordinator may make the call while it investigates. A
+  campaign brief may instead say "escalate once, then park": at the park
+  point whoever runs the review makes one call if a trigger holds, the slice
+  gets one further round for the repair, and it parks if that round is not
+  clean.
+- Record the call in the slice's review summary, and on the work item in a
+  campaign: trigger, model and effort from the invocation, account, verdict,
+  and what followed.
 
 ## Cycle Continuation and Stopping Rule
 
@@ -203,7 +303,8 @@ For Claude/Pi reviews, `--slice-id` computes two of these stopping conditions fr
 the recorded rounds - a required finding that survived two repairs, and a
 Critical/Warning count that has not fallen across two consecutive rounds - and
 returns exit `4` when either fires. Treat that as the loop ending: adjudicate
-and report, rather than opening another round. Judgment still owns every other
+and report, rather than opening another round (**Hard-case escalation** allows
+one call and one round first). Judgment still owns every other
 condition here; the ledger only removes the ones that depend on remembering
 earlier rounds.
 Do not continue merely because the verdict is not `CLEAN`, and do not stop
@@ -213,7 +314,8 @@ Exception for coordinated campaigns (`multi-agent-coordination`): after 2
 review rounds that are not clean, a worker parks the slice and reports to its
 coordinator instead of opening a third round. A Warning that would need user
 acceptance before commit parks the slice too. Parking is not an owner ask; the
-coordinator investigates or leaves the slice parked.
+coordinator investigates or leaves the slice parked. A campaign brief may put
+one **Hard-case escalation** call before the park.
 
 The same harnesses run the B-class pre-action check in
 `multi-agent-coordination` (**Decision classes**): before a new deploy path,
@@ -395,8 +497,9 @@ correctly and it hung only at exit.
    failed/invalid review,
    `3` as lock contention, and `4` as findings plus a ledger verdict that the
    loop is not converging - stop, report the residual risk, and do not start
-   another round on your own authority. Exit `4` never means the findings are
-   resolved. Read `$run_dir/result.json` when it exists; a
+   another round on your own authority (the one exception is **Hard-case
+   escalation**). Exit `4` never means the findings are resolved. Read
+   `$run_dir/result.json` when it exists; a
    scoped clean result still requires explicit judgment about skips, truncations,
    or redactions. A non-empty-run-directory rejection (exit `2`) and lock
    contention (exit `3`) happen before the reviewer runs and do not create a new
@@ -648,7 +751,9 @@ A reviewer is a source of claims, not verdicts you owe agreement to.
 - Disprove a false finding with evidence rather than editing around it. Execute
   the failure it claims before accepting it: reviewers have reported a check-mode
   failure that does not occur, and read a slash-containing branch name as a
-  missing path. Record the evidence and reject the finding.
+  missing path. Record the evidence and reject the finding. If the reviewer
+  raises a rejected Critical or Warning again, do not argue for another round:
+  that is a dispute for **Hard-case escalation**.
 - Give a small-delta review the unchanged context it needs. A reviewer shown
   only an incremental diff has inferred a bypass that the unchanged guard
   directly above it prevents. State those invariants in the review context

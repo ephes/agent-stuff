@@ -1310,12 +1310,30 @@ class TestRepositoryCopyCli(unittest.TestCase):
                     CLAUDE_REVIEW_FAKE_CMD=f"{sys.executable} {FAKE} {mode}",
                     FAKE_CLAUDE_OUT=self.seen)
 
-    def _run(self, mode="clean", *extra):
+    def _run(self, mode="clean", *extra, env=None):
         run_dir = os.path.join(self.base, "run-" + mode)
         proc = subprocess.run(self._argv(run_dir, *extra), capture_output=True,
-                              text=True, env=self._env(mode), timeout=120)
+                              text=True, env=env or self._env(mode), timeout=120)
         with open(os.path.join(run_dir, "result.json")) as fh:
             return proc, json.load(fh), run_dir
+
+    def _seen_config_dir(self, env):
+        proc, _, _ = self._run(env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(self.seen) as fh:
+            return json.load(fh)["claude_config_dir"]
+
+    def test_the_reviewer_inherits_the_callers_claude_config_dir(self):
+        # CLAUDE_CONFIG_DIR selects the Claude account (SKILL.md, Hard rules):
+        # the reviewer must get the caller's value unchanged.
+        account = os.path.join(self.base, "second-account")
+        env = dict(self._env("clean"), CLAUDE_CONFIG_DIR=account)
+        self.assertEqual(self._seen_config_dir(env), account)
+
+    def test_the_reviewer_gets_no_claude_config_dir_when_the_caller_has_none(self):
+        env = self._env("clean")
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        self.assertIsNone(self._seen_config_dir(env))
 
     def test_claude_runs_in_a_copy_of_the_reviewed_state(self):
         before = self._git("status", "--porcelain", "--untracked-files=all")
