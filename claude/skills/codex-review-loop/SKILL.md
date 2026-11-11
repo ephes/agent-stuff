@@ -167,7 +167,8 @@ With no reading at all (a fresh machine) the guard does not block.
      metadata under `--lock-dir` before waiting, and ask the user rather than
      looping on retries.
    - `4` → the review completed and the slice ledger says the loop is not
-     converging. Stop and report the residual risk.
+     converging. Stop and report the residual risk (`cross-agent-review-cycle`,
+     **Hard-case escalation**, allows one escalation call and one round first).
 
 4. Drive further rounds under `cross-agent-review-cycle`, not a round cap.
 

@@ -326,7 +326,8 @@ are not allowed. Separate harness invocations may run concurrently.
      converging: the same required finding survived two repair rounds, or the
      Critical/Warning count has not fallen across two consecutive rounds. Read
      `convergence.reason`, stop the loop, and report the residual risk to the
-     user. Only `--slice-id` runs can return this.
+     user. Only `--slice-id` runs can return this. `cross-agent-review-cycle`,
+     **Hard-case escalation**, allows one escalation call and one round first.
    - `3` -> all bounded review slots are busy. No reviewer result is created.
      Retry later, inspect stale slot metadata, or deliberately adjust
      `--max-concurrent`. Any later attempt must use a fresh `--run-dir` because
@@ -416,6 +417,24 @@ are not allowed. Separate harness invocations may run concurrently.
   Claude runs with `--no-session-persistence` and no setting sources. Its
   installed authentication/configuration remains shared, as it is for normal
   concurrent Claude Code terminals.
+- The reviewer inherits the caller's environment. `CLAUDE_CONFIG_DIR=<dir>` on
+  the harness command therefore runs the review with that directory's Claude
+  login, for example the owner's second account:
+
+  ```bash
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+    CLAUDE_CONFIG_DIR="$HOME/.claude-katharina" \
+    python3 ~/projects/agent-stuff/codex/skills/claude-review-loop/bin/claude-review-loop \
+    --repo "$PWD" --run-dir "$(mktemp -d)/claude-review"
+  ```
+
+  Those three variables are inherited too, and each replaces the directory's
+  login when set; the harness does not clear them, so `env -u` does. Without
+  them, a directory without a valid login ends as a failed review (exit `2`;
+  observed: `PROVIDER_ERROR`, "Not logged in"), not as a review on another
+  account. Keep the directory under the home directory; the sandbox's
+  read-deny for the home then covers it as it covers `~/.claude`.
+  `result.json` does not record the account, so name it in the cycle summary.
 - Fix Critical/Warning before re-review; use judgement on Suggestion (avoid
   over-engineering - do not chase every nit).
 

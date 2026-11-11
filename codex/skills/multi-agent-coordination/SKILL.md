@@ -36,7 +36,53 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   its own sub-agents hands back early and loses track of them.
 - **Split work** roughly evenly between the Claude and Codex subscriptions.
   Codex workers run `gpt-6.1-sol` at low effort; their review gate is
-  `claude-review-loop --model claude-opus-5-5 --effort high`.
+  `claude-review-loop --model claude-opus-5-5 --effort high`. A campaign brief
+  may change these values (**Campaign setup**).
+
+## Campaign setup
+
+A campaign brief may override the defaults below. Every worker brief repeats
+the campaign's values, because workers see nothing else.
+
+| Setting | Default | Example: emerge frontend deep cleanup (owner, 2026-11-11) |
+|---------|---------|-----------------------------------------------------------|
+| Codex worker | `gpt-6.1-sol` at `low` | `gpt-6.1-sol` at `high` |
+| Claude worker effort | `high` | - |
+| Review of Codex work | `claude-review-loop --model claude-opus-5-5 --effort high`, on the account of the session that runs it | same |
+| Escalation model | `claude-fable-5-2` at `high` with `CLAUDE_CONFIG_DIR=~/.claude-katharina` | same |
+| After 2 not-clean rounds | park | escalate once, then park if still not clean |
+| Delivery | agents merge after a clean review | open a merge request only; people merge in the GitLab web UI |
+
+- An override changes a value, not a rule. The different-family review gate,
+  the commit gate, the fail-closed harness rules and the **Decision classes**
+  stay as they are.
+- The escalation model is for hard cases only. Its triggers, input, answer and
+  recording are in `cross-agent-review-cycle`, **Hard-case escalation**; a
+  campaign may change the model, the effort or the account, not the triggers.
+  The role fixes the account and one call is small, so a missing usage
+  reading of that account does not block it; a quota or login error means the
+  call is unavailable, never another account or model.
+- To run a Claude review on another account, set `CLAUDE_CONFIG_DIR` on the
+  `claude-review-loop` command (that skill's **Hard rules** have the command).
+- **Codex workers from a Claude coordinator.** Claude Code's auto-mode
+  classifier refuses `codex exec --dangerously-bypass-approvals-and-sandbox`,
+  which runs the worker without a sandbox. Start the worker inside Codex's
+  sandbox instead and name what it may write:
+
+  ```bash
+  codex exec -m gpt-6.1-sol -c model_reasoning_effort=high \
+    -s workspace-write -c sandbox_workspace_write.network_access=true \
+    --add-dir <repo .git dir> --add-dir <run dir> --add-dir ~/.cache/uv \
+    -C <worktree> -o <last-message file> "<prompt>" < /dev/null
+  ```
+
+  `<repo .git dir>` is the repository's shared git directory
+  (`git rev-parse --git-common-dir`); a worktree writes its commits there. Run
+  `codex-quota-guard` first and bound the call (`cross-agent-review-cycle`,
+  **Supervising A Noninteractive Implementer**). The coordinator then runs the
+  Claude review and any escalation itself and feeds the findings back with
+  `codex exec resume <session> "<prompt>"`. This is the one case where a
+  coordinator runs a review itself.
 
 ## State and owner decisions
 
@@ -272,20 +318,30 @@ Every brief states the item slug, goal, acceptance criteria, and:
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
   (origin under `github.com/ephes/`; otherwise report, never push), verify with
   `git ls-remote`. Agents merge and push a slice themselves once the
-  cross-family review is clean and the tests pass. Deploys follow the
+  cross-family review is clean and the tests pass. A campaign brief may say
+  "open a merge request only" for a repo where people merge: the worker then
+  pushes only the feature branch, opens the merge request and stops. It never
+  merges or pushes to the default branch, and the item stays below `merged`
+  until a person has merged it. If that repo is outside `github.com/ephes/`,
+  the push needs a remote the owner named for the campaign; a brief alone does
+  not allow it. Deploys follow the
   **Decision classes**: the brief names the class and, for a deploy, the
   backup and rollback path; A-class deploys the worker runs itself.
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean (unresolved
   Critical/Warning; a Suggestion-only round is not, see that skill), park the
-  slice and report why instead of looping; parking is not an owner ask. Use public APIs or allowlists,
+  slice and report why instead of looping; parking is not an owner ask. When
+  the brief says "escalate once, then park", one **Hard-case escalation** call
+  comes before the park (that skill). Use public APIs or allowlists,
   not home-made HTTP, streaming or delete-safety layers. Pass each
   `--evidence-file` and `--context-file` as its own quoted argument; a list
   in one shell variable word-splits into a broken invocation.
 - **Effort**: the brief names the implementer's effort (Claude `high`, Codex
-  `low`). A slice that hits a trigger in `cross-agent-review-cycle`, **Effort
-  escalation** (e.g. new Criticals in the same component round after round) is
-  re-dispatched one step up (`max` / `high`) with the instruction to treat the
+  `low`, or the campaign's value). A slice that hits a trigger in
+  `cross-agent-review-cycle`, **Effort escalation** (e.g. new Criticals in the
+  same component round after round) is re-dispatched one step up (`max` /
+  `high`; a Codex worker already at `high` has no step left) with the
+  instruction to treat the
   design as the finding and simplify rather than patch; record the escalation
   and its reason on the item. It is not a round-cap reset: a parked slice gets
   no further round. The coordinator (not the owner) may re-dispatch it as a new

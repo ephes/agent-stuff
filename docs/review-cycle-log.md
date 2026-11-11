@@ -2,6 +2,37 @@
 
 Status: active log
 
+## 2026-11-11 — Hard-case escalation model and per-campaign efforts
+
+- Expected: the skills say who decides when implementer and reviewer keep
+  disagreeing, what happens after exit `4`, and where a campaign sets its
+  efforts.
+- Actual: for a large campaign the owner set the workflow by hand: Codex
+  workers on `gpt-6.1-sol` at `high`, review by Opus 5.5 at `high`, and Claude
+  Fable 5.2 at `high` on the second Claude account only for hard cases; in
+  that repo people merge and agents only open merge requests. The skills had
+  no escalation model, fixed
+  the Codex worker effort at `low`, and let agents merge everywhere, so each
+  coordinator would have had to write all of it into a brief.
+- Also found: Claude Code's auto-mode classifier refuses
+  `codex exec --dangerously-bypass-approvals-and-sandbox`; a Claude coordinator
+  starts Codex workers in the `workspace-write` sandbox with `--add-dir` and
+  runs the review itself. `claude-review-loop` passes `CLAUDE_CONFIG_DIR` to
+  the reviewer, so it already reviews on another account; a directory without
+  a login fails closed, unless `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
+  `CLAUDE_CODE_OAUTH_TOKEN` is set, which replaces the login. A plain
+  `claude -p --tools ...` still loads hooks and MCP servers; the escalation
+  call uses the harness's isolation flags.
+- Fix: `cross-agent-review-cycle` defines the escalation model, its three
+  triggers (a dispute after one exchange, exit `4`, a hard problem), the
+  escalation file, the read-only call, the `VERDICT:` line and how the loop
+  follows and records it. It is not a review and not a round-cap reset.
+  `multi-agent-coordination` has a campaign setup table with overrides, the
+  sandboxed Codex worker command and merge-request-only delivery.
+- Status: resolved.
+
+Promotion: promoted - `cross-agent-review-cycle`, Hard-case escalation; `multi-agent-coordination`, Campaign setup and Worker brief checklist; `claude-review-loop`, Hard rules
+
 ## 2026-11-09 — Fewer owner approvals: A/B/C decision classes
 
 On 2026-11-05 UniFi, Minecraft and ollama_proxy were removed live after a code-only
