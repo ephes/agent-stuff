@@ -292,6 +292,49 @@ class TestMonitor(unittest.TestCase):
         self.assertEqual([t["tool"] for t in m.tool_uses],
                          ["Bash", "Edit", "Write", "Read"])
 
+    def test_bash_failures_are_recorded_by_kind_without_voiding(self):
+        m = mon()
+        m.on_event(tool_use("Bash", {"command": "pytest -q"}, "b1"), now=1)
+        m.on_event(tool_result(denied=True, tool_id="b1", text=(
+            "sandbox-exec: data object length 80687 exceeds maximum (65535)")),
+            now=2)
+        m.on_event(tool_use("Bash", {"command": "false"}, "b2"), now=3)
+        m.on_event(tool_result(denied=True, blocks=True, tool_id="b2",
+                               text="Exit code 1"), now=4)
+        m.on_event(tool_use("Bash", {"command": "ls"}, "b3"), now=5)
+        m.on_event(tool_result(denied=False, tool_id="b3", text="a.py"), now=6)
+        m.on_event(tool_use("Bash", {"command": "f=$(mktemp)"}, "b4"), now=7)
+        m.on_event(tool_result(denied=True, tool_id="b4", tool="Bash"), now=8)
+        m.on_event(result_clean(), now=9)
+        self.assertEqual(m.decide(now=10, proc_alive=True),
+                         Decision("finish", CLEAN))
+        self.assertEqual(m.bash_failures, [
+            {"command": "pytest -q", "kind": "sandbox", "error":
+             "sandbox-exec: data object length 80687 exceeds maximum (65535)"},
+            {"command": "false", "kind": "failed", "error": "Exit code 1"},
+            {"command": "f=$(mktemp)", "kind": "permission",
+             "error": DENIAL.format(tool="Bash")[:300]},
+        ])
+        self.assertEqual(m.bash_calls, {})
+
+    def test_sandbox_error_is_the_whole_output_after_the_exit_header(self):
+        m = mon()
+        m.on_event(tool_use("Bash", {"command": "make test"}, "b1"), now=1)
+        m.on_event(tool_result(denied=True, tool_id="b1", text=(
+            "Exit code 65\nbwrap: Can't create file at /x\n")), now=2)
+        self.assertEqual(m.bash_failures[0]["kind"], "sandbox")
+        self.assertEqual(m.bash_failures[0]["error"],
+                         "bwrap: Can't create file at /x")
+
+    def test_a_command_that_prints_a_sandbox_line_is_an_ordinary_failure(self):
+        m = mon()
+        m.on_event(tool_use("Bash", {"command": "pytest"}, "b1"), now=1)
+        m.on_event(tool_result(denied=True, tool_id="b1", text=(
+            "Exit code 1\nFAILED test_sandbox\nsandbox-exec: expected\n")),
+            now=2)
+        self.assertEqual(m.bash_failures[0]["kind"], "failed")
+        self.assertTrue(m.bash_failures[0]["error"].startswith("Exit code 1"))
+
     def test_write_outside_the_workspace_voids_unless_claude_denied_it(self):
         for denied in (True, False):
             with self.subTest(denied=denied):

@@ -2,6 +2,36 @@
 
 Status: active log
 
+## 2026-11-12 — Darwin review sandbox: fixed-size policy, Bash failures reported
+
+- Expected: the reviewer's Bash runs in Claude's OS sandbox however many
+  entries `/private/tmp` and `/private/tmp/claude-<uid>` hold.
+- Actual: `claude-review-loop` denied reads entry by entry for everything in
+  both directories at launch (about 700 paths on 2026-11-12, more on busy
+  days). macOS compiles the path filters of one operation into a single data
+  object of at most 65535 bytes; past that every Bash command ended with exit
+  `65`, `sandbox-exec: data object length 80687 exceeds maximum (65535)`
+  (Mastodon R3, 2026-10-23). The review still finished CLEAN on Read and Grep
+  alone, and nothing in the result said that no command had run. Reproduced
+  with the old policy and 1500 entries in a private stand-in directory
+  (`data object length 69208`).
+- Fix: the reviewer's Claude gets its own short temporary root
+  (`/private/tmp/crl-XXXXXXXX`, as `CLAUDE_CODE_TMPDIR`), so the sandbox denies
+  `/private/tmp` as a whole and re-opens only the workspace, the object store
+  and that root; `/private/tmp/claude-<uid>` is write-denied unless it holds
+  the workspace. Three read rules instead of one per entry, and the gaps the
+  skill listed for directories created after launch are closed. The harness
+  removes the root after the run. Bash calls answered with an error land in
+  `result.json` `bash_failures` (`sandbox`, `permission`, `failed`); a sandbox
+  refusal sets `bash_unavailable` and prints `BASH UNAVAILABLE:`, so a
+  source-only verdict is not taken for one with reviewer tests. Canary with
+  Claude Code 2.1.322: every Bash boundary held; Sonnet and Opus 5.5 declined
+  the two out-of-scope file-tool steps, which leaves the canary inconclusive
+  there.
+- Status: resolved.
+
+Promotion: promoted - `claude-review-loop`, What confines the reviewer, Verification and Artifacts
+
 ## 2026-11-11 — Hard-case escalation model and per-campaign efforts
 
 - Expected: the skills say who decides when implementer and reviewer keep

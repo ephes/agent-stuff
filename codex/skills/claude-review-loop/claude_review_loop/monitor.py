@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import re
 from .states import CRASHED, INVALID, STALLED, STALLED_RETRY, PROVIDER_ERROR
 from .verdict import (
     extract_claude_assistant_text,
@@ -57,6 +58,44 @@ def _is_permission_denial(block, tool):
     return content in (head, head + PERMISSION_DENIAL_GUIDANCE)
 
 
+# How the OS sandbox reports that it could not start a command at all: the
+# output is nothing but `sandbox-exec:` (macOS) or `bwrap:` (Linux) lines after
+# Claude's `Exit code N` header, for example "sandbox-exec: data object length
+# 80687 exceeds maximum (65535)". A command that ran and merely printed such a
+# line among other output is an ordinary failure.
+_SANDBOX_ERROR = re.compile(r"\s*(?:sandbox-exec|bwrap): ")
+_EXIT_HEADER = re.compile(r"\s*Exit code \d+\s*")
+BASH_FAILURE_TEXT_LIMIT = 300
+
+
+def _tool_result_text(block):
+    content = block.get("content")
+    if isinstance(content, list):
+        content = "\n".join(part.get("text", "") for part in content
+                            if isinstance(part, dict)
+                            and isinstance(part.get("text"), str))
+    return content if isinstance(content, str) else ""
+
+
+def _bash_failure(block, command):
+    """Describe a Bash call Claude answered with an error: a command that
+    exited non-zero, one the OS sandbox could not start, or one Claude
+    refused."""
+    text = _tool_result_text(block)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    output = lines[1:] if lines and _EXIT_HEADER.fullmatch(lines[0]) else lines
+    if _is_permission_denial(block, "Bash"):
+        kind = "permission"
+    elif output and all(_SANDBOX_ERROR.match(line) for line in output):
+        kind = "sandbox"
+        lines = output
+    else:
+        kind = "failed"
+    return {"command": command if isinstance(command, str) else "",
+            "kind": kind,
+            "error": " | ".join(lines)[:BASH_FAILURE_TEXT_LIMIT]}
+
+
 def _provider_error_text(event):
     """Describe a failed result event as text.
 
@@ -102,6 +141,8 @@ class Monitor:
         self.forbidden_tool_uses = []
         self.denied_tool_uses = []     # out-of-scope calls Claude itself refused
         self.pending_out_of_scope = {}  # tool_use id -> (entry, error)
+        self.bash_calls = {}           # tool_use id -> command
+        self.bash_failures = []        # Bash calls answered with an error
         self.invalid_error = None
         # File tools may target only paths inside `review_root`; a relative
         # path resolves against Claude's working directory, `cwd`.
@@ -154,6 +195,8 @@ class Monitor:
             return
         entry = {"tool": name, "input": tool_input if isinstance(tool_input, dict) else {}}
         self.tool_uses.append(entry)
+        if name == "Bash" and isinstance(tool_use_id, str) and tool_use_id:
+            self.bash_calls[tool_use_id] = entry["input"].get("command")
         if name not in ALLOWED_REVIEW_TOOLS:
             self.forbidden_tool_uses.append(entry)
             self.invalid_error = f"forbidden Claude tool use: {name}"
@@ -173,7 +216,12 @@ class Monitor:
         for block in content if isinstance(content, list) else []:
             if not (isinstance(block, dict) and block.get("type") == "tool_result"):
                 continue
-            pending = self.pending_out_of_scope.pop(block.get("tool_use_id"), None)
+            tool_use_id = block.get("tool_use_id")
+            if isinstance(tool_use_id, str) and tool_use_id in self.bash_calls:
+                command = self.bash_calls.pop(tool_use_id)
+                if block.get("is_error") is True:
+                    self.bash_failures.append(_bash_failure(block, command))
+            pending = self.pending_out_of_scope.pop(tool_use_id, None)
             if pending is None:
                 continue
             entry, target_error = pending

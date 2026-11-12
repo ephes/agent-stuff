@@ -4,6 +4,7 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import json
 
@@ -241,25 +242,59 @@ def _default_effort(model):
     return DEFAULT_EFFORT
 
 
-SYSTEM_TMP = "/private/tmp"
+SYSTEM_TMP = os.path.realpath("/tmp")  # `/private/tmp` on macOS
 DENIED_READ_ROOTS = ("/private/var/folders",)
+# Claude Code hands its Bash commands a temporary directory below
+# CLAUDE_CODE_TMPDIR only while `<dir>/claude-<uid>` fits in this many bytes;
+# past that it falls back to the shared `/tmp/claude-<uid>`.
+CLAUDE_TMP_MAX_BYTES = 44
+REVIEWER_TMP_PREFIX = "crl-"
 
 
 def _claude_temp_dir():
-    """Claude Code's per-user temporary directory. Its Bash tool keeps the
-    command's working-directory state there, so the sandbox has to leave it
-    writable; it is also where every other Claude Code session of this user
-    keeps its scratch files."""
+    """The temporary directory every other Claude Code session of this user
+    shares, `/private/tmp/claude-<uid>`. The reviewer gets its own instead (see
+    `make_reviewer_tmp`), so this one stays closed to it."""
     return os.path.join(SYSTEM_TMP, f"claude-{os.getuid()}")
 
 
-def _entries(directory):
-    directory = os.path.realpath(directory)
-    try:
-        names = os.listdir(directory)
-    except OSError:
-        return []
-    return [os.path.join(directory, name) for name in sorted(names)]
+def _fake_cmd():
+    # Test seam: CLAUDE_REVIEW_FAKE_CMD replaces the `claude ...` argv entirely.
+    return (
+        os.environ.get("CLAUDE_REVIEW_FAKE_CMD")
+        or os.environ.get("OPUS_REVIEW_FAKE_CMD")  # legacy compatibility
+    )
+
+
+def _reviewer_tmp_base():
+    """Where the reviewer's temporary root goes, and the longest
+    `<root>/claude-<uid>` allowed there (None: no limit)."""
+    if _fake_cmd():
+        # A fake reviewer is not Claude Code, the only reason for a short
+        # path in the system temporary directory; the caller's own temporary
+        # directory also works when the caller is itself sandboxed.
+        return tempfile.gettempdir(), None
+    return SYSTEM_TMP, CLAUDE_TMP_MAX_BYTES
+
+
+def make_reviewer_tmp():
+    """Create the reviewer's own temporary root and return its real path.
+
+    It is passed to Claude as CLAUDE_CODE_TMPDIR, so the reviewer's Claude
+    keeps its Bash state, and its commands their TMPDIR, in a directory no other
+    session uses; the sandbox can then close the whole system temporary
+    directory with one rule instead of naming each entry in it. Kept short
+    because Claude falls back to the shared directory for a long one. The
+    caller removes it with `workspace.remove_tree`."""
+    base, limit = _reviewer_tmp_base()
+    path = os.path.realpath(
+        tempfile.mkdtemp(prefix=REVIEWER_TMP_PREFIX, dir=base))
+    session = os.path.join(path, f"claude-{os.getuid()}")
+    if limit is not None and len(os.fsencode(session)) > limit:
+        workspace_mod.remove_tree(path)
+        raise OSError(f"reviewer temporary directory {session} is longer "
+                      f"than {limit} bytes")
+    return path
 
 
 def _contains(parent, path):
@@ -270,30 +305,36 @@ def _contains(parent, path):
 
 
 def _sandbox_settings(copy):
-    """Claude settings for a review in `copy` (a `workspace.ReviewCopy`).
+    """Claude settings for a review in `copy` (a `workspace.ReviewCopy` whose
+    `reviewer_tmp` is set).
 
     Bash runs in Claude's OS sandbox. Reads are denied for the user's home,
-    the per-user temporary directory, and every entry of `/private/tmp` that
-    exists at launch - including other Claude sessions' directories under
-    Claude's own temporary directory, which must itself stay usable - and then
-    re-opened for the workspace and the source object store. Writes go to the
-    workspace (and to Claude's temporary directory, which Claude always leaves
-    writable; the existing entries there are denied). Network is open.
+    the per-user temporary directory and the whole system temporary directory
+    - including every other Claude session's scratch space - and then
+    re-opened for the workspace, the source object store and the reviewer's
+    own temporary root. Writes go to the workspace and that root only; the
+    shared Claude temporary directory is denied as well unless it holds the
+    workspace (a denied write cannot be re-opened by a narrower allowance).
+    Network is open.
+
+    Every rule names one directory: macOS compiles the path filters of one
+    operation into a single data object of at most 65535 bytes, so a list
+    that grows with the contents of a temporary directory would eventually
+    stop every Bash command.
 
     Read, Edit and Write are not sandboxed; `dontAsk` permission rules confine
     them to the workspace, and the monitor voids a review whose file tool
     reached outside it and was not refused.
     """
+    if not getattr(copy, "reviewer_tmp", None):
+        raise ValueError("the review copy has no reviewer temporary directory")
     workspace = os.path.realpath(copy.root)
     objects = os.path.realpath(copy.source_objects)
-    claude_tmp = os.path.realpath(_claude_temp_dir())
-    tmp_entries = [p for p in _entries(SYSTEM_TMP) if p != claude_tmp]
-    session_entries = _entries(claude_tmp)
+    reviewer_tmp = os.path.realpath(copy.reviewer_tmp)
+    shared_tmp = os.path.realpath(_claude_temp_dir())
     deny_read = [os.path.realpath(os.path.expanduser("~")),
-                 *DENIED_READ_ROOTS, *tmp_entries, *session_entries]
-    # A denied write cannot be re-opened by a narrower allowance, so never
-    # deny an ancestor of the workspace.
-    deny_write = [p for p in session_entries if not _contains(p, workspace)]
+                 *DENIED_READ_ROOTS, os.path.realpath(SYSTEM_TMP)]
+    deny_write = [] if _contains(shared_tmp, workspace) else [shared_tmp]
     grant = "/" + workspace + "/**"  # `//abs` is an absolute permission path
     return {
         "permissions": {
@@ -307,8 +348,8 @@ def _sandbox_settings(copy):
             "allowUnsandboxedCommands": False,
             "filesystem": {
                 "denyRead": deny_read,
-                "allowRead": [workspace, objects],
-                "allowWrite": [workspace],
+                "allowRead": [workspace, objects, reviewer_tmp],
+                "allowWrite": [workspace, reviewer_tmp],
                 "denyWrite": deny_write,
             },
             "network": {"allowedDomains": ["*"]},
@@ -322,9 +363,11 @@ def _reviewer_env(copy):
     Claude itself needs the real home for its credentials, so `HOME` stays;
     these point git's global configuration and the XDG caches, configuration
     and data that package managers use into the unreadable home's stand-in.
+    CLAUDE_CODE_TMPDIR gives the reviewer's Claude its own temporary root.
     """
     home = os.path.realpath(copy.home)
     return {
+        "CLAUDE_CODE_TMPDIR": os.path.realpath(copy.reviewer_tmp),
         "GIT_CONFIG_GLOBAL": os.path.join(home, ".gitconfig"),
         "XDG_CONFIG_HOME": os.path.join(home, ".config"),
         "XDG_CACHE_HOME": os.path.join(home, ".cache"),
@@ -334,11 +377,7 @@ def _reviewer_env(copy):
 
 
 def _claude_cmd(model, effort, copy):
-    # Test seam: CLAUDE_REVIEW_FAKE_CMD replaces the `claude ...` argv entirely.
-    fake = (
-        os.environ.get("CLAUDE_REVIEW_FAKE_CMD")
-        or os.environ.get("OPUS_REVIEW_FAKE_CMD")  # legacy compatibility
-    )
+    fake = _fake_cmd()
     if fake:
         import shlex
         return shlex.split(fake)
@@ -582,14 +621,25 @@ def _main(argv=None):
                     err = (err or b"").decode("utf-8", errors="replace")
                 return _crashed(
                     f"cannot prepare the repository copy: {(err or '').strip()}")
+            try:
+                copy.reviewer_tmp = make_reviewer_tmp()
+            except OSError as e:
+                return _crashed(
+                    f"cannot create the reviewer's temporary directory: {e}")
             outcome = _review_in_copy(args, copy, model, effort, prompt_path)
         finally:
             removed = workspace_mod.remove_tree(workspace_root)
-            if copy is not None:
-                copy.removed = removed
             if not removed:
                 print("claude-review-loop: could not remove the repository "
                       f"copy at {workspace_root}", file=sys.stderr)
+            if copy is not None and copy.reviewer_tmp \
+                    and not workspace_mod.remove_tree(copy.reviewer_tmp):
+                removed = False
+                print("claude-review-loop: could not remove the reviewer's "
+                      f"temporary directory {copy.reviewer_tmp}",
+                      file=sys.stderr)
+            if copy is not None:
+                copy.removed = removed
     if isinstance(outcome, int):
         return outcome
     result = outcome
@@ -651,6 +701,7 @@ def _main(argv=None):
     if result.denied_tool_uses:
         print(f"  denied: {len(result.denied_tool_uses)} out-of-scope call(s)"
               " refused by Claude (see denied_tool_uses)")
+    _print_bash_failures(result)
     if convergence:
         print(f"  LOOP: {convergence['status']} (round {convergence['round']})"
               f" - {convergence['reason']}")
@@ -659,6 +710,27 @@ def _main(argv=None):
     if convergence and convergence["status"] == ledger_mod.ESCALATE:
         return 4
     return EXIT_BY_STATE.get(result.state, 2)
+
+
+def _print_bash_failures(result):
+    """Say plainly when the reviewer's commands did not run, so a verdict
+    reached by reading the source is not taken for one backed by a test run."""
+    failures = result.bash_failures
+    if not failures:
+        return
+    calls = sum(1 for use in result.tool_uses if use.get("tool") == "Bash")
+    sandbox = [f for f in failures if f.get("kind") == "sandbox"]
+    if sandbox:
+        scope = ("this verdict rests on reading the source only - no reviewer "
+                 "command or test ran" if len(sandbox) >= calls else
+                 "count a reviewer test as run only if its output came back")
+        print(f"  BASH UNAVAILABLE: the OS sandbox refused {len(sandbox)} of "
+              f"{calls} reviewer command(s) ({sandbox[0]['error']}); {scope} "
+              "(see bash_failures)")
+    other = len(failures) - len(sandbox)
+    if other:
+        print(f"  bash: {other} of {calls} reviewer command(s) failed or were "
+              "refused (see bash_failures)")
 
 
 def main(argv=None):
