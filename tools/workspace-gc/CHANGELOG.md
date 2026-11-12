@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Read-only Go module caches no longer stop a removal. `go mod download`
+  leaves its module cache with directories at mode 0555, so deleting a stale
+  workspace directory with `.cache/go-mod` failed with "Permission denied"
+  (4 directories on 2026-11-12), and a checkout with one was class C
+  ("cannot be deleted safely"). Extracted module directories (at or below
+  `<module>@<version>`) of a Go module cache (a directory below the checkout
+  or workspace directory holding `cache/download`) that only miss the owner
+  write bit now get `u+w` right before the delete, through directory
+  descriptors without following symlinks. Read-only directories anywhere
+  else still block.
+
 - Bounded runs. The daily run started 2026-11-11 08:00 was still running after
   29 hours because every clone removal re-walked all of `~/workspaces` and
   `~/projects` for repositories borrowing its objects (~50s per walk under

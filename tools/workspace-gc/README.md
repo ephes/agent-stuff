@@ -352,7 +352,9 @@ following immediately before acting, and skips the checkout if any check fails:
 - an exhaustive walk of everything the removal would delete, including
   payload directories, finds every directory readable, writable and
   searchable, finds no traversal error, and finds no device backup. So a
-  read-only checkout is reported and never partially deleted.
+  read-only checkout is reported and never partially deleted. The one
+  exception is a read-only directory inside a **Go module cache**, see
+  [Read-only Go module caches](#read-only-go-module-caches).
 
 Worktrees are removed with `git worktree remove` (never `--force`), so git also
 refuses one that changed in the meantime. The branch stays in the owning
@@ -374,6 +376,37 @@ Limits: an agent that works in a checkout without a herdr pane, and without a
 process whose working directory is in it, is detected only through the work
 item's `worktree` field and the idle guard. Record worktrees on their items.
 
+## Read-only Go module caches
+
+`go mod download` makes the directories of its module cache read-only (mode
+0555) on purpose, so a plain recursive delete of a checkout or a workspace
+directory that holds one (`.cache/go-mod`, `go/pkg/mod`, ...) stops half-way
+with "Permission denied". A Go module cache is regenerable, so:
+
+- the deletion walk does not count a directory as a blocker when it only
+  misses the owner write bit, is owned by the current user, and is an
+  extracted module of a Go module cache: at or below a `<module>@<version>`
+  directory, not under the cache's own `cache/`. A Go module cache is
+  recognised by its layout, not its name: a directory below the checkout or
+  workspace directory (never that directory itself) holding `cache/download`
+  (real directories, not symlinks);
+- with nested caches the outermost one counts, in the deletion walk and in
+  the unlock below alike;
+- right before the delete of a checkout (clone or worktree), those
+  directories get `u+w` (`chmod -R u+w` limited to them), walking through
+  directory descriptors without following symlinks; this walk only runs
+  when the deletion walk let such a directory through. A stale workspace
+  directory removed whole gets the same treatment, before anything in it is
+  deleted, when the inspection right before the removal found a directory
+  without the owner write bit in it. Nothing else is ever chmodded, and a read-only
+  directory anywhere else still keeps the checkout in class C ("cannot be
+  deleted safely"). If `git worktree remove` refuses afterwards, the module
+  directories stay writable; Go only reads them.
+
+The Go module cache still has to be ignored and regenerable for the checkout
+to be class A: `.cache/` is a built-in regenerable name, other locations need
+a pattern (for example `REPO:go/`).
+
 ## Tests
 
 ```sh
@@ -394,7 +427,8 @@ virtualenvs), the scratch fetch (resolves containment without touching the
 checkout, also in the removal re-check), supersession hints, the
 workspace directories without a checkout, and bounded runs (step and run time
 limits, the shared borrowed-objects walk, git cut off at a deadline, network
-stall limits, `--jobs` bounds and the run lock).
+stall limits, `--jobs` bounds and the run lock), and read-only Go module
+caches (made writable only inside the cache, symlinks not followed).
 
 Partial apply runs retain successful removals and report each failed prune or
 attempted empty/husk cleanup. Such runs exit 1; initial signal refusal exits 2.

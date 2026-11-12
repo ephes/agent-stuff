@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass, field
 
 from . import budget
 from . import git
+from . import readonly
 from .git import GitError
 from .signals import Signals
 
@@ -848,12 +849,15 @@ def find_device_backups(path: str) -> list[str]:
     return sorted(set(found))
 
 
-def deletion_scan(path: str) -> list[str]:
+def deletion_scan(path: str, unlockable: list[str] | None = None) -> list[str]:
     """Exhaustive walk of everything a removal would delete (symlinks not
     followed). Returns blockers: directories that are not readable, writable
-    and searchable (so a delete could stop half-way), traversal errors, and
+    and searchable (so a delete could stop half-way; a read-only directory
+    inside a Go module cache is not one, the removal gives it u+w back, see
+    readonly.py), traversal errors, and
     device backups anywhere in the tree, including payload directories.
-    An empty list is required before any removal."""
+    An empty list is required before any removal. Read-only Go module cache
+    directories that were let through are appended to `unlockable`."""
     blockers = []
     parent = os.path.dirname(path)
     if not os.access(parent, os.W_OK | os.X_OK):
@@ -862,10 +866,14 @@ def deletion_scan(path: str) -> list[str]:
     def onerror(exc: OSError) -> None:
         blockers.append(f"cannot read {exc.filename}: {exc.strerror or exc}")
 
+    go_roots: list[str] = []
     for dirpath, dirnames, _ in os.walk(path, followlinks=False, onerror=onerror):
         budget.check()
         if not os.access(dirpath, os.R_OK | os.W_OK | os.X_OK):
-            blockers.append(f"not writable: {dirpath}")
+            if not readonly.fixable(dirpath, path, go_roots):
+                blockers.append(f"not writable: {dirpath}")
+            elif unlockable is not None:
+                unlockable.append(dirpath)
         rel = os.path.relpath(dirpath, path)
         if rel.replace(os.sep, "/").endswith(".cache/device-db-backups") or \
                 os.path.basename(dirpath).startswith("device-preservation-"):

@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from .empties import PROTECTED_NAMES, _keep_listed
 from . import signals as sig_mod
 from . import budget
+from . import readonly
 from .inventory import Inventory, _du_kb, _is_under, keep_match
 from .signals import Signals
 
@@ -55,6 +56,7 @@ class Husk:
     git_dirs: list[str] = field(default_factory=list)   # repositories found inside
     kept: str = ""        # why it must not be touched (in use, keep-listed, ...)
     note: str = ""        # walk truncated or unreadable parts
+    readonly_dirs: int = 0   # directories without the owner write bit
     cache_only: bool = False   # nothing but workspace-level caches
     idle_hours: float | None = None   # since the newest directory change (cache_only only)
     removable: bool = False    # cache_only, not kept, idle long enough
@@ -123,6 +125,8 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=lambda e: errors.append(e.filename)):
         budget.check()
+        if not os.access(dirpath, os.W_OK, follow_symlinks=False):
+            h.readonly_dirs += 1
         walked += len(dirnames) + len(filenames)
         if walked > MAX_WALK:
             h.note = f"more than {MAX_WALK} entries, walk stopped"
@@ -241,6 +245,15 @@ def _rmtree_under(parent_fd: int, name: str) -> None:
     shutil.rmtree(name, dir_fd=parent_fd)
 
 
+def _empty(dir_fd: int) -> None:
+    """Delete everything inside the directory open as `dir_fd`."""
+    for name in os.listdir(dir_fd):
+        if stat.S_ISDIR(os.lstat(name, dir_fd=dir_fd).st_mode):
+            _rmtree_under(dir_fd, name)
+        else:
+            os.unlink(name, dir_fd=dir_fd)
+
+
 def _fd_path(fd: int) -> str | None:
     """The real path of an open descriptor (macOS F_GETPATH, Linux /proc);
     None where the platform cannot say."""
@@ -273,7 +286,7 @@ def _keep_inside(path: str, keep_patterns: list[str]) -> str:
 
 
 def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = False,
-                     ino: int | None = None) -> str:
+                     ino: int | None = None, unlock: bool = False) -> str:
     """Delete the payload directories (relative to the workspace) below the
     workspace, reached from the root through descriptors opened with
     O_NOFOLLOW, so a path component swapped for a symlink stops the walk."""
@@ -301,12 +314,14 @@ def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = Fa
     if whole:
         # Empty the pinned directory through its descriptor, then rmdir it:
         # a replacement of the name after the check is never descended into.
+        # When the inspection right before found read-only directories, the
+        # module directories of Go module caches get u+w first, before
+        # anything is deleted (a partial delete could remove the cache's
+        # `cache/download` marker before reaching them).
         try:
-            for name in os.listdir(ws_fd):
-                if stat.S_ISDIR(os.lstat(name, dir_fd=ws_fd).st_mode):
-                    _rmtree_under(ws_fd, name)
-                else:
-                    os.unlink(name, dir_fd=ws_fd)
+            if unlock:
+                readonly.unlock(ws_fd)
+            _empty(ws_fd)
             os.rmdir(os.path.basename(path), dir_fd=root_fd)
         except OSError as exc:
             return f"removing {path} failed: {exc.strerror or exc}"
@@ -362,7 +377,8 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
         if inside:
             return f"keep-listed path inside: {inside}"
         h.removed_what = "directory"
-        return _remove_payloads(h.path, root, [], whole=True, ino=ino)
+        return _remove_payloads(h.path, root, [], whole=True, ino=ino,
+                                unlock=fresh.readonly_dirs > 0)
     if not fresh.removable:
         return "no longer cache-only and idle"
     h.removed_what = "caches"
