@@ -35,10 +35,10 @@ class TestPartialOutcomes(unittest.TestCase):
             args, inv = self.fixture()
             inv.empty_dirs = [empties.EmptyDir(path='/synthetic/empty', removable=True), empties.EmptyDir(path='/synthetic/kept', reason='protected')]
             inv.husks = [husks.Husk(path='/synthetic/husk', stale=True), husks.Husk(path='/synthetic/kept-husk', kept='protected')]
-            def fail_empty(entries, *a):
+            def fail_empty(entries, *a, **kw):
                 entries[0].reason = fault
                 entries[0].removable = False
-            def fail_husk(entries, *a):
+            def fail_husk(entries, *a, **kw):
                 entries[0].outcome = fault
                 entries[0].stale = False
             with mock.patch.object(inventory, 'prune_targets', return_value=[]), mock.patch.object(remove, 'remove_checkout', return_value='removed clone /synthetic/ws/repo'), mock.patch.object(empties, 'remove', side_effect=fail_empty), mock.patch.object(husks, 'remove', side_effect=fail_husk):

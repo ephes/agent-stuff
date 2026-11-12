@@ -269,6 +269,59 @@ A checkout that must survive needs one of these: its path in the `worktree`
 field of an active work item, an entry on the keep-list, or the uncommitted or
 unpushed work that makes it class B or C.
 
+## Run time limits and the run lock
+
+A run is bounded, so a slow filesystem, a stalled remote or a very full
+`~/workspaces` cannot keep the daily job busy for more than a day (the run
+started 2026-11-11 08:00 was still going after 29 hours: every clone removal
+walked all of `~/workspaces` and `~/projects` again for borrowed objects,
+~50s per walk under load, for hundreds of clones).
+
+- **One step per checkout** (`--step-timeout SECONDS`, default 600): the
+  inspection of one checkout, and the re-checks before one removal, are each a
+  step. Filesystem walks check the deadline once per directory, git and du get
+  at most the time left. A checkout whose inspection runs out of time is class
+  C ("not inspectable: inspection ran out of time"); a removal whose re-checks
+  run out of time is skipped. The deletion itself (`git worktree remove`, or
+  emptying a clone) never runs under a deadline, so a limit never stops it
+  half-way.
+- **The whole run** (`--max-runtime MINUTES`, default 180, counted from the
+  start of the process): checkouts not inspected by then are class C,
+  removals not started by then are skipped ("not removed in this run: run
+  time limit reached"), and so is everything after them that has not started:
+  the informational local-remote notes, `git worktree prune` per repository,
+  and the scan and the removal of each empty or stale workspace directory.
+  The report is written as usual. With `--apply` the summary line says
+  `stopped early: run time limit reached`, `latest.json` has `"stopped"`, and
+  the exit code is 1; a scan cut short is listed as `INCOMPLETE:` in the
+  report and under `"incomplete"` in `latest.json`. What can run past the
+  limit is the one item under way (bounded by its step or its own timeouts,
+  and a deletion is never interrupted), the reading of the in-use sources
+  (below) and the report's work-app update.
+- **Remote lookups are shared** by every checkout of a URL (`ls-remote`, the
+  default branch, the scratch fetch) and their failures are cached for the
+  run, so they run under their own timeout and the run deadline, not under
+  what is left of the step of whichever checkout asked first.
+- **One borrowed-objects walk per `--lending-ttl SECONDS`** (default 600)
+  instead of one per removed clone. A repository that starts borrowing a
+  clone's objects (`git clone --shared/--reference`) less than that long
+  before the clone's removal can be missed (the age counts from the start of
+  the walk); `--lending-ttl 0` walks for every
+  removal as before. A walk that fails or runs out of time refuses the clone
+  removals until the next walk.
+- **Network waits are bounded:** `ls-remote` 45s, a scratch fetch 300s, ssh
+  with `ConnectTimeout=15` and `ServerAliveInterval=15` (when no ssh command
+  is configured), HTTP(S) transfers abort below 1 KB/s for 30s, and the
+  in-use sources keep their own limits (herdr 30s, lsof 60s, work app 120s).
+- **Bounded parallelism:** `--jobs` (default 8) is limited to 1-32.
+- **Run lock** (`--lock-file`, default
+  `~/.local/state/workspace-gc/workspace-gc.lock`): `report` and every
+  `--apply` take an exclusive `flock` before reading anything. A second run
+  that finds it held prints `BUSY, nothing done: another workspace-gc run
+  holds ... (pid N, started ...)`, writes no report and exits 3. The kernel
+  releases the lock when the holder exits, however it exits, so a killed run
+  leaves nothing to clean up. A dry-run `scan` takes no lock.
+
 ## Removal guards
 
 Checkout removal repeats local dirty/HEAD/hidden/ignored/stash/worktree
@@ -338,8 +391,10 @@ versus the per-item fallback for older servers, the scheduled command
 (applied, refused, dry run), empty-directory removal with its guards, the
 regenerable rules (empty entries, anchored and repository-scoped patterns,
 virtualenvs), the scratch fetch (resolves containment without touching the
-checkout, also in the removal re-check), supersession hints, and the
-workspace directories without a checkout.
+checkout, also in the removal re-check), supersession hints, the
+workspace directories without a checkout, and bounded runs (step and run time
+limits, the shared borrowed-objects walk, git cut off at a deadline, network
+stall limits, `--jobs` bounds and the run lock).
 
 Partial apply runs retain successful removals and report each failed prune or
 attempted empty/husk cleanup. Such runs exit 1; initial signal refusal exits 2.

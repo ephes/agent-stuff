@@ -17,11 +17,13 @@ import socket
 import sys
 import tempfile
 
+from . import budget
 from . import empties
 from . import husks
 from . import inventory as inv_mod
 from . import remove as rm_mod
 from . import report as rep
+from . import runlock
 from . import signals as sig_mod
 
 HOME = os.path.expanduser("~")
@@ -29,6 +31,24 @@ DEFAULT_WORK_ENV = os.path.join(HOME, ".config", "work", "env")
 DEFAULT_WORK_LEDGER = os.path.join(HOME, "projects", "work-ledger")
 COMMANDS = ("scan", "remove", "report")
 DEFAULT_MIN_IDLE = 48.0
+DEFAULT_LOCK_FILE = os.path.join(HOME, ".local", "state", "workspace-gc", "workspace-gc.lock")
+DEFAULT_STEP_TIMEOUT = 600.0
+DEFAULT_MAX_RUNTIME = 180.0
+EXIT_BUSY = 3
+
+
+def _jobs(value: str) -> int:
+    n = int(value)
+    if not 1 <= n <= inv_mod.MAX_JOBS:
+        raise argparse.ArgumentTypeError(f"must be between 1 and {inv_mod.MAX_JOBS}")
+    return n
+
+
+def _seconds(value: str) -> float:
+    n = float(value)
+    if n < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return n
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -56,7 +76,22 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-herdr", action="store_true", help="do not read herdr panes")
     p.add_argument("--no-processes", action="store_true", help="do not read process cwds (lsof)")
     p.add_argument("--no-sizes", action="store_true", help="skip du (faster)")
-    p.add_argument("--jobs", type=int, default=8)
+    p.add_argument("--jobs", type=_jobs, default=8,
+                   help=f"checkouts inspected in parallel (1-{inv_mod.MAX_JOBS}, default %(default)s)")
+    p.add_argument("--step-timeout", type=_seconds, default=DEFAULT_STEP_TIMEOUT, metavar="SECONDS",
+                   help="time limit for inspecting one checkout and for the re-checks before one "
+                        "removal; out of time means class C or skip (default %(default)g; 0: none)")
+    p.add_argument("--max-runtime", type=_seconds, default=DEFAULT_MAX_RUNTIME, metavar="MINUTES",
+                   help="time limit for the whole run: checkouts not inspected by then are class C, "
+                        "removals not started by then are skipped and the report is written "
+                        "(default %(default)g; 0: none)")
+    p.add_argument("--lending-ttl", type=_seconds, default=inv_mod.DEFAULT_LENDING_TTL,
+                   metavar="SECONDS",
+                   help="reuse the walk for repositories borrowing a clone's objects for this "
+                        "long between removals (default %(default)g; 0: walk for every removal)")
+    p.add_argument("--lock-file", default=DEFAULT_LOCK_FILE,
+                   help="run lock taken by report and every --apply; a second run exits "
+                        f"{EXIT_BUSY} at once while it is held (default %(default)s)")
 
 
 def _idle(p: argparse.ArgumentParser, default: float) -> None:
@@ -119,16 +154,42 @@ def _regenerable(a) -> list[str]:
     return inv_mod.load_regenerable(a.regenerable, a.regenerable_file)
 
 
+def _clock(a) -> budget.RunClock:
+    """The run's --max-runtime clock, started when first asked for (main()
+    starts it before anything is read)."""
+    if getattr(a, "clock", None) is None:
+        a.clock = budget.RunClock(a.max_runtime * 60)
+    return a.clock
+
+
 def _build(a, sig, only=None):
     inv = inv_mod.build(_roots(a), sig, main_roots=_main_roots(a), keep=a.keep,
                          keep_file=a.keep_file, regenerable=_regenerable(a),
                          sizes=not a.no_sizes, jobs=a.jobs, only=only,
-                         min_idle_hours=a.min_idle_hours, fetch=not a.no_fetch)
-    if only is None:
-        inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
-        inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes,
-                               min_idle_hours=a.min_idle_hours,
-                               min_stale_hours=a.min_stale_hours)
+                         min_idle_hours=a.min_idle_hours, fetch=not a.no_fetch,
+                         step_timeout=a.step_timeout, run_deadline=_clock(a).deadline)
+    if only is None and not _clock(a).expired():
+        # Workspace directories without a checkout: under the run deadline;
+        # out of time means they wait for the next run.
+        try:
+            with budget.step(None, _clock(a).deadline):
+                inv.empty_dirs = empties.scan(inv.roots, inv.keep_patterns, sig)
+        except budget.StepTimeout:
+            inv.empty_dirs = []
+            inv.incomplete.append("empty workspace directories not scanned (run time limit)")
+        try:
+            with budget.step(None, _clock(a).deadline):
+                inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes,
+                                       min_idle_hours=a.min_idle_hours,
+                                       min_stale_hours=a.min_stale_hours)
+        except budget.StepTimeout:
+            inv.husks = []
+            inv.incomplete.append("workspace directories without a checkout not scanned "
+                                  "(run time limit)")
+    elif only is None:
+        inv.incomplete += ["empty workspace directories not scanned (run time limit)",
+                           "workspace directories without a checkout not scanned "
+                           "(run time limit)"]
     return inv
 
 
@@ -163,12 +224,27 @@ def _apply(a, inv) -> inv_mod.Run:
     if run.refused:
         _preview_prune(inv)
         return run
+    if _clock(a).expired():
+        run.stopped = budget.TIME_LIMIT
     targets = inv_mod.prune_targets(inv)
     roots, mains = _roots(a), _main_roots(a)
+    # One borrowed-objects walk per --lending-ttl, not one per removed clone.
+    lending = inv_mod.LendingCache(roots, mains, inv.keep_patterns, ttl=a.lending_ttl,
+                                   timeout=a.step_timeout or None, run_deadline=_clock(a).deadline)
+    regenerable = _regenerable(a)
     for co in sorted((c for c in inv.checkouts if c.cls == "A"), key=lambda c: c.path):
+        if _clock(a).expired():
+            run.stopped = budget.TIME_LIMIT
+            run.skipped += 1
+            co.reasons.insert(0, "not removed in this run: run time limit reached")
+            run.outcomes.append({"path": co.path, "outcome": "skipped: run time limit reached"})
+            continue
         try:
             outcome = rm_mod.remove_checkout(co, roots, mains, inv.keep_patterns,
-                                             _regenerable(a), fetch=not a.no_fetch, signals=inv.signals)
+                                             regenerable, fetch=not a.no_fetch,
+                                             signals=inv.signals, lending=lending,
+                                             step_timeout=a.step_timeout,
+                                             run_deadline=_clock(a).deadline)
             run.removed.append(co)
         except rm_mod.Refused as exc:
             run.skipped += 1
@@ -176,10 +252,20 @@ def _apply(a, inv) -> inv_mod.Run:
             co.reasons.insert(0, f"not removed in this run: {exc}")
         run.outcomes.append({"path": co.path, "outcome": outcome})
     inv.checkouts = [c for c in inv.checkouts if c not in run.removed]
+    # A clone successfully removed above has no worktree metadata left.
+    targets = [r for r in targets if not any(co.path == r for co in run.removed)]
+    cleanup_left = lambda: any(e.removable for e in inv.empty_dirs) or \
+        any(h.removable or h.stale for h in inv.husks)
+    if _clock(a).expired():
+        # Out of time: stale worktree entries, empty and stale workspace
+        # directories are left for the next run rather than overrun further.
+        if targets or cleanup_left():
+            run.stopped = budget.TIME_LIMIT
+        return run
     for repo in targets:
-        # A clone successfully removed above has no worktree metadata left.
-        if any(co.path == repo for co in run.removed):
-            continue
+        if _clock(a).expired():
+            run.stopped = budget.TIME_LIMIT
+            return run
         try:
             lines = rm_mod.prune(repo)
             if lines:
@@ -187,11 +273,19 @@ def _apply(a, inv) -> inv_mod.Run:
         except rm_mod.GitError as exc:
             run.prune_errors[repo] = str(exc)
             run.skipped += 1
+    if _clock(a).expired():
+        if cleanup_left():
+            run.stopped = budget.TIME_LIMIT
+        return run
     attempted_empty = [e for e in inv.empty_dirs if e.removable]
     attempted_husks = [h for h in inv.husks if h.removable or h.stale]
-    empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals)
+    expired = _clock(a).expired
+    empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals, expired=expired)
     husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours,
-                 a.min_stale_hours)
+                 a.min_stale_hours, expired=expired)
+    if any(e.reason == budget.TIME_LIMIT for e in inv.empty_dirs) or \
+            any(h.outcome == budget.TIME_LIMIT for h in inv.husks):
+        run.stopped = budget.TIME_LIMIT
     for entry in attempted_empty + attempted_husks:
         if not entry.removed:
             run.skipped += 1
@@ -201,7 +295,7 @@ def _apply(a, inv) -> inv_mod.Run:
 
 
 def _exit_code(run: inv_mod.Run) -> int:
-    return 2 if run.refused else 1 if run.skipped else 0
+    return 2 if run.refused else 1 if run.skipped or run.stopped else 0
 
 
 def cmd_scan(a, sig, out) -> int:
@@ -223,6 +317,7 @@ def cmd_scan(a, sig, out) -> int:
                               "husks_removed": [{"path": h.path, "what": h.removed_what,
                                                  "kb": h.removed_kb}
                                                 for h in inv.husks if h.removed],
+                              "stopped": run.stopped,
                               "summary": rep.summary_line(inv)}, indent=2) + "\n")
     else:
         for r in run.outcomes:
@@ -243,6 +338,8 @@ def cmd_scan(a, sig, out) -> int:
         out.write(f"{len(run.removed)} removed, {run.skipped} skipped, {len(gone)} empty "
                   f"director{'y' if len(gone) == 1 else 'ies'} removed; untouched: "
                   f"{sum(1 for c in inv.checkouts if c.cls != 'A')} checkouts in classes B/C/D\n")
+        if run.stopped:
+            out.write(f"stopped early: {run.stopped}; the rest is left for the next run\n")
     return _exit_code(run)
 
 
@@ -276,8 +373,10 @@ def cmd_remove(a, sig, out) -> int:
         out.write(f"REFUSED {desc}: in-use signals incomplete: {rep.escape('; '.join(blockers))}\n")
         return 2
     try:
-        out.write(rep.escape(rm_mod.remove_checkout(co, roots, _main_roots(a), inv.keep_patterns,
-                                         _regenerable(a), fetch=not a.no_fetch, signals=inv.signals)) + "\n")
+        out.write(rep.escape(rm_mod.remove_checkout(
+            co, roots, _main_roots(a), inv.keep_patterns, _regenerable(a), fetch=not a.no_fetch,
+            signals=inv.signals, step_timeout=a.step_timeout,
+            run_deadline=_clock(a).deadline)) + "\n")
     except rm_mod.Refused as exc:
         out.write(f"REFUSED {desc}: {rep.escape(exc)}\n")
         return 1
@@ -352,5 +451,19 @@ def main(argv: list[str] | None = None, *, signals: sig_mod.Signals | None = Non
         argv.insert(0, "scan")
     a = parser().parse_args(argv)
     out = out or sys.stdout
-    sig = _signals(a, signals)
-    return {"scan": cmd_scan, "remove": cmd_remove, "report": cmd_report}[a.cmd](a, sig, out)
+    _clock(a)
+    lock = None
+    if a.cmd == "report" or getattr(a, "apply", False):
+        # Taken before anything is read, so a run never queues behind a hung
+        # one; the kernel releases it when this process exits in any way.
+        try:
+            lock = runlock.acquire(a.lock_file)
+        except runlock.Busy as exc:
+            out.write(f"{rep.now_iso()} BUSY, nothing done: {rep.escape(exc)}\n")
+            return EXIT_BUSY
+    try:
+        sig = _signals(a, signals)
+        return {"scan": cmd_scan, "remove": cmd_remove, "report": cmd_report}[a.cmd](a, sig, out)
+    finally:
+        if lock is not None:
+            lock.release()

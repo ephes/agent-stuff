@@ -131,6 +131,8 @@ class GitFixture(unittest.TestCase):
         out = io.StringIO()
         base = ["--root", self.ws, "--main-root", self.projects,
                 "--keep-file", os.path.join(self.tmp, "no-keep-file"), "--no-sizes"]
+        if "--lock-file" not in argv:
+            base += ["--lock-file", os.path.join(self.tmp, "workspace-gc.lock")]
         if "--regenerable-file" not in argv:
             base += ["--regenerable-file", os.path.join(self.tmp, "no-regenerable-file")]
         if "--min-idle-hours" not in argv:

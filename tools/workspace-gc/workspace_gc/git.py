@@ -14,6 +14,8 @@ import threading
 import time
 from urllib.parse import urlsplit, unquote
 
+from . import budget
+
 LS_REMOTE_TIMEOUT = 45
 GIT_TIMEOUT = 120
 
@@ -46,7 +48,12 @@ def base_env() -> dict[str, str]:
                         {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"}):
                     env.pop(key)
             if "GIT_SSH_COMMAND" not in env and not _configured_ssh_command(env):
-                env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=15"
+                # A stalled connection is dropped after ~45s without traffic.
+                env["GIT_SSH_COMMAND"] = ("ssh -o BatchMode=yes -o ConnectTimeout=15 "
+                                          "-o ServerAliveInterval=15 -o ServerAliveCountMax=3")
+            # HTTP(S): abort a transfer slower than 1 KB/s for 30s.
+            env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+            env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "30")
             _base_env = env
         return dict(_base_env)
 
@@ -88,6 +95,8 @@ def _stop_group(child):
 def run(args: list[str], cwd: str | None = None, *, input: str | None = None,
         alternates: list[str] | None = None, check: bool = True,
         timeout: int = GIT_TIMEOUT) -> subprocess.CompletedProcess:
+    # Never outlive the current step or run deadline (see budget.py).
+    timeout = budget.cap(timeout)
     env = base_env()
     if alternates:
         env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = os.pathsep.join(alternates)

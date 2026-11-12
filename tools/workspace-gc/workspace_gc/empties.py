@@ -27,6 +27,7 @@ import os
 import time
 from dataclasses import asdict, dataclass
 
+from . import budget
 from . import signals as sig_mod
 from .inventory import _is_under, keep_match
 from .signals import Signals
@@ -194,6 +195,7 @@ def scan(roots: list[str], keep_patterns: list[str], sig: Signals) -> list[Empty
             names = []
         try:
             for name in names:
+                budget.check()
                 seen = inspect(root_fd, root, name, keep_patterns, sig)
                 if seen is not None:
                     found.append(EmptyDir(path=os.path.join(root, name),
@@ -231,10 +233,15 @@ def _remove_one(e: EmptyDir, keep_patterns: list[str], sig: Signals) -> str:
     return ""
 
 
-def remove(entries: list[EmptyDir], keep_patterns: list[str], sig: Signals) -> None:
+def remove(entries: list[EmptyDir], keep_patterns: list[str], sig: Signals,
+           expired=None) -> None:
     """Remove the removable entries, each re-checked right before its rmdir
-    calls. Updates the entries in place."""
+    calls. Updates the entries in place. Once `expired()` is true, the
+    entries not yet started stay (reason budget.TIME_LIMIT)."""
     for e in entries:
+        if e.removable and expired is not None and expired():
+            e.reason, e.removable = budget.TIME_LIMIT, False
+            continue
         if e.removable:
             e.reason = _remove_one(e, keep_patterns, sig)
             e.removed = not e.reason
