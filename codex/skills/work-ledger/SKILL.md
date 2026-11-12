@@ -92,13 +92,28 @@ max 40) or `--agent <name>` on any command, which overrides it.
 
 ## Items
 
-Slug: lowercase words with hyphens. Fields: `title`, `project`, `stage`,
-`owner`, `next_action`, `checked_at` (required on every update), optional
+Slug: lowercase words with hyphens. Fields: `title`, `summary`, `decision`,
+`project`, `stage`, `owner`, `next_action`, `checked_at` (required on every update), optional
 `repo_url` (network URL, never a local path), `branch`, `commit`, `worktree`,
 `blocked_reason` (required for `blocked`), `notes`, `evidence` (http(s) links;
 `--evidence` replaces the list). Fields not given stay unchanged. The `notes`
 field is the item's standing summary and `--notes` overwrites it; progress goes
 in `work note`.
+
+**Always set `summary` when creating an item** (`--summary`, at most 600
+characters), and keep it true when the item changes materially: 1–3 plain
+German sentences for the owner saying what the problem or change is, what will
+happen (or happened), and the benefit. No file paths, slice ids, line numbers
+or internal jargon. The owner decides from the tile; a title like "Codex:
+archive slices from scout round 75" tells them nothing. Example:
+`--summary "Im Archiv kann ein veralteter Admin-Stand neuere Transkripte
+überschreiben. Es kommt eine Prüfung dazu, die das verhindert. Nutzen: keine
+stillen Datenverluste."` Set `--decision "<one plain German question>"` (at
+most 300 characters) only while the owner really has something to decide about
+the item, e.g. "Soll m4a in Delve unterstützt werden, oder reicht mp3?"; clear
+it with `--decision ""` once answered. Both show on the owner's tiles; the
+decision is highlighted. A decision does not replace `work ask` for C-class
+questions: ask, and mirror the question in `--decision`.
 
 `owner` is who acts next: `claude`, `codex`, `herdr:<workspace label>`,
 `jochen`.
@@ -147,8 +162,8 @@ execution progress; horizon describes the owner's plan.
   already owns it, then claim with `--stage implementing --owner <worker>`
   and `--expect-updated-at` from `work show <slug> --json`.
 - Agents create new items only at the **end of Next or Later**:
-  `work upsert <slug> --title "..." --project P --stage idea --horizon next
-  --topics security,infra --checked-at now`. Omit rank and neighbours; the
+  `work upsert <slug> --title "..." --summary "..." --project P --stage idea
+  --horizon next --topics security,infra --checked-at now`. Omit rank and neighbours; the
   server appends. `--topics` supplies at most five slug-validated free topics
   (no Topic table); `--topics ""` clears the list. Omitted fields stay unchanged.
   Reuse topic slugs already shown by `work plan` where they fit. Topics name
