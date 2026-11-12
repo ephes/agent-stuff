@@ -202,9 +202,9 @@ class TestBoundedApply(GitFixture):
         seen = []
         real = rm_mod._delete_clone
 
-        def record(path, expected):
+        def record(path, expected, *rest):
             seen.append(budget.remaining())
-            return real(path, expected)
+            return real(path, expected, *rest)
         with mock.patch.object(rm_mod, "_delete_clone", side_effect=record):
             rm_mod.remove_checkout(co, [self.ws], [self.projects], [], step_timeout=300)
         self.assertEqual(seen, [None])

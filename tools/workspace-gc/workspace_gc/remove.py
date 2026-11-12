@@ -12,7 +12,9 @@ acting:
   into a fresh private scratch repository, never into the checkout;
 * no index entries flagged assume-unchanged/skip-worktree, no submodules,
   no grafts, no non-regenerable ignored files, and an exhaustive walk of the
-  tree finds every directory readable and writable and no device backups;
+  tree finds every directory readable and writable (read-only directories
+  inside a Go module cache excepted: they get u+w right before the delete)
+  and no device backups;
 * for standalone clones additionally: no stash, no linked worktrees, and no
   repository under the roots or main roots borrows its objects.
 
@@ -32,6 +34,7 @@ import stat
 
 from . import budget
 from . import git
+from . import readonly
 from . import signals as sig_mod
 from .husks import _fd_path
 from .git import GitError
@@ -45,7 +48,8 @@ class Refused(Exception):
 
 
 def _recheck_local(co: Checkout, roots: list[str], main_roots: list[str],
-             keep_patterns: list[str], regenerable: list[str]) -> str:
+             keep_patterns: list[str], regenerable: list[str],
+             unlockable: list[str] | None = None) -> str:
     path = co.path
     if keep_match(path, keep_patterns) or (co.owner_repo and keep_match(co.owner_repo,
                                                                          keep_patterns)):
@@ -71,7 +75,7 @@ def _recheck_local(co: Checkout, roots: list[str], main_roots: list[str],
     hidden = hidden_state(path, gdir, common)
     if hidden:
         raise Refused(hidden[0])
-    blockers = deletion_scan(path)
+    blockers = deletion_scan(path, unlockable)
     if blockers:
         raise Refused("; ".join(blockers[:3]))
     head = git.out(["rev-parse", "--verify", "HEAD"], path).strip()
@@ -151,7 +155,7 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
         raise Refused(f"{count} commit(s) not on a network remote" + (f" ({why})" if why else ""))
 
 
-def _delete_clone(path, expected):
+def _delete_clone(path, expected, unlock=False):
     if not shutil.rmtree.avoids_symlink_attacks:
         raise Refused("descriptor-safe deletion unavailable")
     parent, name = os.path.split(path)
@@ -165,6 +169,8 @@ def _delete_clone(path, expected):
             current = os.fstat(child_fd)
             if (current.st_dev, current.st_ino) != expected:
                 raise Refused("clone replaced since inspection")
+            if unlock:
+                readonly.unlock(child_fd)
             for entry in os.listdir(child_fd):
                 if stat.S_ISDIR(os.stat(entry, dir_fd=child_fd, follow_symlinks=False).st_mode):
                     shutil.rmtree(entry, dir_fd=child_fd)
@@ -178,6 +184,21 @@ def _delete_clone(path, expected):
             os.close(child_fd)
     finally:
         os.close(parent_fd)
+
+
+def _unlock_worktree(path, expected):
+    """chmod u+w the read-only Go module cache directories of the worktree
+    that was inspected (same device and inode), so `git worktree remove`
+    does not stop half-way. If git then refuses the removal, those
+    directories stay writable (harmless for Go, which only reads them)."""
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        current = os.fstat(fd)
+        if (current.st_dev, current.st_ino) != expected:
+            raise Refused("worktree replaced since inspection")
+        readonly.unlock(fd)
+    finally:
+        os.close(fd)
 
 
 def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
@@ -211,14 +232,18 @@ def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
                     raise Refused(reason)
                 if co.kind == "clone" and _refs(co.path) != refs:
                     raise Refused("refs moved during remote or ownership verification")
-                _recheck_local(co, roots, main_roots, keep_patterns, regenerable or [])
+                unlockable: list[str] = []
+                _recheck_local(co, roots, main_roots, keep_patterns, regenerable or [],
+                               unlockable)
         except budget.StepTimeout as exc:
             raise Refused(f"re-checks ran out of time ({exc})") from exc
         with budget.unbounded():
             if co.kind == "worktree":
+                if unlockable:
+                    _unlock_worktree(co.path, expected)
                 git.out(["worktree", "remove", co.path], co.owner_repo)
                 return f"removed worktree {co.path} (git worktree remove)"
-            _delete_clone(co.path, expected)
+            _delete_clone(co.path, expected, bool(unlockable))
             return f"removed clone {co.path}"
     except GitError as exc:
         raise Refused(str(exc)) from exc
