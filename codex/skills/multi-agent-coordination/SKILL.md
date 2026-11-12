@@ -115,8 +115,10 @@ removed live on 2026-11-05 without a real decision (incident report
 root on the owner's hosts themselves. Classify every action before it runs:
 
 - **A, do it, then inform**: code, tests, merges after a clean review, and
-  routine deploys on the owner's hosts with a fresh backup and a known
-  rollback path. Workers deploy themselves; no owner ask.
+  routine deploys on the owner's hosts with a known rollback path. No
+  backup before a deploy: the nightly backups are the safety net (owner
+  2026-11-12). Workers deploy themselves; no owner ask. A merged fix is
+  not done until it is deployed: commit, push and deploy belong together.
 - **B, independent check, then do it**: new deploy paths, migrations, changes
   to shared services, and retiring clearly unused non-vital things under an
   existing owner rule. Before acting, a reviewer of a different model family
@@ -326,7 +328,8 @@ Every brief states the item slug, goal, acceptance criteria, and:
   the push needs a remote the owner named for the campaign; a brief alone does
   not allow it. Deploys follow the
   **Decision classes**: the brief names the class and, for a deploy, the
-  backup and rollback path; A-class deploys the worker runs itself.
+  rollback path (no pre-deploy backup); A-class deploys the worker runs
+  itself, in the same run as the merge.
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean (unresolved
   Critical/Warning; a Suggestion-only round is not, see that skill), park the
