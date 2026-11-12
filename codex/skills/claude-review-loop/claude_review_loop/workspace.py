@@ -97,6 +97,9 @@ class ReviewCopy:
     excluded: list = field(default_factory=list)
     notes: list = field(default_factory=list)
     removed: bool = False
+    # The reviewer's own temporary root outside `root` (CLAUDE_CODE_TMPDIR);
+    # the harness creates and removes it around the review.
+    reviewer_tmp: str | None = None
 
     def summary(self):
         return {"head": self.head, "tree": self.tree,

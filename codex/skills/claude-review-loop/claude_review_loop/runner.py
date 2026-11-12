@@ -245,6 +245,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             tool_uses=monitor.tool_uses,
             forbidden_tool_uses=monitor.forbidden_tool_uses,
             denied_tool_uses=monitor.denied_tool_uses,
+            bash_failures=monitor.bash_failures,
         )
         result.write(paths["result"])
     except Exception:
@@ -252,7 +253,8 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
         # and best-effort write (a failed write must still not raise).
         portable_tools = [json.loads(json.dumps(uses), parse_constant=lambda _: None)
                           for uses in (monitor.tool_uses, monitor.forbidden_tool_uses,
-                                       monitor.denied_tool_uses)]
+                                       monitor.denied_tool_uses,
+                                       monitor.bash_failures)]
         result = ReviewResult(
             state=CRASHED, items=[], model=model, cost=None,
             started_at=started, ended_at=_now(),
@@ -261,6 +263,7 @@ def run_review(*, cmd, run_dir, model, stall_timeout, retry_grace,
             tool_uses=portable_tools[0],
             forbidden_tool_uses=portable_tools[1],
             denied_tool_uses=portable_tools[2],
+            bash_failures=portable_tools[3],
         )
         try:
             result.write(paths["result"])

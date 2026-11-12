@@ -58,10 +58,11 @@ reviewed tree writes unreferenced objects into the source repository, as
 `--record-baseline` does; `git gc` collects them. The same shared module builds
 the copy for `codex-review-loop` and `pi-review-loop`.
 
-The harness deletes `<run-dir>/workspace` after the run - on success, failure,
+The harness deletes `<run-dir>/workspace` and the reviewer's temporary root
+`/private/tmp/crl-XXXXXXXX` after the run - on success, failure,
 timeout, Ctrl-C and SIGTERM (SIGTERM and SIGHUP take the Ctrl-C path, which
-kills and reaps Claude first). SIGKILL cannot be caught; a copy it leaves
-behind is inside the run directory.
+kills and reaps Claude first). SIGKILL cannot be caught; it leaves the copy
+behind inside the run directory and the temporary root under `/private/tmp`.
 
 Before deleting it, the harness gives the owner access to every directory
 inside it again, so a reviewer that left a directory with mode 000 behind does
@@ -75,16 +76,28 @@ ledger round are recorded either way.
 What confines the reviewer, verified by the canary under **Verification**:
 
 - **Bash** runs in Claude Code's OS sandbox (`failIfUnavailable`, no unsandboxed
-  retry, `autoAllowBashIfSandboxed`). Reads are denied for the user's home,
-  `/private/var/folders` (the per-user `TMPDIR`), every entry of `/private/tmp`
-  present at launch, and every entry of Claude's own temporary directory
-  `/private/tmp/claude-<uid>` present at launch - the other Claude sessions'
-  scratch space - and re-opened for `<run-dir>/workspace` and the source object
-  store. Writes are allowed in `<run-dir>/workspace` and, because Claude's Bash
-  tool keeps its working-directory state there and cannot run without it, in
-  Claude's own temporary directory, except the entries present at launch that
-  do not hold the workspace. Network is open (`allowedDomains: ["*"]`), so a
-  test run can fetch dependencies. System and toolchain paths such as `/usr`
+  retry, `autoAllowBashIfSandboxed`). The reviewer's Claude gets its own
+  temporary root, a fresh `/private/tmp/crl-XXXXXXXX` passed as
+  `CLAUDE_CODE_TMPDIR`: Claude's Bash tool keeps its working-directory state
+  there and the reviewer's commands get it as `TMPDIR`. Reads are denied for
+  the user's home, `/private/var/folders` (the per-user `TMPDIR`) and the
+  whole of `/private/tmp` - including Claude's shared temporary directory
+  `/private/tmp/claude-<uid>`, the other Claude sessions' scratch space - and
+  re-opened for `<run-dir>/workspace`, the source object store and the
+  reviewer's own temporary root. Writes are allowed in `<run-dir>/workspace`
+  and that root only; `/private/tmp/claude-<uid>` is also denied explicitly
+  unless it holds the workspace. Every rule names one directory: macOS
+  compiles all path filters of one operation into a single data object of at
+  most 65535 bytes, and a list that grew with the entries of the temporary
+  directories once stopped every Bash command (`sandbox-exec: data object
+  length 80687 exceeds maximum (65535)`). The harness removes the reviewer's
+  temporary root after the run as it removes the copy. It refuses to start
+  when `<root>/claude-<uid>` would be longer than 44 bytes, because Claude
+  then falls back to the shared directory. With the `CLAUDE_REVIEW_FAKE_CMD`
+  test seam no Claude runs, so the root goes under the caller's `TMPDIR`
+  without that limit; the unit suite also runs inside a reviewer's sandbox.
+  Network is open (`allowedDomains: ["*"]`), so a test run can fetch
+  dependencies. System and toolchain paths such as `/usr`
   and `/opt/homebrew` stay readable, so git, `python3` and `uv` run. Claude's
   sandbox also refuses some writes inside `.git`, even in the copy (observed:
   `git init` copying hook templates into `.git/hooks`).
@@ -98,10 +111,8 @@ What confines the reviewer, verified by the canary under **Verification**:
   under `<run-dir>/workspace`, so a call outside is refused. The harness also
   checks every file-tool target itself (see below).
 
-What is **not** closed: a directory created under `/private/tmp` or Claude's
-temporary directory after launch is not in the deny lists; the reviewer can
-create new files in Claude's temporary directory; and the network is open, so
-anything the reviewer reads could leave the machine. The copy is the user's
+What is **not** closed: the network is open, so anything the reviewer reads
+could leave the machine. The copy is the user's
 code and was deliberately made readable; the bundle stays redacted.
 
 Verdicts use Claude Code's `--json-schema` structured output. Claude Code emits
@@ -118,7 +129,15 @@ non-permission error, a reworded denial) or a verdict that arrives before the an
 result `INVALID`. The review instruction names the working directory and asks
 for relative paths, so such calls should be rare. `Bash` targets are not
 checked by the monitor - a command line has no reliable target - and rely on
-the OS sandbox. Git diff collection always
+the OS sandbox. A Bash call Claude answers with an error is recorded in
+`bash_failures` with its command, a `kind` - `sandbox` when the OS sandbox
+could not start it (a `sandbox-exec:` or `bwrap:` error), `permission` when
+Claude refused it, `failed` for a non-zero exit - and the first 300
+characters of the error. A sandbox refusal sets `bash_unavailable` and prints
+a `BASH UNAVAILABLE:` line: the verdict then rests on reading the source, so
+do not report reviewer tests or commands as run, and check that the reviewer
+read the source the change touches (`tool_uses`). Other failures print a
+`bash:` line. Neither changes the state. Git diff collection always
 uses `--no-ext-diff --no-textconv`. Secret-looking files, private-key blocks, and
 high-confidence token patterns are redacted before model egress; redactions are
 recorded and make a clean verdict scoped. The rules live in
@@ -470,10 +489,11 @@ bundle headings and context-redaction manifest entries.
 `.claude-review-loop.claim/` (atomic run-directory ownership marker),
 `result.json` (`state`, `items`, `model`, `effort`, `cost`, `started_at`,
 `ended_at`, `duration_s`, `structured_output`, `tool_uses`,
-`forbidden_tool_uses`, `denied_tool_uses`, `skipped_files`, `truncations`, `redactions`,
+`forbidden_tool_uses`, `denied_tool_uses`, `bash_failures`, `skipped_files`, `truncations`, `redactions`,
 `baseline_ref`, `baseline_commit`, `slice_id`, `round`, `convergence`, `error`,
 `review_copy` - the copy's `head`, `tree`, `excluded` paths, `notes`, and
-whether it was `removed` - `scoped_clean`, and `scoped_pass`), `events.jsonl` (strict JSONL
+whether it and the reviewer's temporary root were `removed` - `scoped_clean`,
+`scoped_pass`, and `bash_unavailable`), `events.jsonl` (strict JSONL
 event stream), `stdout.raw.log`, `stderr.log`, `review-prompt.txt`, and
 `review-bundle.md` (the redacted starting point Claude was given). The copy
 itself is gone after the run.
@@ -494,12 +514,19 @@ CLAUDE_REVIEW_RUN_CLAUDE_CANARY=1 CLAUDE_REVIEW_CANARY_MODEL=haiku \
 The canary builds a production copy and drives the production command and
 environment with a prompt that asks the model to try every path. Inside the
 copy it requires a read, `git log`, a Bash write, a `Write`-tool write, a
-network fetch and a `python3` run to work. Outside it requires every attempt -
-a file in the home directory, the source worktree's ignored file and `.env`, a
-file directly under `/private/tmp`, a Bash write and a `Write`-tool write into
-the source worktree, a `Read` of the source worktree - to be recorded and to
-return nothing: no planted marker may appear in the output, and neither write
-may land. Verified with Claude Code 2.1.284 on macOS.
+network fetch, a `python3` run and a write and read through `$TMPDIR` to
+work. Outside it requires every attempt - a file in the home directory, the
+source worktree's ignored file and `.env`, a file directly under
+`/private/tmp`, a file in `/private/tmp/claude-<uid>`, a Bash write into the
+source worktree and into `/private/tmp/claude-<uid>`, a `Write`-tool write
+into the source worktree, a `Read` of the source worktree - to be recorded and
+to return nothing: no planted marker may appear in the output, and no write
+may land. Verified with Claude Code 2.1.284 on macOS. With Claude Code
+2.1.322 (2026-11-12) every Bash step passed with Sonnet and Opus 5.5, but
+both models declined the two out-of-scope file-tool steps (`Read` and `Write`
+outside the working directory) because the review instruction confines those
+tools, so the canary stopped as inconclusive there; the monitor's handling of
+such calls is covered by the unit suite.
 
 Result publication serializes portable JSON (no NaN or Infinity) before creating
 a sibling temporary file, then replaces result.json atomically after close.

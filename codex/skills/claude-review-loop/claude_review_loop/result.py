@@ -24,6 +24,7 @@ class ReviewResult:
     tool_uses: list = field(default_factory=list)
     forbidden_tool_uses: list = field(default_factory=list)
     denied_tool_uses: list = field(default_factory=list)
+    bash_failures: list = field(default_factory=list)
     baseline_ref: str | None = None
     baseline_commit: str | None = None
     slice_id: str | None = None
@@ -50,10 +51,18 @@ class ReviewResult:
             self.skipped_files or self.truncations or self.redactions
         )
 
+    @property
+    def bash_unavailable(self):
+        """The OS sandbox refused at least one of the reviewer's commands. The
+        verdict then rests on reading the source; it is not evidence that the
+        reviewer ran anything, tests included."""
+        return any(f.get("kind") == "sandbox" for f in self.bash_failures)
+
     def to_dict(self):
         d = asdict(self)
         d["scoped_clean"] = self.scoped_clean
         d["scoped_pass"] = self.scoped_pass
+        d["bash_unavailable"] = self.bash_unavailable
         d["duration_s"] = round(self.ended_at - self.started_at, 3)
         return d
 

@@ -15,12 +15,14 @@
   forbidden_provider_error -> emit forbidden Agent and a provider error together
   out_of_scope_read -> read /etc/hosts (not denied) before returning CLEAN
   out_of_scope_denied -> request /etc/hosts, get a permission denial, return CLEAN
+  bash_sandbox_error -> one Bash call the OS sandbox cannot start, one that
+                 exits non-zero, then a CLEAN result
   missing_structured -> emit a success result without structured output
   stdin_empty -> return CLEAN only when stdin is empty
   stdin_prompt -> return CLEAN only when stdin contains "review prompt"
 
 With FAKE_CLAUDE_OUT set, it first records what it finds in its working
-directory (the repository copy) and two environment variables there, then
+directory (the repository copy) and three environment variables there, then
 writes into that copy.
 """
 import json
@@ -83,7 +85,8 @@ def main():
         with open(out, "w") as fh:
             json.dump({"cwd": cwd, "files": files,
                        "git_config_global": os.environ.get("GIT_CONFIG_GLOBAL"),
-                       "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR")},
+                       "claude_config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+                       "claude_code_tmpdir": os.environ.get("CLAUDE_CODE_TMPDIR")},
                       fh)
         with open(os.path.join(cwd, "a.py"), "w") as fh:
             fh.write("REVIEWER_WROTE = 1\n")
@@ -179,6 +182,21 @@ def main():
         emit({"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": "toolu_oos", **answer}
         ]}})
+        emit(result("REVIEW: CLEAN"))
+    elif mode == "bash_sandbox_error":
+        for tool_id, command, text in (
+            ("toolu_b1", "pytest -q", "Exit code 65\nsandbox-exec: data "
+             "object length 80687 exceeds maximum (65535)"),
+            ("toolu_b2", "false", "Exit code 1"),
+        ):
+            emit({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tool_id, "name": "Bash",
+                 "input": {"command": command}}
+            ]}})
+            emit({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_id,
+                 "is_error": True, "content": text}
+            ]}})
         emit(result("REVIEW: CLEAN"))
     elif mode == "missing_structured":
         emit({

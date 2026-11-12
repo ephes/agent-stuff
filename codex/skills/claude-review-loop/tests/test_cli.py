@@ -56,6 +56,17 @@ class TestCli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = self.tmp.name
+        # In-process runs without the fake-reviewer seam would put the
+        # reviewer's temporary root in the system temporary directory, which
+        # a sandboxed caller cannot write; keep it in a directory of the test.
+        self.tmp_base_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp_base_dir.cleanup)
+        self.tmp_base = os.path.realpath(self.tmp_base_dir.name)
+        from claude_review_loop import cli
+        patcher = mock.patch.object(cli, "_reviewer_tmp_base",
+                                    return_value=(self.tmp_base, None))
+        patcher.start()
+        self.addCleanup(patcher.stop)
         for args in (["init", "-q"], ["config", "user.email", "t@t"],
                      ["config", "user.name", "t"]):
             subprocess.run(["git", *args], cwd=self.repo, check=True,
@@ -780,6 +791,7 @@ class TestCli(unittest.TestCase):
             state=CLEAN, items=[], model="fake/model", cost=0.0,
             started_at=1.0, ended_at=2.0,
         )
+        tmp_base = self.tmp_base
         with mock.patch.dict(os.environ, {
                     "CLAUDE_REVIEW_FAKE_CMD": "", "OPUS_REVIEW_FAKE_CMD": "",
                 }), \
@@ -799,23 +811,29 @@ class TestCli(unittest.TestCase):
         settings = json.loads(
             kwargs["cmd"][kwargs["cmd"].index("--settings") + 1]
         )
+        reviewer_tmp = kwargs["env"]["CLAUDE_CODE_TMPDIR"]
+        self.assertTrue(reviewer_tmp.startswith(
+            os.path.join(tmp_base, cli.REVIEWER_TMP_PREFIX)))
         self.assertEqual(
             settings["sandbox"]["filesystem"]["allowRead"],
             [workspace, os.path.join(os.path.realpath(self.repo), ".git",
-                                     "objects")]
+                                     "objects"), reviewer_tmp]
         )
         self.assertEqual(settings["sandbox"]["filesystem"]["allowWrite"],
-                         [workspace])
-        # The copy is gone once the review is over.
+                         [workspace, reviewer_tmp])
+        # The copy and the reviewer's temporary root are gone once the review
+        # is over.
         self.assertFalse(os.path.lexists(workspace))
+        self.assertFalse(os.path.lexists(reviewer_tmp))
 
 
-def fake_copy(root="/ws"):
+def fake_copy(root="/ws", reviewer_tmp="/private/tmp/crl-test"):
     from types import SimpleNamespace
     return SimpleNamespace(root=root, path=os.path.join(root, "repo"),
                            home=os.path.join(root, "home"),
                            tmp=os.path.join(root, "tmp"),
-                           source_objects="/src/.git/objects")
+                           source_objects="/src/.git/objects",
+                           reviewer_tmp=reviewer_tmp)
 
 
 class TestClaudeCmd(unittest.TestCase):
@@ -896,56 +914,130 @@ class TestClaudeCmd(unittest.TestCase):
 
     def test_sandbox_confines_the_reviewer_to_its_workspace(self):
         from claude_review_loop import cli
+        reviewer_tmp = os.path.realpath("/private/tmp/crl-test")
         with tempfile.TemporaryDirectory() as root:
             real_root = os.path.join(root, "real")
             link_root = os.path.join(root, "link")
             os.mkdir(real_root)
             os.symlink(real_root, link_root)
-            settings = cli._sandbox_settings(fake_copy(link_root))
+            # Wherever TMPDIR is, the shared directory must not hold the copy.
+            with mock.patch.object(cli, "_claude_temp_dir",
+                                   return_value="/nonexistent/claude-1"):
+                settings = cli._sandbox_settings(fake_copy(link_root))
         workspace = os.path.realpath(real_root)
         filesystem = settings["sandbox"]["filesystem"]
-        self.assertEqual(filesystem["allowWrite"], [workspace])
+        self.assertEqual(filesystem["allowWrite"], [workspace, reviewer_tmp])
         self.assertEqual(filesystem["allowRead"],
-                         [workspace, os.path.realpath("/src/.git/objects")])
-        self.assertIn(os.path.realpath(os.path.expanduser("~")),
-                      filesystem["denyRead"])
-        self.assertIn("/private/var/folders", filesystem["denyRead"])
-        self.assertNotIn(cli._claude_temp_dir(), filesystem["denyRead"])
-        self.assertNotIn("/", filesystem["denyWrite"])
+                         [workspace, os.path.realpath("/src/.git/objects"),
+                          reviewer_tmp])
+        self.assertEqual(filesystem["denyRead"], [
+            os.path.realpath(os.path.expanduser("~")), "/private/var/folders",
+            os.path.realpath(cli.SYSTEM_TMP)])
+        # Other sessions' scratch space: unreadable through the system
+        # temporary directory, and not writable either.
+        self.assertEqual(filesystem["denyWrite"], ["/nonexistent/claude-1"])
         self.assertEqual(settings["sandbox"]["network"], {"allowedDomains": ["*"]})
         self.assertTrue(settings["sandbox"]["autoAllowBashIfSandboxed"])
         self.assertFalse(settings["sandbox"]["allowUnsandboxedCommands"])
         self.assertEqual(settings["permissions"]["allow"], [
             f"Read(/{workspace}/**)", f"Edit(/{workspace}/**)"])
 
-    def test_other_claude_sessions_temp_entries_are_denied(self):
+    def test_sandbox_rules_do_not_grow_with_temporary_entries(self):
+        # macOS compiles the path filters of one operation into a data object
+        # of at most 65535 bytes; listing every temporary entry once broke
+        # every Bash command (`data object length 80687 exceeds maximum`).
         from claude_review_loop import cli
         with tempfile.TemporaryDirectory() as fake_tmp:
             fake_tmp = os.path.realpath(fake_tmp)
             claude_tmp = os.path.join(fake_tmp, "claude-1")
-            other = os.path.join(claude_tmp, "other-session")
-            mine = os.path.join(claude_tmp, "mine")
-            os.makedirs(other)
-            os.makedirs(os.path.join(mine, "run", "workspace"))
-            stray = os.path.join(fake_tmp, "stray.txt")
-            open(stray, "w").close()
+            for n in range(300):
+                os.makedirs(os.path.join(claude_tmp, f"session-{n}"))
+                open(os.path.join(fake_tmp, f"stray-{n}.txt"), "w").close()
             with mock.patch.object(cli, "SYSTEM_TMP", fake_tmp), \
                     mock.patch.object(cli, "_claude_temp_dir",
                                       return_value=claude_tmp):
-                settings = cli._sandbox_settings(
-                    fake_copy(os.path.join(mine, "run", "workspace")))
+                settings = cli._sandbox_settings(fake_copy("/ws"))
         filesystem = settings["sandbox"]["filesystem"]
-        self.assertIn(other, filesystem["denyRead"])
-        self.assertIn(stray, filesystem["denyRead"])
-        self.assertIn(other, filesystem["denyWrite"])
-        # The caller's own directory holds the workspace, so it must stay
-        # writable; its reads are re-opened only for the workspace itself.
-        self.assertNotIn(mine, filesystem["denyWrite"])
-        self.assertNotIn(claude_tmp, filesystem["denyRead"])
+        self.assertEqual(len(filesystem["denyRead"]), 3)
+        self.assertIn(fake_tmp, filesystem["denyRead"])
+        self.assertEqual(filesystem["denyWrite"], [claude_tmp])
+
+    def test_shared_claude_temp_dir_holding_the_workspace_stays_writable(self):
+        from claude_review_loop import cli
+        with tempfile.TemporaryDirectory() as fake_tmp:
+            fake_tmp = os.path.realpath(fake_tmp)
+            claude_tmp = os.path.join(fake_tmp, "claude-1")
+            workspace = os.path.join(claude_tmp, "mine", "run", "workspace")
+            os.makedirs(workspace)
+            with mock.patch.object(cli, "SYSTEM_TMP", fake_tmp), \
+                    mock.patch.object(cli, "_claude_temp_dir",
+                                      return_value=claude_tmp):
+                settings = cli._sandbox_settings(fake_copy(workspace))
+        filesystem = settings["sandbox"]["filesystem"]
+        # A denied write cannot be re-opened by a narrower allowance.
+        self.assertEqual(filesystem["denyWrite"], [])
+        self.assertIn(fake_tmp, filesystem["denyRead"])
+        self.assertIn(workspace, filesystem["allowRead"])
+
+    def test_sandbox_settings_require_a_reviewer_tmp(self):
+        from claude_review_loop import cli
+        with self.assertRaises(ValueError):
+            cli._sandbox_settings(fake_copy("/ws", reviewer_tmp=None))
+
+    def test_make_reviewer_tmp_is_short_private_and_fresh(self):
+        from claude_review_loop import cli, workspace
+        with mock.patch.dict(os.environ, {
+                "CLAUDE_REVIEW_FAKE_CMD": "", "OPUS_REVIEW_FAKE_CMD": ""}):
+            try:
+                first = cli.make_reviewer_tmp()
+            except PermissionError:
+                # A sandboxed caller, such as a reviewer running this suite.
+                self.skipTest(f"{cli.SYSTEM_TMP} is not writable here")
+            second = cli.make_reviewer_tmp()
+        try:
+            self.assertNotEqual(first, second)
+            self.assertEqual(os.path.dirname(first),
+                             os.path.realpath(cli.SYSTEM_TMP))
+            self.assertEqual(os.stat(first).st_mode & 0o777, 0o700)
+            self.assertLessEqual(
+                len(os.fsencode(os.path.join(first, f"claude-{os.getuid()}"))),
+                cli.CLAUDE_TMP_MAX_BYTES)
+        finally:
+            workspace.remove_tree(first)
+            workspace.remove_tree(second)
+
+    def test_make_reviewer_tmp_refuses_a_long_path(self):
+        from claude_review_loop import cli
+        with tempfile.TemporaryDirectory() as deep:
+            deep = os.path.join(os.path.realpath(deep), "x" * 60)
+            os.mkdir(deep)
+            with mock.patch.object(cli, "SYSTEM_TMP", deep), \
+                    mock.patch.dict(os.environ, {
+                        "CLAUDE_REVIEW_FAKE_CMD": "",
+                        "OPUS_REVIEW_FAKE_CMD": ""}):
+                with self.assertRaises(OSError):
+                    cli.make_reviewer_tmp()
+            self.assertEqual(os.listdir(deep), [])
+
+    def test_a_fake_reviewer_gets_its_root_in_the_callers_tmpdir(self):
+        # No Claude Code runs, so no length limit; a sandboxed caller can
+        # still run the suite.
+        from claude_review_loop import cli, workspace
+        with tempfile.TemporaryDirectory() as deep:
+            deep = os.path.join(os.path.realpath(deep), "x" * 60)
+            os.mkdir(deep)
+            with mock.patch.object(cli.tempfile, "tempdir", deep), \
+                    mock.patch.dict(os.environ,
+                                    {"CLAUDE_REVIEW_FAKE_CMD": "fake"}):
+                path = cli.make_reviewer_tmp()
+            self.assertEqual(os.path.dirname(path), deep)
+            workspace.remove_tree(path)
 
     def test_reviewer_env_moves_git_and_xdg_state_into_the_workspace(self):
         from claude_review_loop import cli
         env = cli._reviewer_env(fake_copy("/ws"))
+        self.assertEqual(env["CLAUDE_CODE_TMPDIR"],
+                         os.path.realpath("/private/tmp/crl-test"))
         self.assertEqual(env["GIT_CONFIG_GLOBAL"],
                          os.path.join(os.path.realpath("/ws/home"), ".gitconfig"))
         for key in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
@@ -1037,10 +1129,11 @@ class TestClaudeCmd(unittest.TestCase):
         copy = None
         try:
             denied = {name: f"{name}-{secrets.token_hex(8)}"
-                      for name in ("home", "ignored", "dotenv", "tmp")}
+                      for name in ("home", "ignored", "dotenv", "tmp",
+                                   "session")}
             allowed = {name: f"{name}-{secrets.token_hex(8)}"
                        for name in ("committed", "history", "written",
-                                    "edited")}
+                                    "edited", "scratch")}
             repo = os.path.join(base, "repo")
             os.makedirs(repo)
             for args in (["init", "-q"], ["config", "user.email", "t@t"],
@@ -1060,15 +1153,25 @@ class TestClaudeCmd(unittest.TestCase):
                 "dotenv": os.path.join(repo, ".env"),
                 "tmp": os.path.join(cli.SYSTEM_TMP,
                                     f"claude-review-canary-{secrets.token_hex(4)}.txt"),
+                # Another Claude session's scratch space.
+                "session": os.path.join(
+                    cli._claude_temp_dir(),
+                    f"claude-review-canary-{secrets.token_hex(4)}.txt"),
             }
+            # Another session's scratch space; it may not exist yet.
+            os.makedirs(cli._claude_temp_dir(), mode=0o700, exist_ok=True)
             for name, path in outside.items():
                 with open(path, "w") as fh:
                     fh.write(denied[name] + "\n")
             source_write = os.path.join(repo, "reviewer-was-here.txt")
+            session_write = os.path.join(
+                cli._claude_temp_dir(),
+                f"claude-review-canary-{secrets.token_hex(4)}-write.txt")
             tool_write = os.path.join(repo, "tool-was-here.txt")
             run_dir = os.path.join(base, "run")
             os.mkdir(run_dir)
             copy = workspace.create_copy(repo, os.path.join(run_dir, "workspace"))
+            copy.reviewer_tmp = cli.make_reviewer_tmp()
             model = os.environ.get("CLAUDE_REVIEW_CANARY_MODEL", "haiku")
             with mock.patch.dict(os.environ, {
                 "CLAUDE_REVIEW_FAKE_CMD": "", "OPUS_REVIEW_FAKE_CMD": "",
@@ -1080,8 +1183,11 @@ class TestClaudeCmd(unittest.TestCase):
                 f"Bash: echo {allowed['written']} > written.txt && cat written.txt",
                 "Bash: curl -sS -o /dev/null -w 'status %{http_code}' https://pypi.org/simple/",
                 "Bash: python3 -c 'print(6 * 7)'",
+                f"Bash: echo {allowed['scratch']} > \"$TMPDIR/scratch.txt\" "
+                "&& cat \"$TMPDIR/scratch.txt\"",
                 *(f"Bash: cat {path}" for path in outside.values()),
                 f"Bash: echo probe > {source_write}",
+                f"Bash: echo probe > {session_write}",
                 f"Write tool: create edited.txt containing {allowed['edited']}",
                 f"Read tool: {outside['ignored']}",
                 f"Write tool: create {tool_write} containing probe",
@@ -1121,7 +1227,7 @@ class TestClaudeCmd(unittest.TestCase):
             calls = json.dumps([b.get("input") for b in tool_uses])
             results = json.dumps(list(blocks("tool_result")))
             # Inside the copy: reads, history, writes, network, a toolchain.
-            for name in ("committed", "history", "written"):
+            for name in ("committed", "history", "written", "scratch"):
                 with self.subTest(allowed=name):
                     self.assertIn(allowed[name], results)
             self.assertIn("status 200", results)
@@ -1132,7 +1238,7 @@ class TestClaudeCmd(unittest.TestCase):
             for name, path in outside.items():
                 with self.subTest(attempted=name):
                     self.assertIn(path, calls, f"canary inconclusive: {name}")
-            for path in (source_write, tool_write):
+            for path in (source_write, session_write, tool_write):
                 self.assertIn(path, calls, "canary inconclusive: no write tried")
                 self.assertFalse(os.path.exists(path), path)
             for name, marker in denied.items():
@@ -1144,7 +1250,20 @@ class TestClaudeCmd(unittest.TestCase):
         finally:
             if copy is not None:
                 copy.remove()
+                if copy.reviewer_tmp:
+                    workspace.remove_tree(copy.reviewer_tmp)
             shutil.rmtree(home_dir, ignore_errors=True)
+            try:
+                session_names = os.listdir(cli._claude_temp_dir())
+            except OSError:
+                session_names = []
+            for path in (os.path.join(cli._claude_temp_dir(), n)
+                         for n in session_names
+                         if n.startswith("claude-review-canary-")):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
             for path in (os.path.join(cli.SYSTEM_TMP, n)
                          for n in os.listdir(cli.SYSTEM_TMP)
                          if n.startswith("claude-review-canary-")):
@@ -1153,6 +1272,49 @@ class TestClaudeCmd(unittest.TestCase):
                 except OSError:
                     pass
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestBashFailureSummary(unittest.TestCase):
+    """A verdict reached without working Bash must say so."""
+
+    def _summary(self, failures, calls):
+        import contextlib
+        import io
+        from claude_review_loop import cli
+        from claude_review_loop.result import ReviewResult
+        result = ReviewResult(
+            state="CLEAN", items=[], model="m", cost=None, started_at=0.0,
+            ended_at=1.0, bash_failures=failures,
+            tool_uses=[{"tool": "Bash", "input": {}}] * calls
+            + [{"tool": "Read", "input": {}}])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli._print_bash_failures(result)
+        return result, out.getvalue()
+
+    def test_no_failures_prints_nothing(self):
+        result, text = self._summary([], 2)
+        self.assertEqual(text, "")
+        self.assertFalse(result.to_dict()["bash_unavailable"])
+
+    def test_every_command_refused_by_the_sandbox_is_source_only(self):
+        error = "sandbox-exec: data object length 80687 exceeds maximum (65535)"
+        result, text = self._summary(
+            [{"command": "pytest", "kind": "sandbox", "error": error}] * 2, 2)
+        self.assertTrue(result.to_dict()["bash_unavailable"])
+        self.assertIn("BASH UNAVAILABLE", text)
+        self.assertIn("refused 2 of 2", text)
+        self.assertIn(error, text)
+        self.assertIn("reading the source only", text)
+
+    def test_partial_sandbox_refusal_and_plain_failures(self):
+        result, text = self._summary([
+            {"command": "pytest", "kind": "sandbox", "error": "bwrap: x"},
+            {"command": "false", "kind": "failed", "error": "Exit code 1"},
+        ], 3)
+        self.assertIn("refused 1 of 3", text)
+        self.assertIn("only if its output came back", text)
+        self.assertIn("bash: 1 of 3 reviewer command(s) failed", text)
 
 
 class TestBaselineCli(unittest.TestCase):
@@ -1334,6 +1496,30 @@ class TestRepositoryCopyCli(unittest.TestCase):
         env = self._env("clean")
         env.pop("CLAUDE_CONFIG_DIR", None)
         self.assertIsNone(self._seen_config_dir(env))
+
+    def test_sandbox_refused_bash_is_reported_not_hidden(self):
+        proc, result, _ = self._run("bash_sandbox_error")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(result["state"], "CLEAN")
+        self.assertTrue(result["bash_unavailable"])
+        self.assertEqual([f["kind"] for f in result["bash_failures"]],
+                         ["sandbox", "failed"])
+        self.assertEqual(result["bash_failures"][0]["command"], "pytest -q")
+        self.assertIn("BASH UNAVAILABLE: the OS sandbox refused 1 of 2",
+                      proc.stdout)
+        self.assertIn("data object length 80687", proc.stdout)
+        self.assertIn("bash: 1 of 2 reviewer command(s) failed", proc.stdout)
+
+    def test_the_reviewer_tmp_is_its_own_and_removed(self):
+        proc, _, _ = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(self.seen) as fh:
+            seen = json.load(fh)
+        reviewer_tmp = seen["claude_code_tmpdir"]
+        self.assertEqual(os.path.dirname(reviewer_tmp),
+                         os.path.realpath(tempfile.gettempdir()))
+        self.assertTrue(os.path.basename(reviewer_tmp).startswith("crl-"))
+        self.assertFalse(os.path.lexists(reviewer_tmp))
 
     def test_claude_runs_in_a_copy_of_the_reviewed_state(self):
         before = self._git("status", "--porcelain", "--untracked-files=all")
