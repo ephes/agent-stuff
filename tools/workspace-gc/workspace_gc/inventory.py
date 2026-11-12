@@ -13,6 +13,7 @@ Classes:
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import shutil
@@ -24,6 +25,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 
+from . import budget
 from . import git
 from .git import GitError
 from .signals import Signals
@@ -66,9 +68,14 @@ EMPTY_SCAN_LIMIT = 2000
 # More entries than this in a directory matched by a path pattern, or checked
 # entry by entry, means "not regenerable".
 WALK_LIMIT = 200_000
-FETCH_TIMEOUT = 900
+FETCH_TIMEOUT = 300
+DU_TIMEOUT = 300
+# How long one walk of the roots for borrowed objects (lending_scope) is reused
+# by the removal re-checks of one run; see LendingCache.
+DEFAULT_LENDING_TTL = 600.0
 DISCOVERY_SKIP = PAYLOAD_DIRS | {".git", "__pycache__"}
 MAX_DEPTH = 3
+MAX_JOBS = 32   # inspections in parallel, whatever --jobs says
 CLASS_NAMES = {"A": "removable", "B": "removable after push",
                "C": "needs owner", "D": "keep"}
 
@@ -283,6 +290,7 @@ def find_object_stores(bases: list[str], keep_patterns: list[str],
             errors.append(f"cannot list {rbase}")
             continue
         for dirpath, dirnames, filenames in os.walk(rbase, followlinks=False, onerror=onerror):
+            budget.check()
             depth = 0 if dirpath == rbase else dirpath[len(rbase) + 1:].count(os.sep) + 1
             is_git_dir = "objects" in dirnames and "HEAD" in filenames
             if is_git_dir:
@@ -331,13 +339,67 @@ def lending_scope(roots: list[str], main_roots: list[str], keep_patterns: list[s
     return lenders, errors + unreadable
 
 
+class LendingCache:
+    """lending_scope() for the removal re-checks of one run, walked at most
+    once per `ttl` seconds instead of once per removed clone.
+
+    The walk covers every repository under the roots and main roots (on the
+    Studio ~1000 object stores, ~50s per walk under load, longer at low I/O
+    priority), so walking it again for each of hundreds of clones made a run
+    take more than a day. A repository that starts borrowing a clone's objects
+    less than `ttl` seconds before that clone's removal can be missed; ttl 0
+    walks for every removal as before. A walk that fails or runs out of time
+    (`timeout` seconds, never past `run_deadline`) is cached too, as an
+    unreadable result, so the clone removals in that window are refused
+    instead of each walking again."""
+
+    def __init__(self, roots: list[str], main_roots: list[str], keep_patterns: list[str],
+                 ttl: float = DEFAULT_LENDING_TTL, timeout: float | None = None,
+                 run_deadline: float | None = None):
+        self.roots, self.main_roots = list(roots), list(main_roots)
+        self.keep_patterns = list(keep_patterns)
+        self.ttl = ttl
+        self.timeout = timeout
+        self.run_deadline = run_deadline
+        self.walks = 0
+        self._at: float | None = None
+        self._value: tuple[dict[str, list[str]], list[str]] = ({}, [])
+        self._lock = threading.Lock()
+
+    def get(self) -> tuple[dict[str, list[str]], list[str]]:
+        with self._lock:
+            now = time.monotonic()
+            if self._at is not None and self.ttl > 0 and now - self._at < self.ttl:
+                return self._value
+            self.walks += 1
+            # The snapshot is as old as the start of the walk.
+            started = time.monotonic()
+            try:
+                # Its own step: the walk is shared by many removals and must not
+                # inherit what is left of the step of the removal that triggers it.
+                with budget.unbounded(), budget.step(self.timeout, self.run_deadline):
+                    value = lending_scope(self.roots, self.main_roots, self.keep_patterns)
+            except budget.StepTimeout:
+                value = ({}, ["the scan for repositories borrowing objects did not finish "
+                              "in time"])
+            self._at = started
+            self._value = value
+            return value
+
+
 # ---------------------------------------------------------------- inspection
 
 class Inspector:
     """Per-run caches for remote lookups and repository metadata."""
 
     def __init__(self, main_roots: list[str] | None = None, use_cache: bool = True,
-                 keep_patterns: list[str] | None = None, fetch: bool = True):
+                 keep_patterns: list[str] | None = None, fetch: bool = True,
+                 run_deadline: float | None = None):
+        # Remote lookups are shared by every checkout of a URL, so they run
+        # under their own step (their nominal timeouts, never past the run
+        # deadline), not under what is left of the step of whichever
+        # checkout asked first: a failure is cached for all of them.
+        self.run_deadline = run_deadline
         self.main_roots = [os.path.realpath(os.path.expanduser(r)) for r in (main_roots or [])]
         self.keep_patterns = list(keep_patterns or [])
         self.use_cache = use_cache
@@ -376,14 +438,15 @@ class Inspector:
                     return self._fetched[url]
             repo = tempfile.mkdtemp(prefix="origin-", suffix=".git", dir=scratch)
             try:
-                git.out(["init", "-q", "--bare", repo])
-                git.out(["-c", "gc.auto=0", "-c", "maintenance.auto=false",
-                         "-c", "fetch.writeCommitGraph=false", "-C", repo, "fetch", "-q",
-                         "--no-tags", "--no-write-fetch-head", url,
-                         "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
-                        timeout=FETCH_TIMEOUT)
+                with self._shared_step():
+                    git.out(["init", "-q", "--bare", repo])
+                    git.out(["-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                             "-c", "fetch.writeCommitGraph=false", "-C", repo, "fetch", "-q",
+                             "--no-tags", "--no-write-fetch-head", url,
+                             "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
+                            timeout=FETCH_TIMEOUT)
                 res = (os.path.join(repo, "objects"), "")
-            except GitError as exc:
+            except (GitError, budget.StepTimeout) as exc:
                 res = ("", f"fetch {url}: {exc}")
             with self._lock:
                 self._fetched[url] = res
@@ -396,13 +459,15 @@ class Inspector:
                 return self._heads[url]
         branch = sha = ""
         try:
-            text = git.out(["ls-remote", "--symref", url, "HEAD"], timeout=git.LS_REMOTE_TIMEOUT)
+            with self._shared_step():
+                text = git.out(["ls-remote", "--symref", url, "HEAD"],
+                               timeout=git.LS_REMOTE_TIMEOUT)
             for line in text.splitlines():
                 if line.startswith("ref: ") and line.endswith("\tHEAD"):
                     branch = line[5:].split("\t")[0].removeprefix("refs/heads/")
                 elif line.endswith("\tHEAD") and len(line.split("\t")[0]) >= 40:
                     sha = line.split("\t")[0]
-        except GitError:
+        except (GitError, budget.StepTimeout):
             pass
         with self._lock:
             self._heads[url] = (branch, sha)
@@ -415,12 +480,19 @@ class Inspector:
             if self.use_cache and url in self._ls:
                 return self._ls[url]
         try:
-            res: tuple[set[str] | None, str] = (git.ls_remote(url), "")
-        except GitError as exc:
+            with self._shared_step():
+                res: tuple[set[str] | None, str] = (git.ls_remote(url), "")
+        except (GitError, budget.StepTimeout) as exc:
             res = (None, str(exc))
         with self._lock:
             self._ls[url] = res
         return res
+
+    def _shared_step(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(budget.unbounded())
+        stack.enter_context(budget.step(None, self.run_deadline))
+        return stack
 
     @staticmethod
     def common_dir(repo: str) -> str:
@@ -664,6 +736,7 @@ def _is_empty(path: str) -> bool:
     errors = []
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=errors.append):
+        budget.check()
         for name in dirnames + filenames:
             seen += 1
             if seen > EMPTY_SCAN_LIMIT:
@@ -726,10 +799,13 @@ def _regenerable(path: str, rel: str, extra: list[str], projects: set[str] = fro
 
 
 def _du_kb(path: str) -> int:
+    """Size in KB, or 0 when du fails or runs out of time (sizes are
+    information only and never decide a class)."""
     try:
-        proc = subprocess.run(["du", "-sk", path], capture_output=True, text=True, timeout=600)
+        proc = subprocess.run(["du", "-sk", path], capture_output=True, text=True,
+                              timeout=budget.cap(DU_TIMEOUT))
         return int(proc.stdout.split()[0]) if proc.stdout else 0
-    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError):
+    except (OSError, subprocess.TimeoutExpired, budget.StepTimeout, ValueError, IndexError):
         return 0
 
 
@@ -761,6 +837,7 @@ def find_device_backups(path: str) -> list[str]:
     except OSError:
         found.append(os.path.relpath(backups, path) + " (unreadable)")
     for dirpath, dirnames, _ in os.walk(path, followlinks=False):
+        budget.check()
         depth = dirpath[len(path):].count(os.sep)
         for d in list(dirnames):
             if d.startswith("device-preservation-"):
@@ -786,6 +863,7 @@ def deletion_scan(path: str) -> list[str]:
         blockers.append(f"cannot read {exc.filename}: {exc.strerror or exc}")
 
     for dirpath, dirnames, _ in os.walk(path, followlinks=False, onerror=onerror):
+        budget.check()
         if not os.access(dirpath, os.R_OK | os.W_OK | os.X_OK):
             blockers.append(f"not writable: {dirpath}")
         rel = os.path.relpath(dirpath, path)
@@ -844,6 +922,7 @@ def _regenerable_inside(path: str, rel: str, regenerable: list[str], projects: s
     errors: list[OSError] = []
     seen = 0
     for dirpath, dirnames, filenames in os.walk(top, followlinks=False, onerror=errors.append):
+        budget.check()
         seen += len(dirnames) + len(filenames)
         if ".git" in dirnames or ".git" in filenames or seen > WALK_LIMIT:
             return False
@@ -862,6 +941,7 @@ def _has_git(top: str) -> bool:
     errors: list[OSError] = []
     seen = 0
     for _, dirnames, filenames in os.walk(top, followlinks=False, onerror=errors.append):
+        budget.check()
         seen += len(dirnames) + len(filenames)
         if ".git" in dirnames or ".git" in filenames or seen > WALK_LIMIT:
             return True
@@ -1119,6 +1199,7 @@ class Run:
     outcomes: list[dict] = field(default_factory=list)   # path/outcome for checkout attempts and failed empty/husk cleanup
     skipped: int = 0
     prune_errors: dict[str, str] = field(default_factory=dict)
+    stopped: str = ""           # why the run stopped removing early (run time limit)
 
 
 @dataclass
@@ -1131,25 +1212,53 @@ class Inventory:
     empty_dirs: list = field(default_factory=list)   # empties.EmptyDir
     husks: list = field(default_factory=list)        # husks.Husk
     run: Run | None = None        # None: dry run
+    incomplete: list[str] = field(default_factory=list)  # parts not scanned (time limit)
 
 
 def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None,
           keep: list[str] | None = None, keep_file: str | None = DEFAULT_KEEP_FILE,
           regenerable: list[str] | None = None, sizes: bool = True, jobs: int = 8,
           only: str | None = None, use_cache: bool = True,
-          min_idle_hours: float = 0, fetch: bool = True) -> Inventory:
+          min_idle_hours: float = 0, fetch: bool = True,
+          step_timeout: float | None = None, run_deadline: float | None = None) -> Inventory:
+    """Inventory every checkout under the roots, `jobs` at a time. Each
+    checkout's inspection is one step of at most `step_timeout` seconds; a
+    checkout whose step runs out of time, or that is reached after
+    `run_deadline` (monotonic), is class C as not inspectable."""
     rroots = [os.path.realpath(os.path.expanduser(r)) for r in roots]
     patterns = load_keep_patterns(keep or [], keep_file)
     ins = Inspector(main_roots if main_roots is not None else DEFAULT_MAIN_ROOTS, use_cache,
-                    keep_patterns=patterns, fetch=fetch)
+                    keep_patterns=patterns, fetch=fetch, run_deadline=run_deadline)
     pairs = discover(rroots)
     if only is not None:
         pairs = [(p, r) for p, r in pairs if p == only]
     all_repos = [p for p, _ in discover(rroots) if not keep_match(p, patterns)]
     cos = [Checkout(path=p, root=r, workspace=_workspace_of(p, r)) for p, r in pairs]
-    lenders, unreadable = lending_scope(rroots, ins.main_roots, patterns)
+    try:
+        with budget.step(step_timeout, run_deadline):
+            lenders, unreadable = lending_scope(rroots, ins.main_roots, patterns)
+    except budget.StepTimeout:
+        lenders, unreadable = {}, ["the scan for repositories borrowing objects did not "
+                                   "finish in time"]
 
     def work(co: Checkout) -> Checkout:
+        if run_deadline is not None and time.monotonic() >= run_deadline:
+            return _not_inspected(co, "run time limit reached before this checkout")
+        try:
+            with budget.step(step_timeout, run_deadline):
+                return _work(co)
+        except budget.StepTimeout:
+            return _not_inspected(co, "inspection ran out of time (step or run time limit)")
+
+    def _not_inspected(co: Checkout, why: str) -> Checkout:
+        co.error = why
+        co.cls, co.reasons, co.in_use, co.work_items = "", [], [], []
+        co.work_unknown, co.deletion_blockers = "", []
+        apply_signals(co, sig)
+        classify(co, min_idle_hours)
+        return co
+
+    def _work(co: Checkout) -> Checkout:
         inspect(co, ins, keep_patterns=patterns, regenerable=regenerable or [],
                 sizes=sizes, all_repos=all_repos)
         if not co.keep_listed:
@@ -1178,7 +1287,7 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
         return co
 
     try:
-        with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, min(jobs, MAX_JOBS))) as pool:
             cos = list(pool.map(work, cos))
     finally:
         ins.close()
@@ -1187,7 +1296,13 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
     for c in cos:
         if c.keep_listed or c.error:
             continue
-        cfg = git.run(["config", "--get-regexp", r"^remote\..*\.url$"], c.path, check=False).stdout
+        if run_deadline is not None and time.monotonic() >= run_deadline:
+            break   # informational only
+        try:
+            cfg = git.run(["config", "--get-regexp", r"^remote\..*\.url$"], c.path,
+                          check=False).stdout
+        except GitError:
+            continue
         for line in cfg.splitlines():
             parts = line.split(None, 1)
             if len(parts) == 2 and not git.is_network_url(parts[1]):

@@ -91,6 +91,7 @@ def _summary_line(inv: Inventory) -> str:
             + (f", caches of {len(caches)} workspace director{'y' if len(caches) == 1 else 'ies'} "
                f"({human_kb(sum(h.removed_kb for h in caches))})" if caches else "")
             + (f"; {run.skipped} skipped" if run.skipped else "")
+            + (f"; stopped early: {run.stopped}" if run.stopped else "")
             + f"; left: {left}" + tail)
 
 
@@ -115,6 +116,8 @@ def to_json(inv: Inventory, generated_at: str | None = None) -> dict:
         "removed": [co.to_dict() for co in run.removed] if run else [],
         "removed_kb": sum(c.size_kb for c in run.removed) if run else 0,
         "skipped": [o for o in run.outcomes if not o["outcome"].startswith("removed")] if run else [],
+        "stopped": run.stopped if run else "",
+        "incomplete": inv.incomplete,
     }
 
 
@@ -148,6 +151,8 @@ def to_text(inv: Inventory, generated_at: str | None = None) -> str:
     if blockers:
         w(("REFUSED, in-use signals incomplete: " if run else "--apply would refuse: ")
           + "; ".join(blockers))
+    for note in inv.incomplete:
+        w("INCOMPLETE: " + note)
     w("")
     w("summary: " + summary_line(inv))
     if applied:

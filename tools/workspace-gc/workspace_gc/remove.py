@@ -30,12 +30,14 @@ import os
 import shutil
 import stat
 
+from . import budget
 from . import git
 from . import signals as sig_mod
 from .husks import _fd_path
 from .git import GitError
-from .inventory import (Checkout, Inspector, _is_under, borrowers_of, deletion_scan,
-                        hidden_state, keep_match, lending_scope, project_names, scan_ignored)
+from .inventory import (Checkout, Inspector, LendingCache, _is_under, borrowers_of,
+                        deletion_scan, hidden_state, keep_match, lending_scope, project_names,
+                        scan_ignored)
 
 
 class Refused(Exception):
@@ -98,13 +100,17 @@ def _refs(path):
 
 
 def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
-             keep_patterns: list[str], regenerable: list[str], fetch: bool = True) -> str | None:
+             keep_patterns: list[str], regenerable: list[str], fetch: bool = True,
+             lending: LendingCache | None = None, run_deadline: float | None = None
+             ) -> str | None:
     real = _recheck_local(co, roots, main_roots, keep_patterns, regenerable)
     refs = _refs(co.path) if co.kind == "clone" else None
     path = co.path
-    fresh = Inspector(main_roots, use_cache=False, keep_patterns=keep_patterns, fetch=fetch)
+    fresh = Inspector(main_roots, use_cache=False, keep_patterns=keep_patterns, fetch=fetch,
+                      run_deadline=run_deadline)
     try:
-        _recheck_remote(co, path, real, fresh, roots, main_roots, keep_patterns, regenerable)
+        _recheck_remote(co, path, real, fresh, roots, main_roots, keep_patterns, regenerable,
+                        lending)
     finally:
         fresh.close()
 
@@ -113,7 +119,7 @@ def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
 
 def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots: list[str],
                     main_roots: list[str], keep_patterns: list[str],
-                    regenerable: list[str]) -> None:
+                    regenerable: list[str], lending: LendingCache | None = None) -> None:
     urls, alternates, _ = fresh.resolve_remotes(path)
     for u in co.network_remotes:
         if u not in urls:
@@ -122,7 +128,8 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
         raise Refused("no network remote")
     _check_payload_state(co, path, real, regenerable, urls)
     if co.kind == "clone":
-        lenders, unreadable = lending_scope(roots, main_roots, keep_patterns)
+        lenders, unreadable = lending.get() if lending is not None \
+            else lending_scope(roots, main_roots, keep_patterns)
         if unreadable:
             raise Refused("cannot tell who borrows its objects: " + unreadable[0])
         borrowers = borrowers_of(path, lenders)
@@ -175,29 +182,44 @@ def _delete_clone(path, expected):
 
 def remove_checkout(co: Checkout, roots: list[str], main_roots: list[str],
                     keep_patterns: list[str], regenerable: list[str] | None = None,
-                    fetch: bool = True, signals: sig_mod.Signals | None = None) -> str:
-    """Remove one class-A checkout. Returns a one-line outcome; raises Refused."""
+                    fetch: bool = True, signals: sig_mod.Signals | None = None,
+                    lending: LendingCache | None = None, step_timeout: float | None = None,
+                    run_deadline: float | None = None) -> str:
+    """Remove one class-A checkout. Returns a one-line outcome; raises Refused.
+
+    All re-checks together are one step of at most `step_timeout` seconds,
+    never past `run_deadline` (monotonic); running out of time refuses the
+    removal. The deletion itself runs without a deadline, so a budget never
+    stops it half-way. `lending` shares the borrowed-objects walk between the
+    removals of one run (see LendingCache); without it every clone removal
+    walks the roots itself."""
     if co.cls != "A":
         raise Refused(f"class {co.cls}, only class A is removed")
     try:
         initial = os.stat(co.path, follow_symlinks=False)
         expected = (initial.st_dev, initial.st_ino)
-        refs = _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch)
-        live = sig_mod.refresh(signals or sig_mod.Signals())
-        blockers = live.apply_blockers()
-        if blockers:
-            raise Refused("in-use signals incomplete now: " + "; ".join(blockers))
-        reason = sig_mod.protection_reason(co.workspace, live, work_path=co.path)
-        if reason:
-            raise Refused(reason)
-        if co.kind == "clone" and _refs(co.path) != refs:
-            raise Refused("refs moved during remote or ownership verification")
-        _recheck_local(co, roots, main_roots, keep_patterns, regenerable or [])
-        if co.kind == "worktree":
-            git.out(["worktree", "remove", co.path], co.owner_repo)
-            return f"removed worktree {co.path} (git worktree remove)"
-        _delete_clone(co.path, expected)
-        return f"removed clone {co.path}"
+        try:
+            with budget.step(step_timeout, run_deadline):
+                refs = _recheck(co, roots, main_roots, keep_patterns, regenerable or [], fetch,
+                                lending, run_deadline)
+                live = sig_mod.refresh(signals or sig_mod.Signals())
+                blockers = live.apply_blockers()
+                if blockers:
+                    raise Refused("in-use signals incomplete now: " + "; ".join(blockers))
+                reason = sig_mod.protection_reason(co.workspace, live, work_path=co.path)
+                if reason:
+                    raise Refused(reason)
+                if co.kind == "clone" and _refs(co.path) != refs:
+                    raise Refused("refs moved during remote or ownership verification")
+                _recheck_local(co, roots, main_roots, keep_patterns, regenerable or [])
+        except budget.StepTimeout as exc:
+            raise Refused(f"re-checks ran out of time ({exc})") from exc
+        with budget.unbounded():
+            if co.kind == "worktree":
+                git.out(["worktree", "remove", co.path], co.owner_repo)
+                return f"removed worktree {co.path} (git worktree remove)"
+            _delete_clone(co.path, expected)
+            return f"removed clone {co.path}"
     except GitError as exc:
         raise Refused(str(exc)) from exc
     except OSError as exc:

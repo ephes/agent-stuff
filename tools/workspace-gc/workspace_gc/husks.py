@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 
 from .empties import PROTECTED_NAMES, _keep_listed
 from . import signals as sig_mod
+from . import budget
 from .inventory import Inventory, _du_kb, _is_under, keep_match
 from .signals import Signals
 
@@ -121,6 +122,7 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     walked = 0
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=lambda e: errors.append(e.filename)):
+        budget.check()
         walked += len(dirnames) + len(filenames)
         if walked > MAX_WALK:
             h.note = f"more than {MAX_WALK} entries, walk stopped"
@@ -155,6 +157,7 @@ def _idle_hours(path: str, limit: float) -> float:
     newest = 0.0
     now = _now()
     for dirpath, dirnames, _files in os.walk(path, followlinks=False):
+        budget.check()
         try:
             st = os.lstat(dirpath)
         except OSError:
@@ -174,6 +177,7 @@ def _newest_change(path: str, limit_hours: float) -> float:
     bad = []
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=bad.append):
+        budget.check()
         for name in [""] + filenames + dirnames:
             try:
                 st = os.lstat(os.path.join(dirpath, name))
@@ -368,12 +372,17 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
 
 def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
            sig: Signals, min_idle_hours: float = 48.0,
-           min_stale_hours: float = 72.0) -> None:
+           min_stale_hours: float = 72.0, expired=None) -> None:
     """Remove the stale husks (whole directory) and the caches of the
     cache-only ones, each re-checked right before, with all ownership sources
-    read afresh for every one. Updates the entries."""
+    read afresh for every one. Updates the entries. Once `expired()` is
+    true, the entries not yet started stay (budget.TIME_LIMIT)."""
     for h in entries:
         if not (h.removable or h.stale):
+            continue
+        if expired is not None and expired():
+            h.outcome = budget.TIME_LIMIT
+            h.removable = h.stale = False
             continue
         live = sig_mod.refresh(sig)
         blockers = live.apply_blockers()

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Bounded runs. The daily run started 2026-11-11 08:00 was still running after
+  29 hours because every clone removal re-walked all of `~/workspaces` and
+  `~/projects` for repositories borrowing its objects (~50s per walk under
+  load). That walk is now shared between removals for `--lending-ttl`
+  seconds (default 600; 0 restores the per-removal walk). Inspection of one
+  checkout and the re-checks before one removal are each limited to
+  `--step-timeout` seconds (default 600; filesystem walks stop at the next
+  directory, git and du get at most the time left; the deletion itself is
+  never cut off), the whole run to `--max-runtime` minutes (default 180; then
+  the remaining removals are skipped and the report is written with
+  `stopped early`). Scratch fetches wait at most 300s (was 900s), du 300s
+  (was 600s); ssh gets keep-alives and HTTP(S) a low-speed limit. `--jobs` is
+  limited to 1-32. `report` and every `--apply` take a `flock` run lock
+  (`--lock-file`); a second run exits 3 with `BUSY` instead of running next to
+  or queueing behind a hung one.
+
 - Escape control characters in human reports while retaining JSON identities;
   align partial-run summaries and exclude removed husks from removable counts.
 
