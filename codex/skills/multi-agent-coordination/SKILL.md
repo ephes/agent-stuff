@@ -172,7 +172,10 @@ idea *Not wanted*, do not re-propose it unless something materially changed,
 and then say what changed in the item's notes (`work-ledger`, **Planning and picking work**, "Check the owner's rejections first").
 
 Coordinators and clerks append newly discovered work at the end of Next or
-Later (`work upsert ... --horizon next`, without rank or neighbours). Mark a
+Later (`work upsert ... --summary "..." --horizon next`, without rank or
+neighbours). Every new item gets a plain German `--summary` (what, what will
+happen, benefit) and, while the owner has something to decide, a `--decision`
+question (`work-ledger`, **Items**); scout bundles and queue items too. Mark a
 campaign's items with `--campaign <slug>` (for example `codex-burn`), never
 with a topic; before the campaign deploy, leave the campaign unset. Agents never reorder, including within Next, and never move items
 into Now. Raise
