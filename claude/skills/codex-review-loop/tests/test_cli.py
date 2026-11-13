@@ -182,6 +182,23 @@ class TestCliFailsClosed(unittest.TestCase):
         self.assertFailed("hang", "STALLED", "stall", "--stall-timeout", "1")
         self.assertLess(time.monotonic() - started, 60)
 
+    def test_every_stall_says_why_on_the_terminal(self):
+        proc, result, _ = self.fx.run("hang", "--stall-timeout", "1")
+        self.assertEqual(result["state"], "STALLED")
+        self.assertIn("--stall-timeout (1s)", result["error"])
+        self.assertIn("failure: stall - Codex printed no event", proc.stderr)
+
+    def test_a_launch_that_never_starts_a_thread_fails_at_startup(self):
+        # As a Codex held by a Gatekeeper dialog: no event at all. The startup
+        # timeout ends it long before the stall timeout would.
+        started = time.monotonic()
+        result, _ = self.assertFailed("never_starts", "STALLED", "stall",
+                                      "--startup-timeout", "1")
+        self.assertLess(time.monotonic() - started, 60)
+        self.assertIn("--startup-timeout (1s)", result["error"])
+        self.assertIn("Gatekeeper", result["error"])
+        self.assertIsNone(result["thread_id"])
+
     def test_the_deadline_kills_a_run_that_stays_busy(self):
         self.assertFailed("hang", "STALLED", "deadline",
                           "--stall-timeout", "100", "--review-deadline", "1")

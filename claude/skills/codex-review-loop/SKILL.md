@@ -395,6 +395,30 @@ CODEX_REVIEW_RUN_SANDBOX=1 python3.14 -m unittest tests.test_sandbox_powsybl -v
 - `--stall-timeout` (default 600s) kills a run that neither prints an event nor
   grows its session record. Codex thinks silently for minutes; growth of the
   session record is what keeps a working reviewer alive.
+- `--startup-timeout` (default 120s) kills a run whose Codex has not reported
+  `thread.started` that long after its launch, whatever `--stall-timeout`
+  says. A working Codex starts its thread within seconds; one that does not
+  waits on something outside the review. The result is `STALLED` /
+  `stall`, and `error` says so and names the likeliest cause (below).
+  Every stall and deadline result carries such a one-line `error`, printed
+  after `failure:` on the terminal.
+- **macOS Gatekeeper.** A binary a downloader quarantined (Homebrew's `codex`
+  cask does; the npm package does not) is held at its first launch until
+  someone answers a Gatekeeper dialog on the logged-in user's screen; Codex
+  prints nothing and writes no session record meanwhile. On 2026-11-13, after
+  the cask installed Codex 0.168.0, two reviews on a headless Mac stalled for
+  their full ten minutes that way, while the CLI flags and output were
+  unchanged. Before it creates the copy, the harness therefore reads the
+  `com.apple.quarantine` attribute of the native binary it is about to start
+  and refuses one that is quarantined and was never approved (the
+  user-approved flag `0x40` is missing, e.g. `0181`; `01c1` after approval)
+  as `CRASHED` / `preflight`, without starting Codex. The way out is in
+  `error`: approve the binary once at that screen (`codex --version` in a
+  Terminal there, then confirm the dialog) or clear the attribute with
+  `xattr -d com.apple.quarantine <binary>`. Only the binary the harness runs is
+  checked: the package's helpers (`codex-code-mode-host`) stayed unapproved
+  after the confirmation and ran without a dialog. An attribute that cannot
+  be read does not block; the startup timeout still ends such a launch.
 - `--review-deadline` (default 2700s) is the hard cap.
 - `--exit-grace` (default 30s): after `turn.completed`, Codex gets this long to
   exit before the harness kills the group and judges the completed turn.
@@ -444,7 +468,8 @@ CODEX_REVIEW_RUN_SANDBOX=1 python3.14 -m unittest tests.test_sandbox_powsybl -v
 `~/.cache/review-loop/ledger`, shared with the sibling harnesses),
 `--staged-only`, `--max-bundle-bytes` (default 2MB), `--max-file-size`,
 `--max-diff-bytes-per-file`, `--max-context-file-size`,
-`--max-evidence-file-size`, `--stall-timeout`, `--review-deadline`,
+`--max-evidence-file-size`, `--stall-timeout`, `--startup-timeout`,
+`--review-deadline`,
 `--exit-grace`, `--lock-dir`, `--max-concurrent`.
 
 ## Artifacts (in `--run-dir`)

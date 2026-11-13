@@ -226,7 +226,8 @@ def _read_text(path):
 
 def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
                stall_timeout, global_deadline, access_program=None, exit_grace=30.0,
-               poll_interval=0.5, env=None, extra_env=None, on_spawn=None):
+               poll_interval=0.5, env=None, extra_env=None, on_spawn=None,
+               startup_timeout=None):
     os.makedirs(run_dir, exist_ok=True)
     paths = {k: os.path.join(run_dir, v) for k, v in {
         "raw": "stdout.raw.log", "events": "events.jsonl",
@@ -240,7 +241,8 @@ def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
     sub_env.update(extra_env or {})
     home = codex_home(env)
     monitor = Monitor(started_at=started, stall_timeout=stall_timeout,
-                      global_deadline=global_deadline, exit_grace=exit_grace)
+                      global_deadline=global_deadline, exit_grace=exit_grace,
+                      startup_timeout=startup_timeout, binary=cmd[0])
     session = _SessionWatch(home, monitor)
     proc = pgid = streams = None
     state, kind, error = None, None, None
@@ -278,7 +280,7 @@ def run_review(*, cmd, run_dir, prompt_path, last_message_path, model, effort,
             decision = monitor.decide(_now(), alive)
             if decision.action == "continue":
                 continue
-            state, kind = decision.state, decision.kind
+            state, kind, error = decision.state, decision.kind, decision.error
             # Only a run the harness ended itself after its turn completed may
             # be judged without a clean exit: Codex has been seen to hang at
             # exit. Attribution rests on the signals actually delivered and

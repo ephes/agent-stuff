@@ -19,6 +19,8 @@ way Codex does. The mode comes from FAKE_CODEX_MODE:
   error_exit               an error event, then exit 1 without a turn
   crash                    exit 3 without any event
   hang                     thread.started, then silence forever
+  never_starts             silence forever before any event, as a launch
+                           held by a Gatekeeper dialog
   posthang                 CLEAN, then never exit
   orphan                   CLEAN, exit 0, but leave a sleeping child behind
   silent_recording         print nothing for FAKE_CODEX_SILENCE seconds while
@@ -109,6 +111,8 @@ def main():
 
     if mode == "crash":
         sys.exit(3)
+    if mode == "never_starts":
+        time.sleep(3600)
     thread_id = str(uuid.uuid4())
     emit({"type": "thread.started", "thread_id": thread_id})
     emit({"type": "turn.started"})
