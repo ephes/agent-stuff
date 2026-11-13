@@ -5,7 +5,13 @@ Codex reports a finished turn with `turn.completed` and a failed one with
 `turn.failed`. It can think for minutes without printing anything, so the
 runner also reports growth of the session record as activity; only a reviewer
 that neither prints nor records anything for `stall_timeout` is stalled.
+
+A Codex that starts no thread within `startup_timeout` is stalled too, however
+long the stall timeout: a working Codex reports `thread.started` within seconds
+of its launch, and one that does not is waiting on something outside the
+review - on macOS, a Gatekeeper dialog for a newly installed binary.
 """
+import shlex
 from dataclasses import dataclass
 
 from .states import (INVALID, PROVIDER_ERROR, STALLED, KIND_DEADLINE,
@@ -17,12 +23,26 @@ class Decision:
     action: str               # "continue" | "kill" | "finish"
     state: str | None = None  # None: classify from the completed turn
     kind: str | None = None
+    error: str | None = None  # why the harness ends the run, when it does
+
+
+def startup_hint(binary=None):
+    """Where a launch that never starts a thread most likely waits."""
+    check = ("`xattr -p com.apple.quarantine "
+             + (shlex.quote(binary) if binary else "<native codex binary>") + "`")
+    return ("On macOS the first launch of a newly installed or updated Codex "
+            "can wait silently on a Gatekeeper dialog on the logged-in user's "
+            f"screen: check the binary with {check}, approve it at that screen "
+            "or clear the attribute, then rerun.")
 
 
 class Monitor:
     def __init__(self, *, started_at, stall_timeout, global_deadline,
-                 exit_grace=30.0):
+                 exit_grace=30.0, startup_timeout=None, binary=None):
+        self.started_at = started_at
+        self.binary = binary
         self.stall_timeout = stall_timeout
+        self.startup_timeout = startup_timeout
         self.exit_grace = exit_grace
         self.global_deadline_at = started_at + global_deadline
         self.last_activity_at = started_at
@@ -68,7 +88,24 @@ class Monitor:
                 return Decision("kill")
             return Decision("continue")
         if now > self.global_deadline_at:
-            return Decision("kill", STALLED, KIND_DEADLINE)
+            return Decision("kill", STALLED, KIND_DEADLINE, self._stalled(
+                f"the review exceeded --review-deadline "
+                f"({now - self.started_at:.0f}s)"))
+        if (self.startup_timeout is not None and self.thread_id is None
+                and now - self.started_at > self.startup_timeout):
+            return Decision("kill", STALLED, KIND_STALL, self._stalled(
+                f"Codex started no thread within --startup-timeout "
+                f"({self.startup_timeout:g}s) of its launch"))
         if now - self.last_activity_at > self.stall_timeout:
-            return Decision("kill", STALLED, KIND_STALL)
+            return Decision("kill", STALLED, KIND_STALL, self._stalled(
+                f"Codex printed no event and grew no session record for "
+                f"--stall-timeout ({self.stall_timeout:g}s)"))
         return Decision("continue")
+
+    def _stalled(self, what):
+        """One line: what ended the run, and - when Codex never started a
+        thread - where it most likely waited."""
+        if self.thread_id is not None:
+            return what + "; the reviewer was killed"
+        return (f"{what} and never started a thread; it was killed. "
+                + startup_hint(self.binary))

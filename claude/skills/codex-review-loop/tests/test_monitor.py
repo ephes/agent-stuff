@@ -26,6 +26,43 @@ class TestMonitor(unittest.TestCase):
         d = m.decide(101.0, True)
         self.assertEqual((d.action, d.state, d.kind), ("kill", "STALLED", "deadline"))
 
+    def test_a_launch_that_starts_no_thread_is_a_startup_stall(self):
+        # Output on stderr is activity, but no thread: a Codex held before its
+        # first event ends at the startup timeout, not the stall timeout.
+        m = monitor(stall_timeout=1000.0, startup_timeout=5.0,
+                    binary="/opt/x/codex")
+        m.note_activity(4.0)
+        self.assertEqual(m.decide(5.0, True).action, "continue")
+        d = m.decide(6.0, True)
+        self.assertEqual((d.action, d.state, d.kind), ("kill", "STALLED", "stall"))
+        self.assertIn("--startup-timeout (5s)", d.error)
+        self.assertIn("never started a thread", d.error)
+        self.assertIn("Gatekeeper", d.error)
+        self.assertIn("`xattr -p com.apple.quarantine /opt/x/codex`", d.error)
+        spaced = monitor(startup_timeout=1.0, binary="/Applications/My Codex/codex")
+        self.assertIn("'/Applications/My Codex/codex'", spaced.decide(2.0, True).error)
+        self.assertNotIn("\n", d.error)
+
+    def test_a_started_thread_disarms_the_startup_timeout(self):
+        m = monitor(stall_timeout=1000.0, startup_timeout=5.0)
+        m.on_event({"type": "thread.started", "thread_id": "t"}, 1.0)
+        m.note_activity(50.0)
+        self.assertEqual(m.decide(60.0, True).action, "continue")
+
+    def test_every_stall_says_why(self):
+        d = monitor().decide(11.0, True)
+        self.assertIn("--stall-timeout (10s)", d.error)
+        self.assertIn("never started a thread", d.error)
+        m = monitor()
+        m.on_event({"type": "thread.started", "thread_id": "t"}, 1.0)
+        d = m.decide(12.0, True)
+        self.assertIn("--stall-timeout (10s)", d.error)
+        self.assertNotIn("Gatekeeper", d.error)
+        m = monitor(stall_timeout=1000.0)
+        m.on_event({"type": "thread.started", "thread_id": "t"}, 1.0)
+        m.note_activity(99.0)
+        self.assertIn("--review-deadline", m.decide(101.0, True).error)
+
     def test_activity_resets_the_stall_timer(self):
         m = monitor()
         m.note_activity(9.0)

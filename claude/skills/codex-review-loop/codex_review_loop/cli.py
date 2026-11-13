@@ -15,6 +15,7 @@ from ._shared import ledger as ledger_mod
 from ._shared import workspace as workspace_mod
 from . import command as command_mod
 from . import evidence as evidence_mod
+from . import gatekeeper as gatekeeper_mod
 from . import native as native_mod
 from .lock import DEFAULT_MAX_CONCURRENT, LockHeld, LockPool
 from .result import ReviewResult
@@ -156,6 +157,7 @@ def _build_parser():
                    help="reasoning effort, proven per turn from the session "
                         f"record (default {command_mod.REVIEW_EFFORT})")
     p.add_argument("--stall-timeout", type=_positive_float, default=600)
+    p.add_argument("--startup-timeout", type=_positive_float, default=120)
     p.add_argument("--review-deadline", type=_positive_float, default=2700)
     p.add_argument("--exit-grace", type=_positive_float, default=30)
     p.add_argument("--max-file-size", type=int, default=262144)
@@ -317,6 +319,7 @@ def _review_in_copy(args, copy, b, evidence, review_root, codex_bin, extra_env,
                 last_message_path=last_message_path, model=model,
                 effort=effort, access_program=args.cyber_access_program,
                 stall_timeout=args.stall_timeout,
+                startup_timeout=args.startup_timeout,
                 global_deadline=args.review_deadline,
                 exit_grace=args.exit_grace, extra_env=extra_env,
                 on_spawn=_record_pgid)
@@ -421,6 +424,12 @@ def main(argv=None, *, codex_bin=None, extra_env=None, quota_check=None):
             native, launch_env = native_mod.resolve()
         except native_mod.NativeCodexNotFound as exc:
             return _fail(args.run_dir, model, str(exc), effort=effort,
+                         access_program=args.cyber_access_program)
+        # A binary Gatekeeper has not approved would wait on a dialog nobody
+        # sees, silently, until the stall timeout: refuse it up front.
+        refusal = gatekeeper_mod.check(native)
+        if refusal is not None:
+            return _fail(args.run_dir, model, refusal, effort=effort,
                          access_program=args.cyber_access_program)
         codex_bin = [native]
         extra_env = {**launch_env, **(extra_env or {})}
