@@ -9,9 +9,6 @@ name: CI
 # depend on macOS behavior (lsof output handling, directory-to-link swaps).
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
