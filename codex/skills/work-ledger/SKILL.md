@@ -120,29 +120,27 @@ questions: ask, and mirror the question in `--decision`.
 
 ## Planning and picking work
 
-Rollout: `/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
-`--expedite` upsert flags are live since 2026-11-08: the work app is deployed
-and `work plan` returns horizons. The one-off queue import has run; the
-former codex-q queue items sit in Next. Read and dispatch from `work next`/
-`work plan`; queue files are only generated copies (below), and the import is
-not rerun.
+Who steers (owner decision 2026-11-16): the owner steers by talking to the
+coordinator session. His chat instructions (assignments, priorities, stops,
+a delegated mandate) are authoritative; the coordinator records each one in
+the ledger (item fields or a `work note` "owner chat <date>: ...") and acts
+without re-confirmation in the web app (`multi-agent-coordination`,
+**Planning and dispatch order**). The Codex dispatch list is
+ws-work-planning `coordination/codex/queue.txt`, edited by the coordinator
+and refilled by the Codex autoround; it is not a generated copy of `/plan/`.
 
-Campaign rollout: the separate work-ledger campaign deploy (migration 0021,
-merged 2026-11-09, deployed by the owner afterwards) adds the `campaign` field
-and moves `codex-burn` out of the codex-q items' topics into their campaign.
-Check with `work show <slug> --json`: a `campaign` key means it is live. Before
-that deploy upsert answers 400 "Unknown fields" for `--campaign`, and the old
-server silently ignores `?campaign=` (the CLI notices and `items`/`plan`/`next
---campaign` exit 1; a direct API read would return unfiltered items). The
-codex-q items still carry topic `codex-burn` until then: leave new items
-without a campaign, never add `codex-burn` as a topic, and read the existing
-ones with `--topic codex-burn`.
-After the deploy use `--campaign codex-burn` only.
+`/plan/`, `work next`, `work plan` and the `--horizon`/`--topics`/
+`--expedite` upsert flags are live since 2026-11-08 and are an optional
+overview, not a dispatch precondition: an item need not be in Now to be
+dispatched. On `/plan/` the owner may rank Now / Next / Later (↑ ↓ ⤒ and
+→ Now/Next/Later buttons), with an inbox of unplanned `idea`/`designed` items
+and free topic slugs shown on each card; where he did, respect that order.
+Stage describes execution progress; horizon describes the owner's plan.
 
-The owner prioritizes on `/plan/`: Now / Next / Later with a rank order inside
-each horizon (↑ ↓ ⤒ and → Now/Next/Later buttons), an inbox of unplanned
-`idea`/`designed` items, and free topic slugs shown on each card. Stage still describes
-execution progress; horizon describes the owner's plan.
+The `campaign` field is live (`--campaign <slug>`, `work items --campaign
+<slug>`). The `codex-burn` campaign (Codex burn-down, November 2026) is
+finished history: read its items with `--campaign codex-burn`, never tag new
+items with it, and never use it as a topic.
 
 - Read `work plan` for the ordered plan, or `work plan --json` for structured
   data. The plan includes Now, Next, Later and Unplanned, with `--project P`,
@@ -168,9 +166,8 @@ execution progress; horizon describes the owner's plan.
   (no Topic table); `--topics ""` clears the list. Omitted fields stay unchanged.
   Reuse topic slugs already shown by `work plan` where they fit. Topics name
   themes (`infra`, `podcast`), never a campaign, queue or source: mark those
-  with `--campaign <slug>` (one slug, e.g. `--campaign codex-burn` for Codex
-  burn-down work; `--campaign ""` clears it) and list them with
-  `work items --campaign <slug>`. Never write `--topics codex-burn`.
+  with `--campaign <slug>` (one slug; `--campaign ""` clears it) and list them
+  with `work items --campaign <slug>`.
 - **Check the owner's rejections first.** Before creating an item or proposing
   work, run `work rejected --search "<key words of the title>"` (add
   `--project P` to narrow it). The owner marks unwanted ideas *Not wanted* in the
@@ -183,29 +180,21 @@ execution progress; horizon describes the owner's plan.
   the matched rejection; otherwise record what changed in its notes (`--notes`
   overwrites the summary, so use `--expect-updated-at` on an existing item).
   Only the owner rejects; tokens can only read rejections.
-- **Agents never reorder existing items or move items into Now**, including
-  within Next. Routine stage/owner updates omit horizon and rank. Raise any
-  reorder or horizon-change proposal in the weekly chat check for the owner to
-  apply, not as a separate request. An approval response alone does not authorize an
-  agent to perform the move. Expedite is a boolean flag with at most one
-  item; it does not grant permission to change order or horizon.
-  `--expedite` / `--no-expedite` express booleans, but the token API rejects
-  changes to this owner-only flag. Expedite does not override rank order.
-- At each quota reset and at the weekly planning check, present Next
-  candidates with context to the owner in chat. The owner chooses what moves
-  into Now and its order. The app needs no reprioritization schedule.
-- After the coordinator's one-off import, queue files are generated read-only
-  copies: `work plan --format queue > queue.txt` (or `QUEUE.md`). Never edit
-  those copies to prioritize, and never dispatch from an old file instead of
-  reading `work next`. The coordinator runs `manage.py import_plan_queues`
-  after deployment with an explicit JSON mapping for Atlas prose (and any
-  Codex legacy label overrides). It previews by default; `--apply` appends
-  existing unplanned items to Next atomically, Codex then Atlas, deduplicating
-  at first occurrence; `--campaign codex-burn` also tags the Codex-queue items
-  with that campaign. Missing/unmapped/already planned items abort. It keeps
-  stages and checked times, including completed entries; it never creates
-  items or promotes them to Now. See the work-ledger README for mapping and
-  database setup. Workers never run it.
+- **Agents do not reorder items or change horizons on their own initiative**,
+  including within Next. Routine stage/owner updates omit horizon and rank.
+  When the owner asks for a reorder or a horizon change in the coordinator
+  chat, the coordinator applies it and notes the instruction; otherwise raise
+  proposals in the chat summary, not as separate requests. Expedite is a
+  boolean flag with at most one item; it does not grant permission to change
+  order or horizon. `--expedite` / `--no-expedite` express booleans, but the
+  token API rejects changes to this owner-only flag. Expedite does not
+  override rank order.
+- At each quota reset and weekly, summarize in chat what ran, what is parked
+  and the coordinator's next candidates, so the owner can re-steer.
+- `work plan --format queue` prints the plan as a queue listing for reading
+  or comparison; it never overwrites `coordination/codex/queue.txt`. The
+  one-off `manage.py import_plan_queues` (2026-11-08) has run and is not
+  rerun; see the work-ledger README if it is ever needed again.
 
 ## Stage ladder
 

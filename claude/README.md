@@ -14,6 +14,7 @@ Skills and command prompts for Claude Code.
 | `codex-review-loop` | Default reviewer for Claude implementers. Fail-closed Codex review gate using only `gpt-6.1-sol` at high reasoning (medium on request); no model, provider or reviewer fallback. An explicitly requested security review may run `gpt-daybreak-blue-latest` with `--cyber-access-program daybreak_blue`, proven the same way. The reviewer works in a sandboxed throwaway copy of the repository at the reviewed state, and the model is proven from Codex's session record. Uses the shared bundle, slot pool and slice ledger from `claude-review-loop` |
 | `work-ledger` (shared) | Read and update the work app via its CLI/API, loaded from `../codex/skills/work-ledger` |
 | `multi-agent-coordination` (shared) | Coordinator playbook for running many workers, loaded from `../codex/skills/multi-agent-coordination` |
+| `coordinator-start` (shared) | Restart procedure for the coordinator session (mandate from the ledger, periodic check, one recurring 30-minute check), loaded from `../codex/skills/coordinator-start` |
 | `claude-review-loop` (shared dependency) | Supervised Claude gate loaded from `../codex/skills/claude-review-loop` |
 
 ## Commands

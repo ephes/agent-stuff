@@ -14,6 +14,7 @@ Skills for the Codex coding agent.
 | `review-handoff` | Generate a code review prompt for a second agent |
 | `work-ledger` | Read and update the work app via its CLI/API; one agent-neutral copy shared with Claude and Pi |
 | `multi-agent-coordination` | Coordinator playbook for running many workers; one agent-neutral copy shared with Claude and Pi |
+| `coordinator-start` | Restart procedure for the owner's Claude coordinator session; lives here with the shared coordination skills, installed for Claude only |
 
 `opus-review-loop` remains in the repository as an uninstalled compatibility
 shim for older CLI callers. New skill references must use `claude-review-loop`.

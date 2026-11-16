@@ -16,16 +16,31 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   dispatches and resumes workers, verifies their claims, relays to the owner.
   Implementation, builds, tests, reviews, merges, deploys, installs and
   investigations go to workers, even when they look quick.
-- **Clerk** (an optional bookkeeping agent acting for the coordinator, under
-  the coordinator's `work-ledger` rules): verifies pushes itself with
-  `git ls-remote` before recording them, updates work-app items, creates one
-  request per C-class decision (see **Decision classes**), reports usage,
-  and summarizes owner responses without consuming them. The coordinator still owns the decisions.
+- **Codex workers implement and park.** A Codex implementation worker pushes
+  exactly one branch `codex-q/<job>` (for example `codex-q/r101-daybook`),
+  verifies it with `git ls-remote` and stops. It never merges, never pushes
+  the default or integration branch and never deploys.
+- **Claude clerks review, merge and deliver.** A clerk (a Claude worker on the
+  coordinator's behalf, usually on the second account) takes parked
+  `codex-q/*` branches without repo overlap with other clerks, runs the
+  cross-family review gate (`claude-review-loop`) and the repo's full local
+  gates, merges, pushes, verifies with `git ls-remote`, deletes the merged
+  `codex-q/*` remote branch, deploys (A-class, **Decision classes**) and
+  updates the ledger. Deleting the merged branch is what tells the Codex
+  autoround (**Quota pacing**) that the branch is no longer in the merge
+  backlog. It is the one exception to "never delete remote branches"
+  (`_rules-common.txt`): only a `codex-q/*` branch, only after the merge is
+  verified on the remote integration branch, and the clerk brief states the
+  exception explicitly, because the common rules alone forbid it. Bookkeeping clerks follow the coordinator's `work-ledger` rules:
+  verify pushes with `git ls-remote` before recording them, create one
+  request per C-class decision, report usage, and summarize owner responses
+  without consuming them. The coordinator still owns the decisions.
 - **Scouts** are read-only workers that find ready, valuable slices and return
   a ranked list of bundles (see **Bundling** under the brief checklist), not
   single items; the coordinator (or clerk) records the chosen ones as `idea`
-  items. Prefer security and data-loss bugs, broken CI, and well-specified
-  backlog items.
+  items, or the Codex autoround turns them into per-repo briefs. Prefer
+  security and data-loss bugs, broken CI, and well-specified backlog items.
+  Scouts never widen the owner's mandate (**Planning and dispatch order**).
 - **Implementation workers** never write to the work app; they report, and the
   coordinator or clerk verifies before recording.
 - **Spawning is tool-specific**: Claude Code uses its Agent tool (resume with
@@ -51,7 +66,7 @@ the campaign's values, because workers see nothing else.
 | Review of Codex work | `claude-review-loop --model claude-opus-5-5 --effort high`, on the account of the session that runs it | same |
 | Escalation model | `claude-fable-5-2` at `high` with `CLAUDE_CONFIG_DIR=~/.claude-katharina` | same |
 | After 2 not-clean rounds | park | escalate once, then park if still not clean |
-| Delivery | agents merge after a clean review | open a merge request only; people merge in the GitLab web UI |
+| Delivery | Codex parks `codex-q/<job>`; a Claude clerk reviews, merges and deploys | open a merge request only; people merge in the GitLab web UI |
 
 - An override changes a value, not a rule. The different-family review gate,
   the commit gate, the fail-closed harness rules and the **Decision classes**
@@ -86,15 +101,18 @@ the campaign's values, because workers see nothing else.
 
 ## State and owner decisions
 
-- The work app is the source of truth, not chat history. Long coordinator
-  sessions get compacted; anything that matters is on an item before the turn
-  ends.
+- The owner steers by talking to the coordinator session; the work app is
+  where that steering is kept, not chat history. Long coordinator sessions get
+  compacted and restarted (`coordinator-start`), so anything that matters,
+  owner instructions included, is on an item or a note before the turn ends.
 - Stages are distinct claims (`work-ledger` stage ladder). Verify a worker's
   claim yourself before recording it, and read the full test or build log
   (for example `grep -E 'SKIP|FAIL|ERROR'`) before closing an item; a summary or
   the tail of a log is not evidence.
-- Owner decisions arrive as work-app responses. Act on one through a worker,
-  record the outcome, then consume it.
+- Owner decisions arrive in the coordinator chat or as work-app responses.
+  Act on one through a worker and record the outcome; consume a work-app
+  response afterwards (**Planning and dispatch order** for chat
+  instructions).
 - **No routine acceptance asks.** For code-only or technically verifiable
   work, record the evidence and set the strongest verified stage (often
   `installed`); do not ask the owner for *Tested OK*. Ask for acceptance only
@@ -117,8 +135,9 @@ root on the owner's hosts themselves. Classify every action before it runs:
 - **A, do it, then inform**: code, tests, merges after a clean review, and
   routine deploys on the owner's hosts with a known rollback path. No
   backup before a deploy: the nightly backups are the safety net (owner
-  2026-11-12). Workers deploy themselves; no owner ask. A merged fix is
-  not done until it is deployed: commit, push and deploy belong together.
+  2026-11-12). The worker that merges (usually a Claude clerk) deploys
+  itself; no owner ask. A merged fix is not done until it is deployed:
+  merge, push and deploy belong together.
 - **B, independent check, then do it**: new deploy paths, migrations, changes
   to shared services, and retiring clearly unused non-vital things under an
   existing owner rule. Before acting, a reviewer of a different model family
@@ -152,19 +171,32 @@ root on the owner's hosts themselves. Classify every action before it runs:
 
 ## Planning and dispatch order
 
-`/plan/` and the planning CLI are live since 2026-11-08: the owner sets the plan
-on `/plan/` (Now / Next / Later), and queue files are only generated copies. Use
-the rollout and command contract in `work-ledger`. Before dispatch, read
-`work next [--project P] [--topic T] [--campaign C] [--limit N]` (`--campaign`
-only once the campaign deploy is live; see the campaign rollout note in
-`work-ledger`) and take available Now items in rank order, subject to dependencies,
-same-repo sequencing and quota capacity. If no Now item fits, say why in
-the digest and wait; do not promote a Next item yourself. A Now count over six is
-only a WIP warning and does not stop `work next`. The default limit is one;
-filtering happens before the limit. Eligibility is `designed`/`prototype`, no
-open owner request, owner `jochen`/`claude`/`codex`/`pi`; named worker or unknown
-owners are excluded. This snapshot does not claim work or replace checking for
-a running worker.
+Owner decision 2026-11-16: the owner steers by talking to the coordinator
+session; `/plan/` gives him no overview yet. So:
+
+- **The owner's chat instructions are authoritative**: assignments,
+  priorities, stops and changes of plan. The coordinator records each one
+  durably in the ledger (item fields, or a `work note` saying "owner chat
+  <date>: ...") and acts on it. No re-confirmation in the web app is needed,
+  and none is asked for.
+- **Delegated mandate.** The owner may delegate a bounded mandate in chat:
+  allowed repos, goals, exclusions, capacity limits (accounts, parallel
+  workers, quota) and duration. The coordinator records it as a note on a
+  standing coordination item (so `coordinator-start` can reconstruct it after
+  a restart) and, within it, selects and dispatches work itself without asking.
+  Scouts and workers never widen it; anything outside it waits for the owner's
+  next chat turn. Without a mandate, the coordinator dispatches only what the
+  owner assigned.
+- **Dispatch lists.** `coordination/codex/queue.txt` (in ws-work-planning) is
+  the operational Codex dispatch list: one brief name per line, read by
+  `feeder.sh` and refilled by `autoround.sh` (**Quota pacing**). It is not a
+  generated copy of `/plan/`; the coordinator edits it directly to follow the
+  owner's instructions and mandate. Claude clerks run from
+  `coordination/katharina/` briefs.
+- **`/plan/` is an optional overview**, not a precondition: `work plan` and
+  `work next` show what the owner ranked there, and an owner who uses it gets
+  his order respected, but an item does not have to be in Now to be
+  dispatched.
 
 Before creating an item or proposing work (scout bundles included), run
 `work rejected --search "<key words>"`. If the owner already marked a matching
@@ -176,22 +208,16 @@ Later (`work upsert ... --summary "..." --horizon next`, without rank or
 neighbours). Every new item gets a plain German `--summary` (what, what will
 happen, benefit) and, while the owner has something to decide, a `--decision`
 question (`work-ledger`, **Items**); scout bundles and queue items too. Mark a
-campaign's items with `--campaign <slug>` (for example `codex-burn`), never
-with a topic; before the campaign deploy, leave the campaign unset. Agents never reorder, including within Next, and never move items
-into Now. Raise
-reorder and horizon proposals in the weekly chat check below, not as separate asks;
-claiming work changes stage to `implementing` and owner to the worker, not
+campaign's items with `--campaign <slug>`, never with a topic. Agents do not
+reorder `/plan/` or change horizons on their own initiative; when the owner
+asks for it in chat, the coordinator applies it and notes the instruction.
+Claiming work changes stage to `implementing` and owner to the worker, not
 horizon or rank. Re-read and use the lost-update guard before claiming.
 
-At every quota reset and weekly, present the Next candidates and their context
-to the owner **in chat** for reprioritization. The owner chooses the order and
-promotions; no app-side schedule is needed. After deployment, the coordinator
-runs the preview-first `manage.py import_plan_queues` script with explicit
-Atlas prose mappings (Codex then Atlas source order, all entries into Next;
-`--apply` writes atomically and refuses already planned items).
-Thereafter `coordination/codex/queue.txt` and `coordination/atlas/QUEUE.md` are
-read-only generated copies (`work plan --format queue`), never independent
-sources of dispatch order. Workers do not run the import.
+At every quota reset and weekly, summarize in chat what ran, what is parked
+and what the coordinator would do next, so the owner can re-steer. The
+finished `codex-burn` campaign (Codex burn-down, November 2026) is history:
+its items keep `--campaign codex-burn`, new items never get it.
 
 ## Quota pacing
 
@@ -228,6 +254,37 @@ sources of dispatch order. Workers do not run the import.
   about 1% of the weekly window per hour (13 parallel workers measured
   12-14%/h in October 2026), so ~3%/h means about three such workers.
   Workers that mostly wait on reviews cost less; measure before scaling up.
+- **Codex costs far less than it looks; never let its queue run dry.**
+  Measured with scout round 101 (2026-11-15): a Codex scout round of ~15 per-repo jobs (gpt-6.1-sol
+  high) used only ~3% of the weekly window in ~10 hours. Unused Codex quota
+  expires at the reset, so an empty `queue.txt` before a reset is a
+  coordinator bug. The limit is merge capacity, not quota: a parked branch
+  is worth nothing until a clerk has reviewed, merged and deployed it.
+- **Codex supply runs without the coordinator** (ws-work-planning
+  `coordination/codex/`): `feeder.sh` keeps up to `MAX` (6) `run.sh` jobs
+  running from `queue.txt`, runs `codex-quota-guard` first and moves a brief
+  to `started.txt` only once `run.sh` has really started; `autoround.sh`,
+  called on every feeder loop, turns a finished scout round into per-repo
+  briefs `cx-rN-<repo>` (`round-tpl.md`) and queues the next scout
+  (`scout-tpl.md`) when the queue runs low. Its guard rails: no new round
+  while more than `BACKLOG_MAX` (6) parked `codex-q/*` branches are unmerged
+  or the oldest has waited longer than `BACKLOG_HOURS` (24); at most one open
+  branch per repo (repos with an open one are skipped, their bundles stay in
+  the scout file); off after two empty rounds in a row or a generator
+  failure (`autoround.off` holds the reason; remove it to re-enable); the
+  current pause reason is in `autoround.pause` and `autoround.log`. Each
+  script holds a lock (`feeder.lock`, `autoround.lock`), so a second copy
+  exits. Stop the feeder with `touch stop.flag` and wait for it to exit;
+  running Codex jobs are separate processes and keep running. Never edit
+  `feeder.sh` in place while it runs (bash reads scripts incrementally):
+  write the new file next to it and `mv` it.
+- **Every periodic check verifies the supply chain**: feeder running, queue
+  length, autoround state and pause reason, and the merge backlog (parked
+  `codex-q/*` branches without a clerk). A backlog pause (like
+  `autoround.off`) stops only round expansion and scout prefetch; the feeder
+  keeps dispatching what is already in `queue.txt`, so once that is used up
+  Codex idles. Start clerks before it bites (`coordinator-start` has the
+  check). To stop dispatch itself, use `stop.flag`.
 - Usage reporting is mandatory. Keep the weekly windows fresh in the work app
   (Claude "Weekly · all models", Codex weekly; only those) at session start,
   whenever handling worker results, and on every periodic check (at least
@@ -266,9 +323,11 @@ sources of dispatch order. Workers do not run the import.
 
 - While a campaign runs, schedule a recurring check every 30-60 minutes
   (Claude Code: CronCreate or `/loop`; Codex: its own scheduler or herdr). Each
-  check reads unconsumed owner responses and newly approved items, checks
-  running workers, reports usage, and dispatches the next approved or queued
-  work within the pacing budget.
+  check reads unconsumed owner responses, checks running workers, the Codex
+  feeder, autoround and merge backlog, reports usage, and dispatches the next
+  work within the owner's mandate and the pacing budget. `coordinator-start`
+  holds the standard check prompt and sets up exactly one such schedule after
+  a coordinator restart.
 - Scheduled checks only fire while the coordinator is idle, so run the same
   check whenever handling results. Remove the schedule when the campaign ends.
 
@@ -322,8 +381,11 @@ Every brief states the item slug, goal, acceptance criteria, and:
 - **Delivery**: feature branch, push only after
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
   (origin under `github.com/ephes/`; otherwise report, never push), verify with
-  `git ls-remote`. Agents merge and push a slice themselves once the
-  cross-family review is clean and the tests pass. A campaign brief may say
+  `git ls-remote`. A Codex implementation worker parks: it pushes one
+  `codex-q/<job>` branch and stops (**Roles**). A Claude clerk (or a Claude
+  implementer whose brief says to merge) merges and pushes once the
+  cross-family review is clean and the tests pass, then deletes the merged
+  `codex-q/*` branch (the brief grants that exception, **Roles**). A campaign brief may say
   "open a merge request only" for a repo where people merge: the worker then
   pushes only the feature branch, opens the merge request and stops. It never
   merges or pushes to the default branch, and the item stays below `merged`
@@ -331,8 +393,8 @@ Every brief states the item slug, goal, acceptance criteria, and:
   the push needs a remote the owner named for the campaign; a brief alone does
   not allow it. Deploys follow the
   **Decision classes**: the brief names the class and, for a deploy, the
-  rollback path (no pre-deploy backup); A-class deploys the worker runs
-  itself, in the same run as the merge.
+  rollback path (no pre-deploy backup); A-class deploys the merging worker
+  runs itself, in the same run as the merge.
 - **Review**: independent gate via the installed harness per
   `cross-agent-review-cycle`. After 2 rounds that are not clean (unresolved
   Critical/Warning; a Suggestion-only round is not, see that skill), park the
