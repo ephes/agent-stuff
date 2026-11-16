@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep husks and cache-only workspaces containing nested device boundaries.
+  Check admission and the entire pinned workspace before any deletion or
+  Go-cache permission changes; refuse unreadable boundaries and workspaces
+  mounted on a different device from their root. Same-device bind mounts
+  remain outside this check.
+
 - Bind cache-only deletion to the inspected workspace, selected caches and
   parent directory identities through pinned descriptors. Refuse directory
   and symlink replacements before deleting any selected cache; recheck names

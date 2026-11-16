@@ -124,9 +124,25 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     payload_abs = {os.path.join(path, p) for p in WORKSPACE_PAYLOADS}
     errors: list[str] = []
     walked = 0
+    try:
+        device = os.lstat(path).st_dev
+    except OSError as exc:
+        h.note = f"unreadable: {exc}"
+        return h
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=lambda e: errors.append(e.filename)):
         budget.check()
+        try:
+            # Check children before os.walk can descend into a mount; check
+            # the current directory again in case it changed during descent.
+            for candidate in [dirpath] + [os.path.join(dirpath, d) for d in dirnames]:
+                st = os.lstat(candidate)
+                if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
+                    h.note = f"nested device boundary: {candidate}"
+                    return h
+        except OSError as exc:
+            h.note = f"unreadable device boundary: {exc}"
+            return h
         if not os.access(dirpath, os.W_OK, follow_symlinks=False):
             h.readonly_dirs += 1
         walked += len(dirnames) + len(filenames)
@@ -143,6 +159,7 @@ def inspect(path: str, sizes: bool = True) -> Husk:
         dirnames[:] = [d for d in dirnames if d != ".git"]
     if errors:
         h.note = (h.note + "; " if h.note else "") + f"unreadable: {', '.join(errors[:3])}"
+        return h
     for rel, payload in _entries(path):
         kb = _du_kb(os.path.join(path, rel)) if sizes else 0
         h.entries.append({"path": rel, "kb": kb, "payload": payload})
@@ -287,6 +304,27 @@ def _keep_inside(path: str, keep_patterns: list[str]) -> str:
     return ""
 
 
+def _preflight_device(dir_fd: int, device: int) -> None:
+    """Refuse the entire candidate before any unlink/chmod on boundary error.
+
+    fwalk pins each visited directory; lstat checks children before descent,
+    fstat checks the descriptor actually opened. Never follow symlinks, and
+    propagate traversal errors instead of silently skipping an unreadable tree.
+    """
+    def failed(exc):
+        raise exc
+
+    for path, dirs, _, fd in os.fwalk(".", dir_fd=dir_fd,
+                                      follow_symlinks=False, onerror=failed):
+        budget.check()
+        if os.fstat(fd).st_dev != device:
+            raise OSError(errno.EXDEV, "nested device boundary", path)
+        for name in dirs:
+            st = os.lstat(name, dir_fd=fd)
+            if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
+                raise OSError(errno.EXDEV, "nested device boundary", os.path.join(path, name))
+
+
 def _identity(st) -> tuple[int, int]:
     return st.st_dev, st.st_ino
 
@@ -326,6 +364,8 @@ def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = Fa
             if ((identity is not None and _identity(st) != identity)
                     or (ino is not None and st.st_ino != ino)):
                 return "replaced since the inspection"
+            if st.st_dev != os.fstat(root_fd).st_dev:
+                return "workspace device boundary; nothing removed"
             opened = {"": ws_fd}
             links = [(root_fd, ws_name, ws_fd)]
             selected = []
@@ -347,6 +387,10 @@ def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = Fa
             # leave an earlier payload partially deleted.
             for parent, name, child in links:
                 _require_same(parent, name, child)
+            # Preflight the whole workspace, including every cache, before
+            # any mutation. A later payload must not fail after an earlier
+            # one was deleted, nor may Go-cache unlock cross a device.
+            _preflight_device(ws_fd, st.st_dev)
             if whole:
                 if unlock:
                     readonly.unlock(ws_fd)

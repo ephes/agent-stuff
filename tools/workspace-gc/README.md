@@ -416,6 +416,15 @@ cache directory (including a symlink substitution) causes refusal. Names are
 checked again before removing the emptied directories. Fresh live-use checks
 still run for every candidate; concurrent filesystem writes are not atomic.
 
+Husk/cache admission refuses nested directories on a different device
+(`st_dev`) without descending into them. Immediately before deletion, a
+second walk through pinned descriptors checks the entire workspace, propagates
+unreadable-directory errors and refuses device boundaries before deleting or
+unlocking anything. A workspace on a different device from its root is also
+refused. The whole candidate stays on refusal. These checks do not detect
+same-device bind mounts; those need separate platform support. They also do
+not make concurrent mount or filesystem changes atomic with deletion.
+
 ## Read-only Go module caches
 
 `go mod download` makes the directories of its module cache read-only (mode
