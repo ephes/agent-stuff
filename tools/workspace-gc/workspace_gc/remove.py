@@ -39,8 +39,8 @@ from . import signals as sig_mod
 from .husks import _fd_path
 from .git import GitError
 from .inventory import (Checkout, Inspector, LendingCache, _is_under, borrowers_of,
-                        deletion_scan, hidden_state, keep_match, lending_scope, project_names,
-                        scan_ignored)
+                        codex_job, deletion_scan, hidden_state, keep_match, lending_scope,
+                        project_names, ref_snapshot, scan_ignored, scout_round)
 
 
 class Refused(Exception):
@@ -99,8 +99,7 @@ def _check_payload_state(co, path, real, regenerable, urls):
 
 
 def _refs(path):
-    return git.out(["for-each-ref", "--format=%(refname) %(objectname)",
-                    "refs/heads", "refs/tags"], path)
+    return ref_snapshot(path)
 
 
 def _recheck(co: Checkout, roots: list[str], main_roots: list[str],
@@ -146,13 +145,46 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
         raise Refused(f"kind {co.kind} is never removed")
     # A clone resolved through a same-root sibling borrows that sibling's objects.
     alternates = list(dict.fromkeys(alternates + co.alternates))
-    count, _, errors, missing, _ = fresh.unpushed(path, revs, urls, alternates)
+    count, _, errors, missing, added = fresh.unpushed(path, revs, urls, alternates)
     if errors:
         raise Refused("remote check failed: " + errors[0])
-    if count:
+    if count and co.superseded:
+        if missing:
+            raise Refused(f"{count} commit(s) not on a network remote ({missing} remote tip(s) "
+                          "missing locally, containment unknown)")
+        if count != co.unpushed or _refs(path) != co.codex_refs:
+            raise Refused("branches, tags or commits on no remote changed since the inventory")
+        _recheck_codex(co, path, urls, list(dict.fromkeys(alternates + added)), fresh, count)
+    elif count:
         why = f"{missing} remote tip(s) missing locally, containment unknown" if missing \
             else (errors[0] if errors else "")
         raise Refused(f"{count} commit(s) not on a network remote" + (f" ({why})" if why else ""))
+    if co.scout_round and (scout_round(co) != co.scout_round
+                           or not fresh.scout_done(co.scout_round)):
+        raise Refused(f"scout round {co.scout_round} has no runner closeout now")
+
+
+def _recheck_codex(co: Checkout, path: str, urls: list[str], alternates: list[str],
+                   fresh: Inspector, count: int) -> None:
+    """Re-establish the Codex job clone rule (inventory.codex_superseded) that
+    made `co` class A despite commits on no remote: merged.txt or dropped.txt
+    still close its job (read again), or, for a legacy clone, the branch is
+    still gone from the remote and every patch is on the integration branch
+    (fresh ls-remote and cherry)."""
+    if codex_job(co) != co.codex_job or not co.codex_job:
+        raise Refused("not a Codex job clone any more")
+    closed, blocker = fresh.codex_closed(co.codex_job, urls)
+    if closed:
+        if fresh.unpushed(path, ["HEAD"], urls, alternates, fetch_missing=False)[0] != count:
+            raise Refused("local commits on no network branch or tag outside HEAD")
+        return
+    if co.codex_closed:
+        raise Refused(f"Codex job no longer closed: {blocker}")
+    branch = git.run(["symbolic-ref", "-q", "--short", "HEAD"], path, check=False).stdout.strip()
+    blocker, patches_on = fresh.legacy_codex_facts(path, branch, urls, alternates)
+    if blocker or not patches_on:
+        raise Refused("legacy Codex job clone no longer superseded: "
+                      + (blocker or "not every patch is on the integration branch"))
 
 
 def _delete_clone(path, expected, unlock=False):

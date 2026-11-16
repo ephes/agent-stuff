@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import fnmatch
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -77,6 +78,19 @@ DEFAULT_LENDING_TTL = 600.0
 DISCOVERY_SKIP = PAYLOAD_DIRS | {".git", "__pycache__"}
 MAX_DEPTH = 3
 MAX_JOBS = 32   # inspections in parallel, whatever --jobs says
+# Codex job and scout clones (see codex_superseded and scout_gate): a job runs
+# in ~/workspaces/ws-cx-<job>/<repo> (<job> starts with "cx-"), a scout round N
+# in ws-cx-scoutN/<repo>. The coordination directory records finished jobs
+# (<job>.out, scoutN.out with a "## Runner closeout") and closed ones (merged.txt
+# and dropped.txt: <job>\t<repo>\t<merge sha | reason>). Both rules need
+# CODEX_MIN_IDLE_HOURS idle whatever --min-idle-hours says.
+CODEX_WS_PREFIX = "ws-cx-"
+CODEX_JOB_PREFIX = "cx-"
+CODEX_BRANCH_PREFIX = "codex-q/"
+CODEX_MIN_IDLE_HOURS = 48.0
+CODEX_CLOSEOUT = "## Runner closeout"
+SCOUT_RE = re.compile(r"ws-cx-scout([0-9]+)")
+DEFAULT_CODEX_DIR = os.path.join(HOME, "workspaces", "ws-work-planning", "coordination", "codex")
 CLASS_NAMES = {"A": "removable", "B": "removable after push",
                "C": "needs owner", "D": "keep"}
 
@@ -122,6 +136,16 @@ class Checkout:
     last_activity: str = ""     # newest of last commit, git-dir files, checkout dir
     idle_hours: float = -1.0
     error: str = ""
+    # Codex job and scout clones (see codex_superseded, scout_gate); empty otherwise.
+    codex_job: str = ""          # <job> of a job clone ws-cx-<job>/<repo> (<job> = cx-...)
+    codex_closed: str = ""       # "merged <sha>" / "dropped: <reason>" from merged/dropped.txt
+    codex_closed_blocker: str = ""  # why merged.txt/dropped.txt do not close the job
+    codex_blocker: str = ""      # legacy rule: git fact that rules it out
+    codex_patches_on: str = ""   # legacy rule: integration branch holding every patch
+    scout_round: int = 0         # N of a scout clone ws-cx-scoutN/<repo>
+    scout_done: bool = False     # scoutN.out has a "## Runner closeout"
+    superseded: str = ""         # set when class A comes from the Codex job clone rule
+    codex_refs: str = ""         # job clones: branches and tags at inventory (ref_snapshot)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -395,7 +419,7 @@ class Inspector:
 
     def __init__(self, main_roots: list[str] | None = None, use_cache: bool = True,
                  keep_patterns: list[str] | None = None, fetch: bool = True,
-                 run_deadline: float | None = None):
+                 run_deadline: float | None = None, codex_dir: str | None = None):
         # Remote lookups are shared by every checkout of a URL, so they run
         # under their own step (their nominal timeouts, never past the run
         # deadline), not under what is left of the step of whichever
@@ -406,12 +430,14 @@ class Inspector:
         self.use_cache = use_cache
         self.fetch = fetch
         self._lock = threading.Lock()
-        self._ls: dict[str, tuple[set[str] | None, str]] = {}
+        self._ls: dict[str, tuple[dict[str, str] | None, str]] = {}
         self._heads: dict[str, tuple[str, str]] = {}
         self._root_index: dict[str, list[str]] | None = None
         self._scratch = ""
         self._fetched: dict[str, tuple[str, str]] = {}
         self._url_locks: dict[str, threading.Lock] = {}
+        self.codex_dir = codex_dir or os.environ.get("WORKSPACE_GC_CODEX_DIR") or DEFAULT_CODEX_DIR
+        self._codex_closed: dict[str, tuple[str, str]] | None = None
 
     def close(self) -> None:
         """Delete the private scratch repositories of this run."""
@@ -474,20 +500,59 @@ class Inspector:
             self._heads[url] = (branch, sha)
         return branch, sha
 
+    # -- Codex coordination files
+
+    def codex_closed(self, job: str, urls: list[str]) -> tuple[str, str]:
+        """(closed, blocker) for Codex job `job`: closed is "merged <sha>" or
+        "dropped: <reason>" when merged.txt or dropped.txt of the coordination
+        directory lists the job for the repository the clone's network remotes
+        name; else blocker says why not. The files are read once per Inspector
+        (every time without the cache)."""
+        with self._lock:
+            table = self._codex_closed if self.use_cache else None
+        if table is None:
+            table = read_codex_closed(self.codex_dir)
+            with self._lock:
+                self._codex_closed = table
+        entry = table.get(job)
+        if entry is None:
+            return "", (f"job {job} is in neither merged.txt nor dropped.txt of "
+                        f"{self.codex_dir}")
+        repo, closed = entry
+        names = {_repo_name(u) for u in urls}
+        if repo.lower() not in names:
+            return "", (f"{job} is closed for repository {repo}, but this clone's remote is "
+                        + ", ".join(sorted(names)))
+        return closed, ""
+
+    def scout_done(self, n: int) -> bool:
+        """Scout round `n` has finished: scoutN.out has a runner closeout."""
+        try:
+            with open(os.path.join(self.codex_dir, f"scout{n}.out"), encoding="utf-8",
+                      errors="replace") as fh:
+                return any(line.startswith(CODEX_CLOSEOUT) for line in fh)
+        except OSError:
+            return False
+
     # -- remotes
 
-    def ls_remote(self, url: str) -> tuple[set[str] | None, str]:
+    def ls_remote_refs(self, url: str) -> tuple[dict[str, str] | None, str]:
+        """({ref name: object name} of every branch and tag, error)."""
         with self._lock:
             if self.use_cache and url in self._ls:
                 return self._ls[url]
         try:
             with self._shared_step():
-                res: tuple[set[str] | None, str] = (git.ls_remote(url), "")
+                res: tuple[dict[str, str] | None, str] = (git.ls_remote_refs(url), "")
         except (GitError, budget.StepTimeout) as exc:
             res = (None, str(exc))
         with self._lock:
             self._ls[url] = res
         return res
+
+    def ls_remote(self, url: str) -> tuple[set[str] | None, str]:
+        refs, err = self.ls_remote_refs(url)
+        return (None if refs is None else set(refs.values())), err
 
     def _shared_step(self):
         stack = contextlib.ExitStack()
@@ -609,6 +674,23 @@ class Inspector:
         locally (including alternates) can be used; `missing tips` counts the
         others, so a non-zero count with missing tips means "unknown", not
         "unpushed". Any git failure raises GitError - never a number."""
+        present, missing, errors = self._present_tips(repo, urls, alternates)
+        stdin = "".join(f"^{s}\n" for s in present)
+        raw = git.out(["rev-list", "--count", "--stdin", *revs], repo,
+                      input=stdin, alternates=alternates).strip()
+        if not raw.isdigit():
+            raise GitError(f"rev-list --count gave no number: {raw[:60]!r}")
+        count = int(raw)
+        sample = []
+        if count:
+            sample = git.out(["log", "--stdin", "--format=%H %cs %s", "-n", "8", *revs], repo,
+                             input=stdin, alternates=alternates).splitlines()
+        return count, sample, errors, missing
+
+    def _present_tips(self, repo: str, urls: list[str], alternates: list[str]
+                      ) -> tuple[list[str], int, list[str]]:
+        """(remote branch and tag tips whose objects exist locally, number of
+        tips missing locally, errors of unreachable URLs)."""
         tips: set[str] = set()
         errors = []
         for url in urls:
@@ -628,17 +710,62 @@ class Inspector:
                     present.append(parts[0])
                 elif len(parts) == 2 and parts[1] == "missing":
                     missing += 1
+        return present, missing, errors
+
+    def legacy_codex_facts(self, repo: str, branch: str, urls: list[str],
+                           alternates: list[str]) -> tuple[str, str]:
+        """Git facts for a legacy Codex job clone (see codex_superseded):
+        (blocker, branch). Legacy jobs pushed their codex-q/ branch to GitHub,
+        and the merge clerk deleted it there after merging a rebased copy. The
+        rule needs proof the branch was pushed (a remote-tracking ref of the
+        same name), the branch gone from every network remote, and every local
+        commit that is on no remote branch or tag on HEAD. `branch` names the
+        integration branch (the remote's default branch, or develop) that has
+        a commit with the same patch (git cherry) for each of them, else "".
+        `blocker` says why the rule cannot apply. Any git error raises
+        GitError."""
+        if not branch.startswith(CODEX_BRANCH_PREFIX):
+            return f"not on a {CODEX_BRANCH_PREFIX} branch", ""
+        tracking = git.out(["for-each-ref", "--format=%(refname)", "refs/remotes"], repo)
+        if not any(ref.endswith("/" + branch) for ref in tracking.split()):
+            return (f"{branch} was never pushed (no remote-tracking ref); only merged.txt or "
+                    "dropped.txt can close this job"), ""
+        candidates: list[tuple[str, str]] = []
+        for url in urls:
+            refs, err = self.ls_remote_refs(url)
+            if refs is None:
+                return f"cannot list the branches of {url}: {err}", ""
+            if f"refs/heads/{branch}" in refs:
+                return f"{branch} still exists on {url}", ""
+            default, head = self.default_head(url)
+            if head:
+                candidates.append((default or "default branch", head))
+            if default != "develop" and "refs/heads/develop" in refs:
+                candidates.append(("develop", refs["refs/heads/develop"]))
+        present, missing, errors = self._present_tips(repo, urls, alternates)
+        if errors:
+            return "remote unreachable: " + errors[0], ""
+        if missing:
+            return f"{missing} remote tip(s) missing locally", ""
         stdin = "".join(f"^{s}\n" for s in present)
-        raw = git.out(["rev-list", "--count", "--stdin", *revs], repo,
-                      input=stdin, alternates=alternates).strip()
-        if not raw.isdigit():
-            raise GitError(f"rev-list --count gave no number: {raw[:60]!r}")
-        count = int(raw)
-        sample = []
-        if count:
-            sample = git.out(["log", "--stdin", "--format=%H %cs %s", "-n", "8", *revs], repo,
-                             input=stdin, alternates=alternates).splitlines()
-        return count, sample, errors, missing
+        everywhere = git.out(["rev-list", "--stdin", "HEAD", "--branches", "--tags"], repo,
+                             input=stdin, alternates=alternates).split()
+        on_head = git.out(["rev-list", "--stdin", "HEAD"], repo, input=stdin,
+                          alternates=alternates).split()
+        if set(everywhere) != set(on_head):
+            return ("local commits on no network branch or tag outside HEAD (other local "
+                    "branches or tags)"), ""
+        if not on_head:
+            return "no local commits", ""
+        for name, head in candidates:
+            if git.run(["cat-file", "-e", f"{head}^{{commit}}"], repo, check=False,
+                       alternates=alternates).returncode != 0:
+                continue
+            cherry = git.out(["cherry", head, "HEAD"], repo, alternates=alternates)
+            same = {ln[2:].strip() for ln in cherry.splitlines() if ln.startswith("- ")}
+            if set(on_head) <= same:
+                return "", name
+        return "", ""
 
     def supersession_hints(self, repo: str, sample: list[str], urls: list[str],
                            alternates: list[str]) -> tuple[list[str], list[str]]:
@@ -1068,6 +1195,7 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
         co.alternates = alternates
         co.payloads, co.ignored_unique = scan_ignored(path, regenerable, project_names(urls))
         if urls:
+            fetched: list[str] = []
             revs = ["HEAD"] if co.kind == "worktree" else ["HEAD", "--branches", "--tags"]
             co.unpushed, sample, co.remote_errors, co.missing_tips, _ = ins.unpushed(
                 path, revs, urls, alternates, fetch_missing=False)
@@ -1088,6 +1216,26 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
                 if added:
                     co.notes.append("containment checked against a fresh fetch of "
                                     + ", ".join(urls) + " into a scratch repository")
+                    fetched = added
+            co.codex_job = codex_job(co)
+            if co.codex_job:
+                co.codex_refs = ref_snapshot(path)
+                co.codex_closed, co.codex_closed_blocker = ins.codex_closed(co.codex_job, urls)
+                if co.codex_closed and co.unpushed > 0 and not co.missing_tips:
+                    on_head = ins.unpushed(path, ["HEAD"], urls,
+                                           list(dict.fromkeys(alternates + fetched)),
+                                           fetch_missing=False)[0]
+                    if on_head != co.unpushed:
+                        co.codex_closed, co.codex_closed_blocker = "", (
+                            "local commits on no network branch or tag outside HEAD "
+                            "(other local branches or tags)")
+                if (not co.codex_closed and co.unpushed > 0 and not co.missing_tips
+                        and not co.remote_errors):
+                    co.codex_blocker, co.codex_patches_on = ins.legacy_codex_facts(
+                        path, co.branch, urls, list(dict.fromkeys(alternates + fetched)))
+            co.scout_round = scout_round(co)
+            if co.scout_round:
+                co.scout_done = ins.scout_done(co.scout_round)
             if co.unpushed and sample:
                 try:
                     co.unpushed_hints, _ = ins.supersession_hints(path, sample, urls, alternates)
@@ -1105,6 +1253,83 @@ def inspect(co: Checkout, ins: Inspector, *, keep_patterns: list[str], regenerab
 
 
 # ---------------------------------------------------------------- classify
+
+def ref_snapshot(path: str) -> str:
+    """Every local branch and tag with its object, one per line."""
+    return git.out(["for-each-ref", "--format=%(refname) %(objectname)",
+                    "refs/heads", "refs/tags"], path)
+
+
+def _repo_name(url: str) -> str:
+    """Lower-case repository name of a remote URL (".../openDAW.git" -> "opendaw")."""
+    tail = url.rstrip("/").replace(":", "/").rsplit("/", 1)[-1]
+    return tail.removesuffix(".git").lower()
+
+
+def read_codex_closed(codex_dir: str) -> dict[str, tuple[str, str]]:
+    """{job: (repo, "merged <sha>" | "dropped: <reason>")} from merged.txt and
+    dropped.txt (<job>\t<repo>\t<merge sha | reason>) in `codex_dir`. Missing
+    files count as empty; lines without job and repo are skipped."""
+    closed: dict[str, tuple[str, str]] = {}
+    for name, label in (("dropped.txt", "dropped: "), ("merged.txt", "merged ")):
+        try:
+            with open(os.path.join(codex_dir, name), encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split("\t")
+            if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+                continue
+            detail = parts[2].strip() if len(parts) > 2 else ""
+            closed[parts[0].strip()] = (parts[1].strip(), label + (detail or "(no detail)"))
+    return closed
+
+
+def codex_job(co: Checkout) -> str:
+    """<job> when `co` is a Codex job clone: a clone directly in a workspace
+    directory ws-cx-<job> whose <job> starts with "cx-". Else ""."""
+    name = os.path.basename(co.workspace)
+    job = name[len(CODEX_WS_PREFIX):]
+    if (co.kind != "clone" or not name.startswith(CODEX_WS_PREFIX)
+            or not job.startswith(CODEX_JOB_PREFIX)
+            or os.path.dirname(co.path) != co.workspace):
+        return ""
+    return job
+
+
+def scout_round(co: Checkout) -> int:
+    """N when `co` is a clone directly in a scout workspace ws-cx-scoutN, else 0."""
+    m = SCOUT_RE.fullmatch(os.path.basename(co.workspace))
+    if co.kind != "clone" or not m or os.path.dirname(co.path) != co.workspace:
+        return 0
+    return int(m.group(1))
+
+
+def codex_superseded(co: Checkout) -> str:
+    """Why a Codex job clone with commits on no remote may go, or "" if it may not.
+
+    Codex jobs commit on a local codex-q/ branch and never push it; a merge
+    clerk fetches it from the clone, rebases, merges and pushes only the
+    integration branch, then records the job in merged.txt (or dropped.txt
+    when it is not merged). Such a clone may go once merged.txt or dropped.txt
+    lists its job for the clone's repository. Legacy jobs pushed the branch
+    instead (see Inspector.legacy_codex_facts): their clone may go when the
+    branch is gone from the remote and the integration branch has every
+    local commit's patch. Everything else (clean, no stash, regenerable
+    ignored files only, not in use) is checked as for any class A; idle
+    time is checked by classify."""
+    if not co.codex_job or co.unpushed <= 0:
+        return ""
+    if co.codex_closed:
+        return (f"closed Codex job clone: {co.codex_job} is {co.codex_closed} "
+                f"({co.unpushed} local commit(s) on no remote)")
+    if not co.codex_blocker and co.codex_patches_on:
+        return (f"merged legacy Codex job clone: {co.branch} is gone from the remote and "
+                f"every patch is on {co.codex_patches_on} ({co.unpushed} local commit(s) "
+                "superseded)")
+    return ""
+
 
 def apply_signals(co: Checkout, sig: Signals) -> None:
     ws = co.workspace
@@ -1185,12 +1410,36 @@ def classify(co: Checkout, min_idle_hours: float = 0) -> None:
     elif c_reasons:
         co.cls = "C"
         r.extend(c_reasons)
+    elif co.unpushed > 0 and codex_superseded(co):
+        if co.idle_hours >= CODEX_MIN_IDLE_HOURS:
+            co.cls = "A"
+            co.superseded = codex_superseded(co)
+            r.append(co.superseded)
+        else:
+            co.cls = "D"
+            r.append(f"recently active ({co.last_activity}, idle {co.idle_hours:g}h < "
+                     f"{CODEX_MIN_IDLE_HOURS:g}h for a closed Codex job clone)")
+            co.notes.append(codex_superseded(co))
     elif co.unpushed > 0:
         co.cls = "B"
         r.append(f"{co.unpushed} commit(s) on no network branch or tag")
+        if co.codex_job:
+            why = "; ".join(b for b in (
+                co.codex_closed_blocker, co.codex_blocker or (
+                    "" if co.codex_patches_on or co.missing_tips or co.remote_errors
+                    else "legacy rule: not every patch is on the integration branch")) if b)
+            co.notes.append(f"Codex job clone kept: {why}")
+    elif co.scout_round and not co.scout_done:
+        co.cls = "D"
+        r.append(f"scout round {co.scout_round} not finished (no runner closeout in "
+                 f"scout{co.scout_round}.out)")
     else:
         co.cls = "A"
-        r.append("clean and fully on " + ", ".join(co.network_remotes))
+        if co.scout_round:
+            r.append(f"finished scout round {co.scout_round} clone, clean and fully on "
+                     + ", ".join(co.network_remotes))
+        else:
+            r.append("clean and fully on " + ", ".join(co.network_remotes))
     for w in co.work_items:
         if not w["active"]:
             co.notes.append(f"referenced by closed work item {w['slug']} ({w['stage']})")

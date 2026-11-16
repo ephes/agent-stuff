@@ -16,22 +16,32 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   dispatches and resumes workers, verifies their claims, relays to the owner.
   Implementation, builds, tests, reviews, merges, deploys, installs and
   investigations go to workers, even when they look quick.
-- **Codex workers implement and park.** A Codex implementation worker pushes
-  exactly one branch `codex-q/<job>` (for example `codex-q/r101-daybook`),
-  verifies it with `git ls-remote` and stops. It never merges, never pushes
-  the default or integration branch and never deploys.
+- **Codex workers implement and hand off locally** (owner 2026-11-16: no
+  branches on GitHub, no pull requests). A Codex implementation worker commits
+  on exactly one local branch `codex-q/<job>` (for example
+  `codex-q/r101-daybook`) in its clone `~/workspaces/ws-cx-<job>/<repo>`, pushes
+  nothing and stops; its final message ends with `HANDOFF <clone path>
+  <branch> <head sha>`, and the runner's closeout adds a `CLONE` line with the
+  same facts. It never merges, never pushes and never deploys.
 - **Claude clerks review, merge and deliver.** A clerk (a Claude worker on the
-  coordinator's behalf, usually on the second account) takes parked
-  `codex-q/*` branches without repo overlap with other clerks, runs the
-  cross-family review gate (`claude-review-loop`) and the repo's full local
-  gates, merges, pushes, verifies with `git ls-remote`, deletes the merged
-  `codex-q/*` remote branch, deploys (A-class, **Decision classes**) and
-  updates the ledger. Deleting the merged branch is what tells the Codex
-  autoround (**Quota pacing**) that the branch is no longer in the merge
-  backlog. It is the one exception to "never delete remote branches"
-  (`_rules-common.txt`): only a `codex-q/*` branch, only after the merge is
-  verified on the remote integration branch, and the clerk brief states the
-  exception explicitly, because the common rules alone forbid it. Bookkeeping clerks follow the coordinator's `work-ledger` rules:
+  coordinator's behalf, usually on the second account; normally started by
+  `automerge.sh`, **Quota pacing**) handles one finished job without repo
+  overlap with other clerks: `git fetch <clone> codex-q/<job>` into a fresh
+  worktree from `origin/<integration branch>` (main, or develop where AGENTS.md
+  says so), rebase, the gates Codex could not run, the cross-family review
+  gate (`claude-review-loop`) until clean, merge locally, push ONLY the
+  integration branch, verify with `git ls-remote`, deploy (A-class,
+  **Decision classes**), update the ledger, and append `<job>\t<repo>\t<merge
+  sha>` to `coordination/codex/merged.txt` (or `<job>\t<repo>\t<reason>` to
+  `dropped.txt` when it is not merged; a parked clerk keeps the rebased work
+  in its own worktree first). That line takes the job out of the merge
+  backlog and lets `workspace-gc` remove the Codex clone after 48 hours. No
+  remote feature branch is created or deleted. Legacy jobs that still pushed
+  `codex-q/*` to GitHub (briefs from before 2026-11-16) are merged from
+  GitHub, and their clerk deletes the merged remote branch: the one exception
+  to "never delete remote branches" (`_rules-common.txt`), only for such a
+  legacy branch, only after the merge is verified on the remote integration
+  branch, stated explicitly in the clerk brief. Bookkeeping clerks follow the coordinator's `work-ledger` rules:
   verify pushes with `git ls-remote` before recording them, create one
   request per C-class decision, report usage, and summarize owner responses
   without consuming them. The coordinator still owns the decisions.
@@ -66,7 +76,7 @@ the campaign's values, because workers see nothing else.
 | Review of Codex work | `claude-review-loop --model claude-opus-5-5 --effort high`, on the account of the session that runs it | same |
 | Escalation model | `claude-fable-5-2` at `high` with `CLAUDE_CONFIG_DIR=~/.claude-katharina` | same |
 | After 2 not-clean rounds | park | escalate once, then park if still not clean |
-| Delivery | Codex parks `codex-q/<job>`; a Claude clerk reviews, merges and deploys | open a merge request only; people merge in the GitLab web UI |
+| Delivery | Codex commits `codex-q/<job>` locally in its clone; a Claude clerk fetches it, reviews, merges locally, pushes the integration branch and deploys | open a merge request only; people merge in the GitLab web UI |
 
 - An override changes a value, not a rule. The different-family review gate,
   the commit gate, the fail-closed harness rules and the **Decision classes**
@@ -258,7 +268,7 @@ its items keep `--campaign codex-burn`, new items never get it.
   Measured with scout round 101 (2026-11-15): a Codex scout round of ~15 per-repo jobs (gpt-6.1-sol
   high) used only ~3% of the weekly window in ~10 hours. Unused Codex quota
   expires at the reset, so an empty `queue.txt` before a reset is a
-  coordinator bug. The limit is merge capacity, not quota: a parked branch
+  coordinator bug. The limit is merge capacity, not quota: a finished job
   is worth nothing until a clerk has reviewed, merged and deployed it.
 - **Codex supply runs without the coordinator** (ws-work-planning
   `coordination/codex/`): `feeder.sh` keeps up to `MAX` (6) `run.sh` jobs
@@ -267,24 +277,40 @@ its items keep `--campaign codex-burn`, new items never get it.
   called on every feeder loop, turns a finished scout round into per-repo
   briefs `cx-rN-<repo>` (`round-tpl.md`) and queues the next scout
   (`scout-tpl.md`) when the queue runs low. Its guard rails: no new round
-  while more than `BACKLOG_MAX` (6) parked `codex-q/*` branches are unmerged
-  or the oldest has waited longer than `BACKLOG_HOURS` (24); at most one open
-  branch per repo (repos with an open one are skipped, their bundles stay in
+  while more than `BACKLOG_MAX` (6; the feeder runs with 20) finished Codex
+  jobs are unmerged or the oldest has waited longer than `BACKLOG_HOURS` (24;
+  feeder: 48). The backlog is the finished jobs of `parked.txt` (not queued,
+  not running) that are in neither `merged.txt` nor `dropped.txt`, without
+  `ls-remote`; only legacy jobs (pushed) still count as merged once their
+  branch is gone from GitHub. At most one open job per repo (repos with an open one are skipped, their bundles stay in
   the scout file); off after two empty rounds in a row or a generator
   failure (`autoround.off` holds the reason; remove it to re-enable); the
-  current pause reason is in `autoround.pause` and `autoround.log`. Each
-  script holds a lock (`feeder.lock`, `autoround.lock`), so a second copy
-  exits. Stop the feeder with `touch stop.flag` and wait for it to exit;
+  current pause reason is in `autoround.pause` and `autoround.log`.
+  Merging starts without the coordinator: `coordination/katharina/automerge.sh`,
+  called first on every feeder loop (also while the Codex quota guard
+  refuses), starts one Claude clerk per finished job that is in neither
+  `merged.txt` nor `dropped.txt` (`merge-tpl.md` rendered to `merge-<job>.md`
+  with the clone path, branch and head SHA; `run.sh merge-<job>`) while
+  fewer than `KMAX` (4) such clerks run, never for a repo that a running
+  clerk (automatic or manual) already covers, each job once
+  (`automerge.started`), and not while the Katharina weekly usage reads at or
+  above 90%. A job whose clone holds nothing to hand off goes straight to
+  `dropped.txt`. `automerge.off` disables it; starts and drops are in
+  `automerge.log`. Each script holds a lock (`feeder.lock`,
+  `autoround.lock`, `automerge.lock`), so a second copy exits. Stop the feeder with `touch stop.flag` and wait for it to exit;
   running Codex jobs are separate processes and keep running. Never edit
   `feeder.sh` in place while it runs (bash reads scripts incrementally):
   write the new file next to it and `mv` it.
 - **Every periodic check verifies the supply chain**: feeder running, queue
-  length, autoround state and pause reason, and the merge backlog (parked
-  `codex-q/*` branches without a clerk). A backlog pause (like
+  length, autoround state and pause reason, automerge running (no
+  `automerge.off`, recent `automerge.log` lines) and the merge backlog
+  progressing (`merged.txt`/`dropped.txt` growing). A backlog pause (like
   `autoround.off`) stops only round expansion and scout prefetch; the feeder
   keeps dispatching what is already in `queue.txt`, so once that is used up
-  Codex idles. Start clerks before it bites (`coordinator-start` has the
-  check). To stop dispatch itself, use `stop.flag`.
+  Codex idles. `automerge.sh` keeps the backlog moving; the coordinator
+  starts a clerk by hand only for what it does not cover (a job whose
+  automatic clerk failed without a `merged.txt`/`dropped.txt` line, or while
+  `automerge.off` exists; `coordinator-start` has the check). To stop dispatch itself, use `stop.flag`.
 - Usage reporting is mandatory. Keep the weekly windows fresh in the work app
   (Claude "Weekly · all models", Codex weekly; only those) at session start,
   whenever handling worker results, and on every periodic check (at least
@@ -378,14 +404,18 @@ Every brief states the item slug, goal, acceptance criteria, and:
   result. Workflow-tool subagents can be forced to return on long slices,
   which lost a running review five times in one campaign; run long slices and
   finishers as background agents (Claude Code: the Agent tool) instead.
-- **Delivery**: feature branch, push only after
+- **Delivery**: work on a local feature branch; push only the integration
+  branch (main, or develop where AGENTS.md says so), only after
   `~/projects/agent-stuff/tools/guard-projects/bin/check-push-remote` passes
-  (origin under `github.com/ephes/`; otherwise report, never push), verify with
-  `git ls-remote`. A Codex implementation worker parks: it pushes one
-  `codex-q/<job>` branch and stops (**Roles**). A Claude clerk (or a Claude
-  implementer whose brief says to merge) merges and pushes once the
-  cross-family review is clean and the tests pass, then deletes the merged
-  `codex-q/*` branch (the brief grants that exception, **Roles**). A campaign brief may say
+  (origin under `github.com/ephes/`; otherwise report, never push), and verify
+  with `git ls-remote` (owner 2026-11-16: no feature branches on GitHub, no
+  pull requests). A Codex implementation worker hands off locally: it
+  commits one local `codex-q/<job>` branch in its clone, pushes nothing and
+  stops (**Roles**). A Claude clerk (or a Claude implementer whose brief says
+  to merge) merges locally and pushes only the integration branch once the
+  cross-family review is clean and the tests pass; no feature branch goes to
+  GitHub (only a legacy pushed `codex-q/*` branch is deleted after its merge,
+  **Roles**). A campaign brief may say
   "open a merge request only" for a repo where people merge: the worker then
   pushes only the feature branch, opens the merge request and stops. It never
   merges or pushes to the default branch, and the item stays below `merged`

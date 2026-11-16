@@ -179,12 +179,17 @@ def local_url_path(url: str, repo: str) -> str:
     return os.path.normpath(u)
 
 
-def ls_remote(url: str, cwd: str | None = None) -> set[str]:
-    """Commit-ish object names of every branch and tag on `url`."""
+def ls_remote_refs(url: str, cwd: str | None = None) -> dict[str, str]:
+    """{ref name: object name} of every branch and tag on `url`."""
     text = out(["ls-remote", "--heads", "--tags", url], cwd, timeout=LS_REMOTE_TIMEOUT)
-    shas = set()
+    refs = {}
     for line in text.splitlines():
         parts = line.split("\t")
         if len(parts) == 2 and len(parts[0]) >= 40:
-            shas.add(parts[0])
-    return shas
+            refs[parts[1]] = parts[0]
+    return refs
+
+
+def ls_remote(url: str, cwd: str | None = None) -> set[str]:
+    """Commit-ish object names of every branch and tag on `url`."""
+    return set(ls_remote_refs(url, cwd).values())

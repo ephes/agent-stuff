@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Codex job clones no longer pile up (431 of the 609 directories in
+  `~/workspaces`, about 377 GB in all, were `ws-cx-*` on 2026-11-16). Codex jobs now keep their `codex-q/` branch
+  local and a merge clerk records the job in `merged.txt` or `dropped.txt` of
+  the coordination directory (`WORKSPACE_GC_CODEX_DIR`); a job clone
+  (`ws-cx-<job>/<repo>`) listed there is class A when clean, without stash,
+  not in use and idle for 48 hours, although its commits are on no remote.
+  Legacy clones whose pushed branch the clerk merged and deleted are class A
+  when the branch is gone from the remote and the default branch or
+  `develop` has every local commit's patch (`git cherry`). A clone whose job
+  is in neither file is never removed by this rule. Scout clones
+  (`ws-cx-scoutN/<repo>`) stay class D until `scoutN.out` has a runner
+  closeout. The removal re-check verifies the rule again; `latest.txt` shows
+  the reason.
+
 - Read-only Go module caches no longer stop a removal. `go mod download`
   leaves its module cache with directories at mode 0555, so deleting a stale
   workspace directory with `.cache/go-mod` failed with "Permission denied"

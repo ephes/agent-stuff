@@ -74,14 +74,16 @@ Periodic coordinator check (coordinator-start).
    autoround.off and autoround.pause (pause reason), autoround.state; finished reports = *.out containing
    "## Runner closeout" that are new since the last check. Katharina clerks (coordination/katharina):
    finished *.out reports and running run.sh jobs.
-5. Merge backlog: parked codex-q/* branches not yet merged. Candidates are the lines of parked.txt
-   (<brief> <repo> <branch>) whose job has FINISHED (<brief>.out contains "## Runner closeout") and is neither
-   in queue.txt nor running (no `run.sh <brief>` process); queued or running jobs are not merge-ready. A finished
-   candidate whose branch is still present per `git ls-remote --heads git@github.com:ephes/<repo>.git <branch>`
-   is unmerged. For those that no running clerk covers -> write a clerk brief like
-   coordination/katharina/r101-merge-a.md (repos without overlap with running clerks, _rules-common.txt binding,
-   and state the one exception explicitly: delete each codex-q/* branch after verifying its merge on the remote
-   integration branch) and start it:
+5. Merging runs by itself (owner 2026-11-16: local handoff, nothing may lie around): coordination/katharina/automerge.sh,
+   run by the feeder every loop, starts a clerk for every finished Codex job (parked.txt line whose <brief>.out has
+   "## Runner closeout", not queued, not running) that is in neither codex/merged.txt nor codex/dropped.txt (up to
+   KMAX=4 at once, one per repo, each job once). Verify that it runs: automerge.off is ABSENT, automerge.log has recent
+   lines (starts, drops, quota state) and merged.txt/dropped.txt keep growing; read new merge-<job>.out reports.
+   Backlog = finished jobs in neither file (no ls-remote; legacy jobs pushed before 2026-11-16 still count as merged
+   once their branch is gone from GitHub). Start a clerk by hand only for a job automerge does not cover: listed in
+   automerge.started, its clerk no longer running and no merged/dropped line (failed clerk), or while automerge.off
+   exists. Then render merge-tpl.md like automerge.sh does (or write a brief like it: repos without overlap with
+   running clerks, _rules-common.txt binding) and start it:
    cd ~/workspaces/ws-work-planning/coordination/katharina && nohup ./run.sh <name> > logs/<name>.runner 2>&1 &
    Keep the Codex queue from running dry before the Codex reset, within the owner's mandate.
 6. Report briefly in German in chat only when something changed (finished jobs, merges, pauses, failures,
@@ -104,13 +106,32 @@ Periodic coordinator check (coordinator-start).
   when the owner wants a looser brake; changing them means stopping the
   feeder (`touch stop.flag`, wait for it to exit, remove the flag) and
   starting it again.
+- Automatic merge clerks (`coordination/katharina/automerge.sh`, header
+  comment has the details): the feeder runs it first on every loop. Codex
+  jobs commit on a local `codex-q/*` branch in their clone
+  (`~/workspaces/ws-cx-<job>/<repo>`) and push nothing. For each finished job
+  in neither `codex/merged.txt` nor `codex/dropped.txt` it renders
+  `merge-tpl.md` to `merge-<job>.md` (clone path, branch, head SHA) and starts
+  `run.sh merge-<job>`, at most `KMAX` (4, feeder environment) at once, never
+  on a repo that a running clerk's brief names, and each job only once
+  (`automerge.started`; remove a line to let it retry). A clone with nothing
+  to hand off goes to `dropped.txt` directly. It skips starts while
+  `claude-usage-read` reports the Katharina weekly usage at or above 90%
+  (read on atlas when the local read fails), and skips that check (logged
+  once) when the usage cannot be read. `touch automerge.off` disables it;
+  starts, drops and skips are in `automerge.log`. The clerk merges locally,
+  pushes only the integration branch and appends the job to `merged.txt` (or
+  `dropped.txt` with the reason); `workspace-gc` then removes the Codex clone
+  after 48 hours.
 - Katharina clerks (`coordination/katharina/`): `run.sh <brief>` runs a
   headless Claude worker on the second account (`CLAUDE_CONFIG_DIR=
   ~/.claude-katharina`, Opus 5.5 by default, `MODEL=` overrides) from
   `<brief>.md`; output in `<brief>.out`, full log in `logs/<brief>.log`.
-  Merge-clerk briefs grant one exception to the common rules' "never delete
-  remote branches": the merged `codex-q/*` branch is deleted once its merge
-  is verified, which is how the autoround's backlog brake sees it as merged.
+  Merge clerks create no remote branch. Only for a legacy job that still
+  pushed its `codex-q/*` branch to GitHub (briefs from before 2026-11-16) the
+  brief grants the one exception to the common rules' "never delete remote
+  branches": that branch is deleted once its merge is verified, which is how
+  the backlog brake sees a legacy job as merged.
   `_rules-common.txt` holds the binding safety rules (decision classes,
   B-class plan review, worktrees under `~/workspaces/ws-<slug>/`,
   `~/projects` read-only, gates, push checks, no secrets, no data deletion,

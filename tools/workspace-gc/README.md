@@ -141,13 +141,45 @@ evaluates the same rules again right before removing.
 
 | Class | Meaning | Examples |
 |---|---|---|
-| A | removable | clean, nothing unique, every commit on the network remote, idle |
+| A | removable | clean, nothing unique, every commit on the network remote, idle; a closed or merged legacy Codex job clone (below) |
 | B | removable after push | like A, but some commits are on no network branch or tag; they are listed |
 | C | needs owner | dirty, stash, device backups, non-regenerable ignored files, hidden index flags, submodules, grafts, read-only or unreadable parts, no or unreachable network remote, containment unknown, keep-listed, not inspectable |
 | D | keep | in use, referenced by an active work item, work item list incomplete or unreadable, recently active (default 48h, `--min-idle-hours`), owns linked worktrees, objects borrowed by another repository, main checkout |
 
 A work item counts as active unless its stage is `merged`, `installed`,
 `accepted` or `dropped`. A closed item's worktree is reported as a note.
+
+Codex job and scout clones. Codex jobs run in `~/workspaces/ws-cx-<job>/<repo>`
+(`<job>` starts with `cx-`) and commit on a local `codex-q/` branch that they
+never push; a merge clerk fetches it from the clone, merges locally, pushes
+only the integration branch and appends the job to `merged.txt` (or
+`dropped.txt` when it is not merged) in the coordination directory
+(`~/workspaces/ws-work-planning/coordination/codex`, `WORKSPACE_GC_CODEX_DIR`
+overrides; lines `<job>\t<repo>\t<merge sha | reason>`). Such a clone has
+commits on no remote, so it would be class B. It is class A instead when
+`merged.txt` or `dropped.txt` lists its job for the repository its network
+remote names, every one of those commits is on HEAD (no other local branch
+or tag holds unique work), it is clean, has no stash, only regenerable ignored files, is
+not in use and has been idle for at least 48 hours (whatever
+`--min-idle-hours` says; before that it is class D). A job clone whose job is
+in neither file stays class B, whatever its commits look like, with one
+exception for legacy jobs that pushed their branch to GitHub and whose clerk
+deleted it there after merging a rebased copy: such a clone is class A
+under the same conditions when it has a remote-tracking ref for its
+`codex-q/` branch (proof it was pushed), the branch is gone from the remote,
+every commit on no remote branch or tag is on HEAD, and the remote's default
+branch or `develop` has a commit with the same patch (`git cherry`) for each
+of them. A scout clone (`ws-cx-scoutN/<repo>`, read-only, nothing unique)
+follows the usual class A rules, but stays class D until `scoutN.out` in the
+coordination directory has a `## Runner closeout`. The removal re-check reads
+`merged.txt`/`dropped.txt` again (legacy: fresh `ls-remote` and `git cherry`),
+requires the same branches, tags and commits on no remote as at the inventory
+(no work added since), every such commit on HEAD and no remote tip missing
+locally, reads `scoutN.out` again for a scout clone, and refuses when any of
+it no longer holds. The reason (`closed Codex job
+clone: <job> is merged <sha>`, `merged legacy Codex job clone: ...`,
+`finished scout round N clone`) is in `latest.txt`; a job clone kept in class
+B gets a note saying why.
 
 Keep-list: nothing is built in. Paths or globs can be added with `--keep` or in
 `~/.config/workspace-gc/keep` (one per line, `#` comments). Keep-listed
