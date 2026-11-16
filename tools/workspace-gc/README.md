@@ -408,6 +408,14 @@ Limits: an agent that works in a checkout without a herdr pane, and without a
 process whose working directory is in it, is detected only through the work
 item's `worktree` field and the idle guard. Record worktrees on their items.
 
+Husk and cache-only removal bind the freshly inspected workspace to its device
+and inode. Cache-only removal also pins every selected cache and its parent
+components, opens and validates all selections before deleting any of them,
+and empties the admitted descriptors. A replaced workspace, cache parent or
+cache directory (including a symlink substitution) causes refusal. Names are
+checked again before removing the emptied directories. Fresh live-use checks
+still run for every candidate; concurrent filesystem writes are not atomic.
+
 ## Read-only Go module caches
 
 `go mod download` makes the directories of its module cache read-only (mode

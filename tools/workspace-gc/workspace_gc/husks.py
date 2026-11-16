@@ -27,7 +27,9 @@ caches and logs only.
 
 from __future__ import annotations
 
+import errno
 import fnmatch
+from contextlib import ExitStack
 import os
 import shutil
 import stat
@@ -285,70 +287,80 @@ def _keep_inside(path: str, keep_patterns: list[str]) -> str:
     return ""
 
 
+def _identity(st) -> tuple[int, int]:
+    return st.st_dev, st.st_ino
+
+
+def _require_same(parent: int, name: str, child: int) -> None:
+    st = os.lstat(name, dir_fd=parent)
+    if not stat.S_ISDIR(st.st_mode) or _identity(st) != _identity(os.fstat(child)):
+        raise OSError(errno.ESTALE, "replaced since the inspection", name)
+
+
 def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = False,
-                     ino: int | None = None, unlock: bool = False) -> str:
-    """Delete the payload directories (relative to the workspace) below the
-    workspace, reached from the root through descriptors opened with
-    O_NOFOLLOW, so a path component swapped for a symlink stops the walk."""
+                     ino: int | None = None, unlock: bool = False,
+                     identity: tuple[int, int] | None = None,
+                     payload_identities: dict[str, tuple[int, int]] | None = None) -> str:
+    """Open and validate every selected directory before deleting anything.
+
+    Pin workspace, payloads and their parents; empty only the admitted open
+    directories and recheck their names before rmdir. No path component may
+    be replaced by a real directory or symlink between inspection and use.
+    """
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        root_fd = os.open(root, flags)
+        with ExitStack() as stack:
+            def open_dir(name, parent=None):
+                fd = os.open(name, flags, dir_fd=parent)
+                stack.callback(os.close, fd)
+                return fd
+
+            root_fd = open_dir(root)
+            actual = _fd_path(root_fd)
+            if actual != root:
+                return (f"{root} now resolves to {actual}" if actual
+                        else f"cannot verify where {root} is; nothing removed")
+            ws_name = os.path.basename(path)
+            ws_fd = open_dir(ws_name, root_fd)
+            st = os.fstat(ws_fd)
+            if ((identity is not None and _identity(st) != identity)
+                    or (ino is not None and st.st_ino != ino)):
+                return "replaced since the inspection"
+            opened = {"": ws_fd}
+            links = [(root_fd, ws_name, ws_fd)]
+            selected = []
+            for rel in payloads:
+                parts = rel.split("/")
+                for i, part in enumerate(parts):
+                    key = "/".join(parts[:i + 1])
+                    if key in opened:
+                        continue
+                    parent = opened["/".join(parts[:i])]
+                    child = open_dir(part, parent)
+                    if (payload_identities is not None
+                            and _identity(os.fstat(child)) != payload_identities.get(key)):
+                        return "replaced since the inspection: " + key
+                    opened[key] = child
+                    links.append((parent, part, child))
+                selected.append((opened["/".join(parts[:-1])], parts[-1], opened[rel]))
+            # Validate all selections together: a later replacement must not
+            # leave an earlier payload partially deleted.
+            for parent, name, child in links:
+                _require_same(parent, name, child)
+            if whole:
+                if unlock:
+                    readonly.unlock(ws_fd)
+                _empty(ws_fd)
+                _require_same(root_fd, ws_name, ws_fd)
+                os.rmdir(ws_name, dir_fd=root_fd)
+            else:
+                for parent, name, child in selected:
+                    _require_same(parent, name, child)
+                    _empty(child)
+                    _require_same(parent, name, child)
+                    os.rmdir(name, dir_fd=parent)
     except OSError as exc:
-        return f"cannot open {root}: {exc.strerror or exc}"
-    # Ancestors of the root could be symlinks swapped after the inspection:
-    # the descriptor must still be where the root really is.
-    actual = _fd_path(root_fd)
-    if actual != root:
-        os.close(root_fd)
-        return (f"{root} now resolves to {actual}" if actual
-                else f"cannot verify where {root} is; nothing removed")
-    try:
-        ws_fd = os.open(os.path.basename(path), flags, dir_fd=root_fd)
-    except OSError as exc:
-        os.close(root_fd)
-        return f"cannot open {path}: {exc.strerror or exc}"
-    if ino is not None and os.fstat(ws_fd).st_ino != ino:
-        os.close(ws_fd)
-        os.close(root_fd)
-        return "replaced since the inspection"
-    if whole:
-        # Empty the pinned directory through its descriptor, then rmdir it:
-        # a replacement of the name after the check is never descended into.
-        # When the inspection right before found read-only directories, the
-        # module directories of Go module caches get u+w first, before
-        # anything is deleted (a partial delete could remove the cache's
-        # `cache/download` marker before reaching them).
-        try:
-            if unlock:
-                readonly.unlock(ws_fd)
-            _empty(ws_fd)
-            os.rmdir(os.path.basename(path), dir_fd=root_fd)
-        except OSError as exc:
-            return f"removing {path} failed: {exc.strerror or exc}"
-        finally:
-            os.close(ws_fd)
-            os.close(root_fd)
-        return ""
-    try:
-        for rel in payloads:
-            parts = rel.split("/")
-            fds = []
-            try:
-                cur = ws_fd
-                for part in parts[:-1]:
-                    cur = os.open(part, flags, dir_fd=cur)
-                    fds.append(cur)
-                _rmtree_under(cur, parts[-1])
-            except FileNotFoundError:
-                continue
-            except OSError as exc:
-                return f"removing {rel} failed: {exc.strerror or exc}"
-            finally:
-                for fd in fds:
-                    os.close(fd)
-    finally:
-        os.close(ws_fd)
-        os.close(root_fd)
+        return f"removing {path} failed: {exc.strerror or exc}"
     return ""
 
 
@@ -366,7 +378,17 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
     if _keep_listed(h.path, [(h.path, 0)], keep_patterns):
         return "a keep-list entry names something inside it"
     try:
-        ino = os.lstat(h.path).st_ino
+        identity = _identity(os.lstat(h.path))
+        payloads = [rel for rel, payload in _entries(h.path) if payload]
+        payload_identities = {}
+        for rel in payloads:
+            parts = rel.split("/")
+            for i in range(1, len(parts) + 1):
+                key = "/".join(parts[:i])
+                st = os.lstat(os.path.join(h.path, key))
+                if not stat.S_ISDIR(st.st_mode):
+                    return "payload replaced before inspection: " + key
+                payload_identities[key] = _identity(st)
     except OSError as exc:
         return f"cannot stat {h.path}: {exc.strerror or exc}"
     fresh = inspect(h.path, sizes=True)
@@ -377,13 +399,13 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
         if inside:
             return f"keep-listed path inside: {inside}"
         h.removed_what = "directory"
-        return _remove_payloads(h.path, root, [], whole=True, ino=ino,
+        return _remove_payloads(h.path, root, [], whole=True, identity=identity,
                                 unlock=fresh.readonly_dirs > 0)
     if not fresh.removable:
         return "no longer cache-only and idle"
     h.removed_what = "caches"
-    payloads = [rel for rel, payload in _entries(h.path) if payload]
-    return _remove_payloads(h.path, root, payloads)
+    return _remove_payloads(h.path, root, payloads, identity=identity,
+                            payload_identities=payload_identities)
 
 
 def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],

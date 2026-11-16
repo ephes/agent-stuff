@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bind cache-only deletion to the inspected workspace, selected caches and
+  parent directory identities through pinned descriptors. Refuse directory
+  and symlink replacements before deleting any selected cache; recheck names
+  before removing emptied directories.
+
 - Codex job clones no longer pile up (431 of the 609 directories in
   `~/workspaces`, about 377 GB in all, were `ws-cx-*` on 2026-11-16). Codex jobs now keep their `codex-q/` branch
   local and a merge clerk records the job in `merged.txt` or `dropped.txt` of
