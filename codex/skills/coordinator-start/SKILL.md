@@ -60,6 +60,8 @@ checks fire only while the session is idle.
 
 ```text
 Periodic coordinator check (coordinator-start).
+0. Heartbeat: touch ~/workspaces/ws-work-planning/coordination/coordinator.heartbeat
+   (coord-watchdog reports it after 45 minutes without a touch; never touch it without running this check).
 1. Usage: work usage status --max-age 30m --provider claude. Exit 0: the Studio's usage-collect LaunchAgent keeps
    both Claude pools fresh (it runs work usage collect-codex too; a Codex reading is only as new as the last Codex session).
    Otherwise see why in ssh studio 'cat ~/.local/state/usage-collect/latest.txt' (every step's latest outcome and output)
@@ -77,7 +79,10 @@ Periodic coordinator check (coordinator-start).
    queue length (queue.txt), running jobs (ps -axo pid,etime,command | grep '[r]un.sh'), tail autoround.log,
    autoround.off and autoround.pause (pause reason), autoround.state; finished reports = *.out containing
    "## Runner closeout" that are new since the last check. Katharina clerks (coordination/katharina):
-   finished *.out reports and running run.sh jobs.
+   finished *.out reports and running run.sh jobs. After handling each finished katharina/<name>.out
+   (merge-*.out included): touch ~/workspaces/ws-work-planning/coordination/acks/<name>
+   (coord-watchdog reports reports unacknowledged for 30 minutes; a rerun of the same name needs a new touch).
+   Read coordination/watchdog/latest.json and new lines of watchdog/notifications.log and act on open findings.
 5. Merging runs by itself (owner 2026-11-16: local handoff, nothing may lie around): coordination/katharina/automerge.sh,
    run by the feeder every loop, starts a clerk for every finished Codex job (parked.txt line whose <brief>.out has
    "## Runner closeout", not queued, not running) that is in neither codex/merged.txt nor codex/dropped.txt (up to
@@ -95,6 +100,17 @@ Periodic coordinator check (coordinator-start).
 ```
 
 ## Runner reference
+
+- Watchdog (`agent-stuff/tools/coord-watchdog`, README there): the Studio
+  LaunchAgent `de.wersdoerfer.coord-watchdog` checks the pipeline every 5
+  minutes without an LLM (feeder, queue, `automerge.off` age, stuck and
+  unacknowledged Katharina workers, usage freshness, this session's
+  heartbeat, sustained load). A finding that persists 15 minutes gets one
+  bounded headless diagnosis run (`coordination/watchdog/diag-*/summary.md`,
+  may only restart a dead feeder) and one owner notification
+  (`watchdog/notifications.log`, herdr, a note on work item
+  `coord-watchdog`). State and last cycle: `watchdog/state.json`,
+  `watchdog/latest.json`.
 
 - Codex (ws-work-planning `coordination/codex/`): `run.sh <brief>` runs one
   Codex job from `<brief>.md` plus `COMMON.md` and appends a runner closeout

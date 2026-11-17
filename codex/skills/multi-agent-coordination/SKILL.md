@@ -362,6 +362,18 @@ its items keep `--campaign codex-burn`, new items never get it.
   a coordinator restart.
 - Scheduled checks only fire while the coordinator is idle, so run the same
   check whenever handling results. Remove the schedule when the campaign ends.
+- **Heartbeat and acknowledgements** (owner 2026-11-17): every periodic check
+  starts with `touch coordination/coordinator.heartbeat` (in
+  `~/workspaces/ws-work-planning/coordination`), and after handling a
+  finished Katharina report `katharina/<name>.out` (merge clerks' `merge-*.out`
+  included) the coordinator runs `touch coordination/acks/<name>`. The
+  watchdog `agent-stuff/tools/coord-watchdog` (Studio LaunchAgent, every 5
+  minutes) reports a heartbeat older than 45 minutes, a report unacknowledged
+  for 30 minutes, a stuck or dead pipeline part, stale usage and sustained
+  load; it starts one bounded diagnosis run and then notifies the owner
+  (`coordination/watchdog/notifications.log`, herdr, work-app item
+  `coord-watchdog`). Touch the heartbeat and acks only for checks and
+  reports actually done; a touch without the work hides a stall.
 
 ## Handoffs and herdr panes
 
