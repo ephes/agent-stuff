@@ -79,6 +79,27 @@ class ParseOutputTest(unittest.TestCase):
         with self.assertRaisesRegex(cur.UsageError, "no 'Current"):
             cur.parse_claude_output(fixture("usage-api-key.json"), NOW)
 
+    def test_cost_summary_names_the_missing_login(self):
+        # ~/.claude read with an explicit CLAUDE_CONFIG_DIR: no login found, the cost summary instead.
+        with self.assertRaisesRegex(cur.UsageError, "API-cost summary.*no subscription login"):
+            cur.parse_claude_output(fixture("usage-cost-summary.json"), NOW)
+
+    def test_main_account_fixture(self):
+        now = datetime(2026, 11, 17, 16, 0, tzinfo=timezone.utc)
+        windows = cur.parse_claude_output(fixture("usage-main-account.json"), now)
+        self.assertEqual([(w.work_label, w.used_percent, cur._iso(w.resets_at)) for w in windows], [
+            ("Weekly · all models", 76.0, "2026-11-18T02:00:00Z"),
+            ("Weekly · Fable", 10.0, "2026-11-18T01:59:00Z"),
+        ])
+
+    def test_work_labels(self):
+        cases = {"week (all models)": "Weekly · all models", "Week (All Models)": "Weekly · all models",
+                 "week (Fable)": "Weekly · Fable", "week (Opus 5)": "Weekly · Opus 5",
+                 "session": None, "week": None, "month (all models)": None}
+        for label, expected in cases.items():
+            with self.subTest(label=label):
+                self.assertEqual(cur.Window(label, 1.0, None).work_label, expected)
+
     def test_not_json(self):
         with self.assertRaisesRegex(cur.UsageError, "JSON"):
             cur.parse_claude_output("Welcome to Claude\n", NOW)
@@ -103,13 +124,59 @@ class ParseOutputTest(unittest.TestCase):
         with self.assertRaises(cur.UsageError):
             cur.weekly_all_models(windows)
 
-    def test_report_args(self):
-        weekly = cur.Window("week (all models)", 3.0, datetime(2026, 11, 12, 18, 59, tzinfo=timezone.utc))
-        self.assertEqual(cur.report_args(weekly, "claude-katharina"), [
-            "usage", "report", "--provider", "claude", "--pool", "claude-katharina",
-            "--window", "Weekly · all models", "--used", "3", "--resets-at", "2026-11-12T18:59:00Z",
-            "--observed-at", "now", "--source", "claude-usage-read"])
-        self.assertNotIn("--pool", cur.report_args(weekly, None))
+    def test_report_payload(self):
+        reset = datetime(2026, 11, 12, 18, 59, tzinfo=timezone.utc)
+        windows = [cur.Window("session", 40.0, reset), cur.Window("week (Fable)", 0.5, reset),
+                   cur.Window("week (Opus)", 7.0, None), cur.Window("week (all models)", 3.0, reset)]
+        payload = cur.report_payload(windows, NOW, pool="claude-katharina")
+        self.assertEqual(payload, {"windows": [
+            {"provider": "claude", "window_label": "Weekly · all models", "percent_used": 3.0,
+             "resets_at": "2026-11-12T18:59:00Z", "observed_at": "2026-11-06T15:00:00Z",
+             "source": "claude-usage-read", "pool": "claude-katharina"},
+            {"provider": "claude", "window_label": "Weekly · Fable", "percent_used": 0.5,
+             "resets_at": "2026-11-12T18:59:00Z", "observed_at": "2026-11-06T15:00:00Z",
+             "source": "claude-usage-read", "pool": "claude-katharina"},
+            # No reset of its own (unused this week): the all-models reset keeps the reading fresh.
+            {"provider": "claude", "window_label": "Weekly · Opus", "percent_used": 7.0,
+             "resets_at": "2026-11-12T18:59:00Z", "observed_at": "2026-11-06T15:00:00Z",
+             "source": "claude-usage-read", "pool": "claude-katharina"},
+        ]})
+        # Without an all-models window there is no cycle to fall back on: such a window is left out.
+        lone = cur.report_payload([cur.Window("week (Opus)", 0.0, None)], NOW)
+        self.assertEqual(lone, {"windows": []})
+        main = cur.report_payload(windows, NOW, account="main")["windows"]
+        self.assertTrue(all(w["account"] == "main" and "pool" not in w for w in main))
+        self.assertTrue(all("account" not in w for w in cur.report_payload(windows, NOW)["windows"]))
+
+
+class ChildEnvTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        (self.home / ".claude").mkdir()
+        self.base = {"HOME": str(self.home), "PATH": "/usr/bin", "CLAUDE_CONFIG_DIR": "/elsewhere",
+                     "ANTHROPIC_API_KEY": "x", "ANTHROPIC_BASE_URL": "x", "CLAUDE_CODE_OAUTH_TOKEN": "x",
+                     "CLAUDECODE": "1", "HERDR_PANE_ID": "p1", "CLAUDE_USAGE_READ_WORK": "work"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def env_for(self, config_dir):
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            return cur.child_env(config_dir, self.base)
+
+    def test_default_dir_runs_without_config_dir(self):
+        for config_dir in (self.home / ".claude", self.home / ".claude" / ".." / ".claude"):
+            with self.subTest(config_dir=config_dir):
+                self.assertNotIn("CLAUDE_CONFIG_DIR", self.env_for(config_dir))
+
+    def test_other_dir_is_passed(self):
+        env = self.env_for(self.home / ".claude-katharina")
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(self.home / ".claude-katharina"))
+
+    def test_scrubs_other_logins_and_session_context(self):
+        env = self.env_for(self.home / ".claude-katharina")
+        self.assertEqual(sorted(env), ["CLAUDE_CONFIG_DIR", "CLAUDE_USAGE_READ_WORK", "HOME", "PATH"])
 
 
 class CliTest(unittest.TestCase):
@@ -140,7 +207,8 @@ class CliTest(unittest.TestCase):
     def fake_work(self, exit_code=0):
         return self.fake("work", (
             "import json, sys\n"
-            f"open({str(self.log)!r}, 'a').write(json.dumps({{'work': sys.argv[1:]}}) + '\\n')\n"
+            f"open({str(self.log)!r}, 'a').write(json.dumps({{'work': sys.argv[1:], "
+            "'stdin': sys.stdin.read()}) + '\\n')\n"
             f"sys.exit({exit_code})\n"))
 
     def calls(self):
@@ -184,10 +252,32 @@ class CliTest(unittest.TestCase):
                "CLAUDE_USAGE_READ_WORK": self.fake_work()}
         code, _, err = self.run_main(["--report", "--pool", "claude-katharina", str(self.dir)], env)
         self.assertEqual(code, 0, err)
-        work = [c["work"] for c in self.calls() if "work" in c]
+        work = [c for c in self.calls() if "work" in c]
         self.assertEqual(len(work), 1)
-        self.assertEqual(work[0][:6], ["usage", "report", "--provider", "claude", "--pool", "claude-katharina"])
-        self.assertIn("claude-usage-read", work[0])
+        self.assertEqual(work[0]["work"], ["usage", "report", "--json", "-"])
+        windows = json.loads(work[0]["stdin"])["windows"]
+        self.assertEqual([(w["window_label"], w["percent_used"], w["pool"]) for w in windows], [
+            ("Weekly · all models", 3.0, "claude-katharina"), ("Weekly · Fable", 0.0, "claude-katharina")])
+        self.assertTrue(all(w["source"] == "claude-usage-read" for w in windows))
+        self.assertNotIn("credential", work[0]["stdin"])
+
+    def test_default_dir_reads_without_config_dir(self):
+        home = self.dir / "home"
+        (home / ".claude").mkdir(parents=True)
+        env = {"CLAUDE_USAGE_READ_CLAUDE": self.fake_claude("usage-main-account.json"), "HOME": str(home),
+               "CLAUDE_CONFIG_DIR": str(home / ".claude"), "CLAUDE_CODE_OAUTH_TOKEN": "x"}
+        code, out, err = self.run_main([], env)
+        self.assertEqual(code, 0, err)
+        self.assertIn("used=76 ", out)
+        self.assertIsNone(self.calls()[0]["config"])
+
+    def test_cost_summary_is_a_read_failure(self):
+        env = {"CLAUDE_USAGE_READ_CLAUDE": self.fake_claude("usage-cost-summary.json"),
+               "CLAUDE_USAGE_READ_WORK": self.fake_work()}
+        code, out, err = self.run_main(["--report", str(self.dir)], env)
+        self.assertEqual(code, cur.EXIT_READ_FAILED)
+        self.assertIn("no subscription login", err)
+        self.assertFalse(any("work" in c for c in self.calls()))
 
     def test_report_failure_exit_code(self):
         env = {"CLAUDE_USAGE_READ_CLAUDE": self.fake_claude("usage-subscription.json"),
@@ -217,9 +307,10 @@ class CliTest(unittest.TestCase):
         self.assertIn("not found", err)
 
     def test_pool_without_report_is_usage_error(self):
-        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
-            cur.main(["--pool", "x"])
-        self.assertEqual(ctx.exception.code, 2)
+        for argv in (["--pool", "x"], ["--account", "main"]):
+            with self.subTest(argv=argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+                cur.main(argv)
+            self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":

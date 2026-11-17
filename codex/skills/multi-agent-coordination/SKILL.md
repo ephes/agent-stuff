@@ -312,11 +312,18 @@ its items keep `--campaign codex-burn`, new items never get it.
   automatic clerk failed without a `merged.txt`/`dropped.txt` line, or while
   `automerge.off` exists; `coordinator-start` has the check). To stop dispatch itself, use `stop.flag`.
 - Usage reporting is mandatory. Keep the weekly windows fresh in the work app
-  (Claude "Weekly · all models", Codex weekly; only those) at session start,
-  whenever handling worker results, and on every periodic check (at least
-  hourly while a campaign runs). Claude: read the desktop app's usage tool
-  (`get_usage`), then `work usage report --provider claude --window "Weekly · all models" --used <pct> --resets-at <iso>
-  --observed-at now --source "claude-desktop get_usage"`. Codex: `work usage
+  (Claude "Weekly · all models" and per-model weekly windows, Codex weekly;
+  only those). On the Studio the LaunchAgent `de.wersdoerfer.usage-collect`
+  reports both Claude accounts (pools `claude`, `claude-katharina`, via
+  `tools/claude-usage-read`) and Codex every 15 minutes. At session start and
+  on every periodic check, run `work usage status --max-age 30m --provider
+  claude`; when a window is stale, look at
+  `~/.local/state/usage-collect/latest.txt` on the Studio (every step's latest
+  outcome and output) and report by hand meanwhile. A Codex reading is only as new
+  as the last Codex session, so it ages while Codex is idle. Claude: `tools/claude-usage-read/bin/claude-usage-read
+  [config dir] --report --pool <pool>`, or read the desktop app's usage tool
+  (`get_usage`), then for each weekly window it shows `work usage report --provider claude --pool claude
+  --window "<window>" --used <pct> --resets-at <iso> --observed-at now --source "claude-desktop get_usage"`. Codex: `work usage
   collect-codex`. Stale usage in the work app is a coordinator bug.
 - Check both weekly windows **before every dispatch** and before any Codex
   call (reviews included), not only when handling results. Codex keeps running
@@ -338,12 +345,11 @@ its items keep `--campaign codex-burn`, new items never get it.
   studio, not the CPU-bound claascraft laptop). Its workers do not see the main
   account's memory, so their brief must carry the rules, including the
   decision classes. Its
-  usage is read with `/usage` in a dedicated pane or short session that is
-  closed afterwards, never in a working pane (see **Handoffs and herdr
-  panes**); once `work usage`
-  supports it, report it as its own pool (never mixed into `--provider
-  claude`). Until then (item `quota-aware-dispatch`), the second account
-  counts as "unknown" under rule 2 unless the owner gives the number.
+  usage is never read with `/usage` in a working pane (see **Handoffs and
+  herdr panes**); the usage collector reports it as its own pool
+  `claude-katharina` (account `katharina`, never mixed into the main
+  account). Without a fresh reading it counts as "unknown" under rule 2
+  unless the owner gives the number.
 
 ## Periodic checks
 

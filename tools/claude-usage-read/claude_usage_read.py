@@ -6,11 +6,18 @@ no model call, no cost, no interactive dialog in a working pane. Its JSON
 
     Current week (all models): 3% used · resets Nov 12 at 7:59pm (Europe/Berlin)
 
-This module runs that command for one ``CLAUDE_CONFIG_DIR``, parses the
-windows and prints one parseable line. ``--report`` hands the weekly
-all-models window to ``work usage report``. Only the parsed windows are
-printed; the raw output (which also carries account metadata such as the
-credential expiry) is never echoed. Python 3 stdlib only.
+This module runs that command for one Claude config dir, parses the
+windows and prints one parseable line. ``--report`` hands the weekly windows
+(all models, plus per-model ones such as Fable) to ``work usage report``.
+Only the parsed windows are printed; the raw output (which also carries
+account metadata such as the credential expiry) is never echoed. Python 3
+stdlib only.
+
+The default dir ``~/.claude`` is read with ``CLAUDE_CONFIG_DIR`` unset: Claude
+Code keeps that dir's login in the keychain item ``Claude Code-credentials``,
+but any explicit ``CLAUDE_CONFIG_DIR`` (even ``~/.claude``) makes it look for
+``Claude Code-credentials-<hash>`` instead. Without a login it prints the
+API-cost summary (``Estimated cost: ...``) rather than the usage windows.
 """
 
 from __future__ import annotations
@@ -38,8 +45,14 @@ EXIT_REPORT_FAILED = 4
 
 ALL_MODELS_LABEL = "week (all models)"
 WORK_WINDOW = "Weekly · all models"
+# Inherited variables that would make the child use another login, endpoint or
+# pane: an API key or OAuth token overrides the config dir's subscription
+# login, a session's CLAUDE_CODE_* settings or a herdr pane id would leak the
+# caller's context into this read.
+_SCRUBBED_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDECODE", "HERDR_")
 SOURCE = "claude-usage-read"
 DEFAULT_TIMEOUT = 60.0
+WORK_TIMEOUT = 60.0
 
 _WINDOW_LINE = re.compile(
     r"^\s*Current (?P<label>[^:]+?):\s*(?P<used>\d+(?:\.\d+)?)\s*%\s*used"
@@ -65,6 +78,19 @@ class Window:
     label: str
     used_percent: float
     resets_at: datetime | None
+
+    @property
+    def work_label(self) -> str | None:
+        """The work app's label for a weekly window, None for any other window.
+
+        ``week (all models)`` is ``Weekly · all models``, ``week (Fable)`` is
+        ``Weekly · Fable``.
+        """
+        match = re.fullmatch(r"week\s*\((?P<scope>[^()]+)\)", self.label.strip(), re.IGNORECASE)
+        if not match:
+            return None
+        scope = match["scope"].strip()
+        return WORK_WINDOW if scope.lower() == "all models" else f"Weekly · {scope}"
 
 
 def _zone(name: str | None, now: datetime) -> tzinfo:
@@ -154,6 +180,10 @@ def parse_claude_output(stdout: str, now: datetime) -> list[Window]:
         raise UsageError("claude did not run /usage as a local command")
     windows = parse_usage_text(result, now)
     if not windows:
+        if re.search(r"^\s*(Estimated|Total) cost:", result, re.IGNORECASE | re.MULTILINE):
+            raise UsageError("claude printed the API-cost summary, not usage windows: no "
+                             "subscription login for this config dir (for ~/.claude, run without "
+                             "CLAUDE_CONFIG_DIR; for another dir, log in with that dir)")
         raise UsageError("no 'Current ...: N% used' line in the /usage output "
                          "(not a subscription login, or the output format changed)")
     return windows
@@ -166,14 +196,52 @@ def weekly_all_models(windows: list[Window]) -> Window:
     raise UsageError("no 'Current week (all models)' window in the /usage output")
 
 
+def weekly_windows(windows: list[Window]) -> list[Window]:
+    """The weekly windows ``--report`` sends, all-models first.
+
+    A per-model line without its own reset time (a window not used this week)
+    gets the all-models reset, the account's weekly cycle, so its earlier
+    reading is still refreshed. The all-models window always has a reset
+    (``main`` refuses to read without one).
+    """
+    weekly = sorted((w for w in windows if w.work_label), key=lambda w: w.work_label != WORK_WINDOW)
+    cycle = next((w.resets_at for w in weekly if w.work_label == WORK_WINDOW), None)
+    result = []
+    for window in weekly:
+        resets_at = window.resets_at or cycle
+        if resets_at is not None:
+            result.append(Window(window.label, window.used_percent, resets_at))
+    return result
+
+
 def default_config_dir(env=None) -> Path:
     env = os.environ if env is None else env
     return Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
 
 
+def _is_default_dir(config_dir: Path) -> bool:
+    try:
+        return config_dir.expanduser().resolve() == (Path.home() / ".claude").resolve()
+    except OSError:
+        return False
+
+
+def child_env(config_dir: Path, base=None) -> dict:
+    """The environment for ``claude``: scrubbed, with the config dir selected.
+
+    The default ``~/.claude`` runs with ``CLAUDE_CONFIG_DIR`` unset (see the
+    module docstring); any other dir is passed explicitly.
+    """
+    base = os.environ if base is None else base
+    env = {k: v for k, v in base.items()
+           if k != "CLAUDE_CONFIG_DIR" and not k.startswith(_SCRUBBED_PREFIXES)}
+    if not _is_default_dir(config_dir):
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    return env
+
+
 def run_claude(config_dir: Path, claude_bin: str, timeout: float) -> str:
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    env = child_env(config_dir)
     cmd = [claude_bin, "-p", "/usage", "--output-format", "json", "--no-session-persistence"]
     try:
         proc = subprocess.run(
@@ -197,13 +265,20 @@ def _number(value: float) -> str:
     return f"{value:g}"
 
 
-def report_args(window: Window, pool: str | None) -> list[str]:
-    args = ["usage", "report", "--provider", "claude"]
-    if pool:
-        args += ["--pool", pool]
-    args += ["--window", WORK_WINDOW, "--used", _number(window.used_percent),
-             "--resets-at", _iso(window.resets_at), "--observed-at", "now", "--source", SOURCE]
-    return args
+def report_payload(windows: list[Window], observed_at: datetime, pool: str | None = None,
+                   account: str | None = None) -> dict:
+    """The ``work usage report --json -`` body for the weekly windows."""
+    entries = []
+    for window in weekly_windows(windows):
+        entry = {"provider": "claude", "window_label": window.work_label,
+                 "percent_used": window.used_percent, "resets_at": _iso(window.resets_at),
+                 "observed_at": _iso(observed_at), "source": SOURCE}
+        if pool:
+            entry["pool"] = pool
+        if account:
+            entry["account"] = account
+        entries.append(entry)
+    return {"windows": entries}
 
 
 def main(argv=None) -> int:
@@ -215,14 +290,15 @@ def main(argv=None) -> int:
     )
     parser.add_argument("config_dir", nargs="?",
                         help="Claude config dir (default: $CLAUDE_CONFIG_DIR, else ~/.claude)")
-    parser.add_argument("--pool", help="pool slug passed to `work usage report --pool`")
+    parser.add_argument("--pool", help="work app pool slug for --report, e.g. claude-katharina")
+    parser.add_argument("--account", help="work app account for --report (default: the pool's, else main)")
     parser.add_argument("--report", action="store_true",
-                        help="also send the weekly all-models window to `work usage report`")
+                        help="also send the weekly windows to `work usage report`")
     parser.add_argument("--json", action="store_true", help="print all parsed windows as JSON")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds to wait for claude")
     args = parser.parse_args(argv)
-    if args.pool and not args.report:
-        parser.error("--pool only applies with --report")
+    if (args.pool or args.account) and not args.report:
+        parser.error("--pool and --account only apply with --report")
 
     config_dir = Path(args.config_dir).expanduser() if args.config_dir else default_config_dir()
     claude_bin = os.environ.get("CLAUDE_USAGE_READ_CLAUDE", "claude")
@@ -243,18 +319,24 @@ def main(argv=None) -> int:
             "observed_at": _iso(now),
             "used_percent": weekly.used_percent,
             "resets_at": _iso(weekly.resets_at),
-            "windows": [{"label": w.label, "used_percent": w.used_percent, "resets_at": _iso(w.resets_at)}
-                        for w in windows],
+            "windows": [{"label": w.label, "work_label": w.work_label, "used_percent": w.used_percent,
+                         "resets_at": _iso(w.resets_at)} for w in windows],
         }, ensure_ascii=False))
     else:
         print(f"used={_number(weekly.used_percent)} resets_at={_iso(weekly.resets_at)} "
               f"observed_at={_iso(now)} config_dir={config_dir}")
 
     if args.report:
+        payload = json.dumps(report_payload(windows, now, args.pool, args.account), ensure_ascii=False)
         try:
-            proc = subprocess.run([work_bin, *report_args(weekly, args.pool)], stdin=subprocess.DEVNULL)
+            proc = subprocess.run([work_bin, "usage", "report", "--json", "-"], input=payload, text=True,
+                                  timeout=WORK_TIMEOUT)
         except FileNotFoundError:
             print(f"claude-usage-read: {work_bin!r} not found", file=sys.stderr)
+            return EXIT_REPORT_FAILED
+        except subprocess.TimeoutExpired:
+            print(f"claude-usage-read: work usage report did not finish within {WORK_TIMEOUT:g}s",
+                  file=sys.stderr)
             return EXIT_REPORT_FAILED
         if proc.returncode != 0:
             print(f"claude-usage-read: work usage report exited {proc.returncode}", file=sys.stderr)

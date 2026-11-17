@@ -70,11 +70,14 @@ max 40) or `--agent <name>` on any command, which overrides it.
   investigate or park, not ask.
 - **Pick up answers** (`work responses`) at the start of a coordination turn;
   act on each one, then `work consume <id>`.
-- **Report usage** (`work usage report --provider claude --window "Weekly ·
-  all models" --used <pct> --resets-at <iso> --observed-at now --source
-  "claude-desktop get_usage"`; `work usage collect-codex`) for the weekly
-  windows only, at session start, when handling results, and at least hourly
-  while a campaign runs; stale usage is a coordinator bug.
+- **Report usage** for the weekly windows only. On the Studio the LaunchAgent
+  `de.wersdoerfer.usage-collect` does it every 15 minutes for both Claude
+  accounts and Codex. By hand, when that is stale or off the Studio:
+  `agent-stuff/tools/claude-usage-read/bin/claude-usage-read [config dir]
+  --report --pool claude|claude-katharina`, or per weekly window `work usage
+  report --provider claude --pool claude --window "<window, e.g. Weekly · all models>" --used <pct> --resets-at <iso>
+  --observed-at now --source "claude-desktop get_usage"`; `work usage
+  collect-codex`. Stale usage is a coordinator bug.
   Check `work usage status [--max-age 3h] [--provider claude] [--json]`
   before relying on usage numbers: exit 0 means all weekly windows are fresh,
   2 means stale or no weekly readings, and 1 means the call failed. The default

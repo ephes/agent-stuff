@@ -60,12 +60,16 @@ checks fire only while the session is idle.
 
 ```text
 Periodic coordinator check (coordinator-start).
-1. Usage: read Claude main with get_usage, then
-   work usage report --provider claude --window "Weekly · all models" --used N --resets-at <iso> --observed-at now --source "claude-desktop get_usage";
-   work usage collect-codex;
-   Katharina: ssh atlas '~/projects/agent-stuff/tools/claude-usage-read/bin/claude-usage-read ~/.claude-katharina'
-   and report its used=/resets_at= with
-   work usage report --provider claude --account katharina --window "Weekly · all models" --used N --resets-at <iso> --observed-at now --source "claude-usage-read atlas".
+1. Usage: work usage status --max-age 30m --provider claude. Exit 0: the Studio's usage-collect LaunchAgent keeps
+   both Claude pools fresh (it runs work usage collect-codex too; a Codex reading is only as new as the last Codex session).
+   Otherwise see why in ssh studio 'cat ~/.local/state/usage-collect/latest.txt' (every step's latest outcome and output)
+   and report the stale pools by hand on the Studio:
+   ~/projects/agent-stuff/tools/claude-usage-read/bin/claude-usage-read --report --pool claude;
+   ~/projects/agent-stuff/tools/claude-usage-read/bin/claude-usage-read ~/.claude-katharina --report --pool claude-katharina;
+   work usage collect-codex.
+   Only if claude-usage-read cannot read the main account: read get_usage and report each weekly window it shows
+   ("Weekly · all models", "Weekly · Fable", ...) with
+   work usage report --provider claude --pool claude --window "<window>" --used N --resets-at <iso> --observed-at now --source "claude-desktop get_usage".
 2. work responses: act on each response that belongs to this coordinator, record the outcome, then work consume <id>.
    Leave responses that belong to other coordinators (e.g. the photos coordinator) unconsumed.
 3. herdr --machine claascraft workspace list (look only; never type into panes from this check).
