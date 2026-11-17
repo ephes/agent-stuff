@@ -412,7 +412,10 @@ Husk and cache-only removal bind the freshly inspected workspace to its device
 and inode. Cache-only removal also pins every selected cache and its parent
 components, opens and validates all selections before deleting any of them,
 and empties the admitted descriptors. A replaced workspace, cache parent or
-cache directory (including a symlink substitution) causes refusal. Names are
+cache directory (including a symlink substitution) causes refusal. The
+snapshot taken before the fresh inspection must match the workspace and cache
+identities that inspection walked, and must be unchanged after it; a rename
+away and back, or caches added or removed meanwhile, cause refusal. Names are
 checked again before removing the emptied directories. Fresh live-use checks
 still run for every candidate; concurrent filesystem writes are not atomic.
 
@@ -420,7 +423,7 @@ Husk/cache admission refuses nested directories on a different device
 (`st_dev`) without descending into them. Immediately before deletion, a
 second walk through pinned descriptors checks the entire workspace, propagates
 unreadable-directory errors and refuses device boundaries before deleting or
-unlocking anything. A workspace on a different device from its root is also
+unlocking anything; it never opens directory symlinks. A workspace on a different device from its root is also
 refused. The whole candidate stays on refusal. These checks do not detect
 same-device bind mounts; those need separate platform support. They also do
 not make concurrent mount or filesystem changes atomic with deletion.

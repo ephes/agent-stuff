@@ -125,10 +125,16 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     errors: list[str] = []
     walked = 0
     try:
-        device = os.lstat(path).st_dev
+        st0 = os.lstat(path)
     except OSError as exc:
         h.note = f"unreadable: {exc}"
         return h
+    device = st0.st_dev
+    # Not a dataclass field (stays out of the report): the generation this
+    # inspection walked, which removal compares with its own snapshots.
+    h._walked = (st0.st_dev, st0.st_ino)
+    h._walked_payloads = {}
+    components = {".cache", *WORKSPACE_PAYLOADS}
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=lambda e: errors.append(e.filename)):
         budget.check()
@@ -140,6 +146,9 @@ def inspect(path: str, sizes: bool = True) -> Husk:
                 if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
                     h.note = f"nested device boundary: {candidate}"
                     return h
+                rel = os.path.relpath(candidate, path)
+                if rel in components and stat.S_ISDIR(st.st_mode):
+                    h._walked_payloads[rel] = (st.st_dev, st.st_ino)
         except OSError as exc:
             h.note = f"unreadable device boundary: {exc}"
             return h
@@ -320,10 +329,15 @@ def _preflight_device(dir_fd: int, device: int) -> None:
         budget.check()
         if os.fstat(fd).st_dev != device:
             raise OSError(errno.EXDEV, "nested device boundary", path)
+        real = []
         for name in dirs:
             st = os.lstat(name, dir_fd=fd)
-            if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
+            if not stat.S_ISDIR(st.st_mode):
+                continue    # fwalk lists directory symlinks and would open them
+            if st.st_dev != device:
                 raise OSError(errno.EXDEV, "nested device boundary", os.path.join(path, name))
+            real.append(name)
+        dirs[:] = real
 
 
 def _identity(st) -> tuple[int, int]:
@@ -409,6 +423,23 @@ def _remove_payloads(path: str, root: str, payloads: list[str], whole: bool = Fa
     return ""
 
 
+def _snapshot(path: str):
+    """(workspace identity, selected caches, identities of every cache path
+    component), or why the selection cannot be pinned. Raises OSError."""
+    identity = _identity(os.lstat(path))
+    payloads = [rel for rel, payload in _entries(path) if payload]
+    payload_identities = {}
+    for rel in payloads:
+        parts = rel.split("/")
+        for i in range(1, len(parts) + 1):
+            key = "/".join(parts[:i])
+            st = os.lstat(os.path.join(path, key))
+            if not stat.S_ISDIR(st.st_mode):
+                return "payload replaced before inspection: " + key
+            payload_identities[key] = _identity(st)
+    return identity, payloads, payload_identities
+
+
 def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signals,
                 min_idle_hours: float, min_stale_hours: float) -> str:
     """Delete one husk (the whole directory if it is stale, else only its
@@ -423,21 +454,28 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
     if _keep_listed(h.path, [(h.path, 0)], keep_patterns):
         return "a keep-list entry names something inside it"
     try:
-        identity = _identity(os.lstat(h.path))
-        payloads = [rel for rel, payload in _entries(h.path) if payload]
-        payload_identities = {}
-        for rel in payloads:
-            parts = rel.split("/")
-            for i in range(1, len(parts) + 1):
-                key = "/".join(parts[:i])
-                st = os.lstat(os.path.join(h.path, key))
-                if not stat.S_ISDIR(st.st_mode):
-                    return "payload replaced before inspection: " + key
-                payload_identities[key] = _identity(st)
+        before = _snapshot(h.path)
     except OSError as exc:
         return f"cannot stat {h.path}: {exc.strerror or exc}"
+    if isinstance(before, str):
+        return before
     fresh = inspect(h.path, sizes=True)
     _classify(fresh, min_idle_hours, min_stale_hours)
+    # Bind the deletion to the generation the fresh inspection walked: it
+    # must have started on the snapshot's workspace, and workspace, selected
+    # caches and their components must be unchanged after it (a rename away
+    # and back around the inspection is refused).
+    walked = getattr(fresh, "_walked_payloads", {})
+    if (getattr(fresh, "_walked", None) != before[0]
+            or any(walked.get(k) != v for k, v in before[2].items())):
+        return "replaced during the inspection"
+    try:
+        after = _snapshot(h.path)
+    except OSError as exc:
+        return f"cannot stat {h.path}: {exc.strerror or exc}"
+    if after != before:
+        return "replaced during the inspection"
+    identity, payloads, payload_identities = before
     h.kb, h.payload_kb = fresh.kb, fresh.payload_kb      # measured now, for the audit
     if fresh.stale:
         inside = _keep_inside(h.path, keep_patterns)
@@ -448,6 +486,8 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
                                 unlock=fresh.readonly_dirs > 0)
     if not fresh.removable:
         return "no longer cache-only and idle"
+    if payloads != [e["path"] for e in fresh.entries if e["payload"]]:
+        return "caches changed during the inspection"
     h.removed_what = "caches"
     return _remove_payloads(h.path, root, payloads, identity=identity,
                             payload_identities=payload_identities)

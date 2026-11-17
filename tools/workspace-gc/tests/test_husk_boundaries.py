@@ -97,6 +97,69 @@ class TestHuskIdentity(SyntheticWorkspace):
         self.assertEqual((old / 'sentinel').read_text(), 'keep')
         self.assertTrue(Path(self.path, 'node_modules/sentinel').exists())
 
+    def test_rename_away_and_back_around_inspection_is_refused(self):
+        for rel in ('', 'node_modules'):
+            with self.subTest(rel=rel):
+                victim = os.path.join(self.path, rel).rstrip('/')
+                old = os.path.join(self.root, 'away')    # outside the workspace
+                real = husks.inspect
+
+                def aba(path, *args, **kw):
+                    os.rename(victim, old)
+                    for payload in ('.cache/uv', 'node_modules'):
+                        target = Path(self.path, payload)
+                        if not target.exists():
+                            target.mkdir(parents=True)
+                            (target / 'sentinel').write_text('inspected')
+                    try:
+                        return real(path, *args, **kw)
+                    finally:
+                        shutil.rmtree(victim)
+                        os.rename(old, victim)
+
+                with mock.patch.object(husks, 'inspect', side_effect=aba), \
+                        mock.patch.object(husks, '_remove_payloads') as removal:
+                    reason = self.remove()
+                self.assertIn('replaced during the inspection', reason)
+                removal.assert_not_called()
+                for payload in ('.cache/uv', 'node_modules'):
+                    self.assertEqual(Path(self.path, payload, 'sentinel').read_text(), 'keep')
+
+    def test_cache_selection_changed_during_inspection_is_refused(self):
+        for change in ('added', 'removed'):
+            with self.subTest(change=change):
+                real = husks.inspect
+
+                def changing(path, *args, **kw):
+                    h = real(path, *args, **kw)
+                    if change == 'added':
+                        Path(self.path, '.cache/prek').mkdir()
+                    else:
+                        shutil.rmtree(Path(self.path, 'node_modules'))
+                    return h
+
+                with mock.patch.object(husks, 'inspect', side_effect=changing), \
+                        mock.patch.object(husks, '_remove_payloads') as removal:
+                    reason = self.remove()
+                self.assertTrue(reason)
+                removal.assert_not_called()
+                self.assertTrue(Path(self.path, '.cache/uv/sentinel').exists())
+                shutil.rmtree(Path(self.path, '.cache/prek'), ignore_errors=True)
+                Path(self.path, 'node_modules').mkdir(exist_ok=True)
+                Path(self.path, 'node_modules/sentinel').write_text('keep')
+
+    def test_cache_symlink_to_unreadable_directory_is_not_followed(self):
+        outside = Path(self.root, 'outside')
+        outside.mkdir()
+        (outside / 'sentinel').write_text('keep')
+        os.symlink(outside, Path(self.path, 'node_modules/linked'))
+        outside.chmod(0)
+        self.addCleanup(outside.chmod, 0o700)
+        self.assertEqual(self.remove(), '')
+        self.assertFalse(Path(self.path, 'node_modules').exists())
+        outside.chmod(0o700)
+        self.assertEqual((outside / 'sentinel').read_text(), 'keep')
+
     def test_same_generation_cache_removal_leaves_shell(self):
         self.assertEqual(self.remove(), '')
         self.assertTrue(os.path.isdir(self.path))

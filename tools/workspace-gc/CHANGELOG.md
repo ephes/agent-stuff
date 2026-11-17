@@ -6,12 +6,18 @@
   Check admission and the entire pinned workspace before any deletion or
   Go-cache permission changes; refuse unreadable boundaries and workspaces
   mounted on a different device from their root. Same-device bind mounts
-  remain outside this check.
+  remain outside this check. The deletion preflight does not open directory
+  symlinks, so a link to an unreadable or remote directory inside a cache no
+  longer refuses the candidate or touches the link target.
 
 - Bind cache-only deletion to the inspected workspace, selected caches and
   parent directory identities through pinned descriptors. Refuse directory
   and symlink replacements before deleting any selected cache; recheck names
-  before removing emptied directories.
+  before removing emptied directories. The removal snapshot must match the
+  identities the fresh inspection walked and be unchanged after it, so a
+  rename away and back around the inspection, or caches added or removed
+  during it, cause refusal. A husk with unreadable parts keeps its sizes in
+  the report.
 
 - Codex job clones no longer pile up (431 of the 609 directories in
   `~/workspaces`, about 377 GB in all, were `ws-cx-*` on 2026-11-16). Codex jobs now keep their `codex-q/` branch
