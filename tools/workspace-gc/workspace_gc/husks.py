@@ -138,20 +138,32 @@ def inspect(path: str, sizes: bool = True) -> Husk:
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False,
                                                 onerror=lambda e: errors.append(e.filename)):
         budget.check()
-        try:
-            # Check children before os.walk can descend into a mount; check
-            # the current directory again in case it changed during descent.
-            for candidate in [dirpath] + [os.path.join(dirpath, d) for d in dirnames]:
+        # Check children before os.walk can descend into a mount; check the
+        # current directory again in case it changed during descent. A child
+        # that cannot be stat'ed (a readable but not searchable parent) is an
+        # unreadable part: never descended into, and the note keeps the husk.
+        skip = set()
+        lost = False
+        for name in [None] + dirnames:
+            candidate = dirpath if name is None else os.path.join(dirpath, name)
+            try:
                 st = os.lstat(candidate)
-                if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
-                    h.note = f"nested device boundary: {candidate}"
-                    return h
-                rel = os.path.relpath(candidate, path)
-                if rel in components and stat.S_ISDIR(st.st_mode):
-                    h._walked_payloads[rel] = (st.st_dev, st.st_ino)
-        except OSError as exc:
-            h.note = f"unreadable device boundary: {exc}"
-            return h
+            except OSError:
+                errors.append(candidate)
+                if name is None:
+                    lost = True
+                    break
+                skip.add(name)
+                continue
+            if stat.S_ISDIR(st.st_mode) and st.st_dev != device:
+                h.note = f"nested device boundary: {candidate}"
+                return h
+            rel = os.path.relpath(candidate, path)
+            if rel in components and stat.S_ISDIR(st.st_mode):
+                h._walked_payloads[rel] = (st.st_dev, st.st_ino)
+        if lost:
+            dirnames[:] = []
+            continue
         if not os.access(dirpath, os.W_OK, follow_symlinks=False):
             h.readonly_dirs += 1
         walked += len(dirnames) + len(filenames)
@@ -165,7 +177,7 @@ def inspect(path: str, sizes: bool = True) -> Husk:
         # Caches are walked for repositories but their files are not counted.
         if not any(_is_under(dirpath, p) for p in payload_abs):
             h.files += len(filenames)
-        dirnames[:] = [d for d in dirnames if d != ".git"]
+        dirnames[:] = [d for d in dirnames if d != ".git" and d not in skip]
     if errors:
         # Sizes stay informative: du cannot descend into unreadable trees
         # either, and the note alone keeps the husk from being removable.
@@ -461,10 +473,15 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
         return before
     fresh = inspect(h.path, sizes=True)
     _classify(fresh, min_idle_hours, min_stale_hours)
+    h.kb, h.payload_kb = fresh.kb, fresh.payload_kb      # measured now, for the audit
+    if not fresh.stale and not fresh.removable:
+        # The inspection's own reason (device boundary, unreadable part, walk
+        # limit, new content) rather than an incomplete identity comparison.
+        return ("no longer cache-only and idle" + (f": {fresh.note}" if fresh.note else ""))
     # Bind the deletion to the generation the fresh inspection walked: it
-    # must have started on the snapshot's workspace, and workspace, selected
-    # caches and their components must be unchanged after it (a rename away
-    # and back around the inspection is refused).
+    # must have started on the snapshot's workspace and cache components,
+    # and all of them must be unchanged after it (a rename away and back
+    # around the inspection is refused).
     walked = getattr(fresh, "_walked_payloads", {})
     if (getattr(fresh, "_walked", None) != before[0]
             or any(walked.get(k) != v for k, v in before[2].items())):
@@ -476,7 +493,6 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
     if after != before:
         return "replaced during the inspection"
     identity, payloads, payload_identities = before
-    h.kb, h.payload_kb = fresh.kb, fresh.payload_kb      # measured now, for the audit
     if fresh.stale:
         inside = _keep_inside(h.path, keep_patterns)
         if inside:
@@ -484,8 +500,6 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
         h.removed_what = "directory"
         return _remove_payloads(h.path, root, [], whole=True, identity=identity,
                                 unlock=fresh.readonly_dirs > 0)
-    if not fresh.removable:
-        return "no longer cache-only and idle"
     if payloads != [e["path"] for e in fresh.entries if e["payload"]]:
         return "caches changed during the inspection"
     h.removed_what = "caches"

@@ -16,8 +16,9 @@
   before removing emptied directories. The removal snapshot must match the
   identities the fresh inspection walked and be unchanged after it, so a
   rename away and back around the inspection, or caches added or removed
-  during it, cause refusal. A husk with unreadable parts keeps its sizes in
-  the report.
+  during it, cause refusal. A husk with unreadable parts (including
+  directories that can be listed but not searched) keeps its sizes in the
+  report, and a refusal names the fresh inspection's own reason.
 
 - Codex job clones no longer pile up (431 of the 609 directories in
   `~/workspaces`, about 377 GB in all, were `ws-cx-*` on 2026-11-16). Codex jobs now keep their `codex-q/` branch

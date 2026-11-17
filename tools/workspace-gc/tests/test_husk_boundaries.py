@@ -213,6 +213,37 @@ class TestHuskDeviceBoundary(SyntheticWorkspace):
         self.assertIn('node_modules', [e['path'] for e in h.entries])
         size.assert_called()
 
+    def test_unsearchable_directory_keeps_sizes_and_is_not_removable(self):
+        locked = Path(self.path, 'locked')
+        Path(locked, 'sub').mkdir(parents=True)
+        locked.chmod(0o400)    # listable, but its children cannot be stat'ed
+        self.addCleanup(locked.chmod, 0o700)
+        with mock.patch.object(husks, '_du_kb', return_value=7):
+            h = husks.inspect(self.path)
+            husks._classify(h, 0, 1)
+        self.assertIn('unreadable', h.note)
+        self.assertNotIn('device', h.note)
+        self.assertFalse(h.removable)
+        self.assertEqual(h.kb, 7)
+        self.assertIn('node_modules', [e['path'] for e in h.entries])
+
+    def test_removal_reports_the_inspection_reason(self):
+        real = os.lstat
+        foreign = Path(self.path, 'node_modules')
+
+        def different_device(path, *args, **kw):
+            st = real(path, *args, **kw)
+            if not kw.get('dir_fd') and os.fspath(path).rstrip('/') == str(foreign):
+                return self.foreign_stat(st)
+            return st
+
+        with mock.patch.object(husks, '_snapshot', return_value=((0, 0), [], {})), \
+                mock.patch.object(husks.os, 'lstat', side_effect=different_device), \
+                mock.patch.object(husks, '_remove_payloads') as removal:
+            reason = self.remove()
+        self.assertIn('nested device boundary', reason)
+        removal.assert_not_called()
+
     def test_late_boundary_refuses_whole_candidate_before_mutation(self):
         for whole in (False, True):
             for fault in ('device', 'unreadable', 'walk-error'):
