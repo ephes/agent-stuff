@@ -134,6 +134,22 @@ class TestHuskDeviceBoundary(SyntheticWorkspace):
         self.assertNotIn(mock.call(str(foreign)), scanned.call_args_list)
         self.assertTrue((foreign / 'sentinel').exists())
 
+    def test_unreadable_husk_keeps_sizes_and_is_not_removable(self):
+        locked = Path(self.path, 'locked')
+        locked.mkdir()
+        (locked / 'data').write_text('x' * 8192)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o700)
+        with mock.patch.object(husks, '_du_kb', return_value=7) as size:
+            h = husks.inspect(self.path)
+            husks._classify(h, 0, 1)
+        self.assertIn('unreadable', h.note)
+        self.assertFalse(h.removable)
+        self.assertFalse(h.stale)
+        self.assertEqual(h.kb, 7)
+        self.assertIn('node_modules', [e['path'] for e in h.entries])
+        size.assert_called()
+
     def test_late_boundary_refuses_whole_candidate_before_mutation(self):
         for whole in (False, True):
             for fault in ('device', 'unreadable', 'walk-error'):

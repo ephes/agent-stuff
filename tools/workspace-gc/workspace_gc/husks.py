@@ -158,8 +158,9 @@ def inspect(path: str, sizes: bool = True) -> Husk:
             h.files += len(filenames)
         dirnames[:] = [d for d in dirnames if d != ".git"]
     if errors:
+        # Sizes stay informative: du cannot descend into unreadable trees
+        # either, and the note alone keeps the husk from being removable.
         h.note = (h.note + "; " if h.note else "") + f"unreadable: {', '.join(errors[:3])}"
-        return h
     for rel, payload in _entries(path):
         kb = _du_kb(os.path.join(path, rel)) if sizes else 0
         h.entries.append({"path": rel, "kb": kb, "payload": payload})
