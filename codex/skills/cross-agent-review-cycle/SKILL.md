@@ -21,7 +21,7 @@ choice overrides this default; record same-family reviews accurately.
 - `REVIEWER_MODEL` may override the default model for the selected reviewer.
 - If `REVIEWER_AGENT` is unset or `auto`:
   - Claude-family implementer: use `codex` through the supervised
-    `codex-review-loop` harness, which runs `gpt-6.1-sol` at `high` reasoning.
+    `codex-review-loop` harness, which runs `gpt-6.2-sol` at `high` reasoning.
   - Codex/GPT-family implementer, including Pi: use `claude` with
     `REVIEWER_MODEL="${REVIEWER_MODEL:-claude-opus-5-5}"` (Opus 5.5) at
     `medium` effort, the harness default for that model.
@@ -29,14 +29,14 @@ choice overrides this default; record same-family reviews accurately.
   `codex-review-loop --cyber-access-program daybreak_blue`) is allowed only
   for a security review the user or coordinator explicitly requested, of
   security-critical code. It is never a default, never a reviewer for an
-  ordinary slice, and never a fallback when `gpt-6.1-sol` is unavailable or a
+  ordinary slice, and never a fallback when `gpt-6.2-sol` is unavailable or a
   normal review hits the provider's cyber filter (`failure_kind`
   `cyber_policy`): that review is blocked and reported.
 - Every Claude-family review must use `claude-review-loop`. Do not invoke direct
   Claude plan mode, tool-disabled mode, tmux wrappers, or Bash-pattern
   allowlists. The dedicated harness owns isolation, exact context, structured
   output, lifecycle supervision, and fail-closed verdicts.
-- Every Pi review must use `openai-codex/gpt-6.1-sol`, the model
+- Every Pi review must use `openai-codex/gpt-6.2-sol`, the model
   `pi-review-loop` pins. It needs Pi's OpenAI Codex subscription login
   (`/login` → OpenAI Codex); a ChatGPT sign-in on the `openai` provider is a
   different provider and does not satisfy it. If that login or model is
@@ -65,27 +65,37 @@ where the work is mechanical.
 | Role | Default | Escalate a tier when |
 |------|---------|----------------------|
 | Orchestrator / plan | the session's own model | the design is genuinely open and a wrong shape costs a rewrite |
-| Implementer | mid tier: `gpt-6-sol`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context (raise effort first: **Effort escalation**) |
-| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.1-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
+| Implementer | mid tier: `gpt-6.2-sol` at `medium`, `sonnet`, or `opus` | two consecutive rounds produced no working repair and the failure is reasoning, not missing context (raise effort first: **Effort escalation**) |
+| Reviewer, first round of a slice | `claude-opus-5-5` (Claude) / `gpt-6.2-sol` (Codex, Pi) | not by default; this verdict already runs on the primary reviewer |
 | Reviewer, delta re-review rounds | one tier below the primary reviewer is allowed | the round verifies a Critical repair, or the cheaper tier returns findings you cannot adjudicate |
 | Escalation model | not used; on a **Hard-case escalation** trigger `claude-fable-5-2` at `high` on the second Claude account | never; it is the last step |
+| Hard-problem implementer (Codex) | not used; `gpt-6.2-astra` at `high` for design or architecture work, a component that keeps producing new Criticals after the effort step, or a defect whose cause a real attempt did not find | never; the next step is **Hard-case escalation** |
 
 `REVIEWER_MODEL` is read by this skill. `ORCHESTRATOR_MODEL`,
 `IMPLEMENTER_MODEL`, and `REVIEWER_MODEL_DELTA` are conventions for the driving
 agent to apply when it builds those commands; nothing reads them automatically.
 
-Never default to the top tier. Claude Fable and GPT Astra are opt-in per run,
-chosen deliberately and recorded - not the resting default for any role.
+Never default to the top tier. Claude Fable and GPT-6.2 Astra
+(`gpt-6.2-astra`) are opt-in per run, chosen deliberately and recorded - not
+the resting default for any role. Select Astra for a Codex implementer with
+`codex exec -m gpt-6.2-astra -c model_reasoning_effort=high` (in the
+coordination runner: a `codex-model: gpt-6.2-astra` line in the job brief).
+Astra never reviews: both review harnesses pin `gpt-6.2-sol` and refuse every
+other id, and the tmux branch below refuses Astra and every id older than
+GPT-6.2.
+
+OpenAI model floor (owner, 2026-11-18): no OpenAI model older than GPT-6.2
+runs in any role. The review harnesses refuse such ids before anything runs,
+and `tools/model-floor` reports any that is left in active configuration.
 
 Reasoning effort is a separate axis from model choice, and it follows the model
-generation rather than the price. The default Codex reviewer, `gpt-6.1-sol`,
+generation rather than the price. The default Codex reviewer, `gpt-6.2-sol`,
 reviews at `high` (the `codex-review-loop` default; `medium` only when the user
-asks for it). The default Claude reviewer, Opus 5.5, reviews at `medium`, as do
-GPT Astra and other GPT-6 models; Opus 5 and GPT-5.6 review at `high`, and
-`xhigh` belongs to the Opus 4.x generation that needed it. Raise a `medium`
-default to `high` only when the user asks for it. Do not raise effort merely
-because a model is expensive, and do not let a request for a stronger model
-silently change effort as well.
+asks for it); Codex implementers run `gpt-6.2-sol` at `medium`. The default
+Claude reviewer, Opus 5.5, reviews at `medium`. Raise a `medium` default to
+`high` only when the user asks for it. Do not raise effort merely because a
+model is expensive, and do not let a request for a stronger model silently
+change effort as well.
 
 A cheaper delta re-review is only safe on a round that is actually scoped -
 `--baseline-ref` for Claude/Pi, an explicit delta prompt for Codex. Keep the
@@ -113,15 +123,19 @@ Do not escalate for a small repair delta (docs, tests, a local fix) that one
 re-review can close, or because the model is expensive.
 
 Action: re-dispatch (or resume) the implementer one step up - Claude
-implementers `high` -> `max`, Codex implementers (`gpt-6.1-sol`) `low` ->
+implementers `high` -> `max`, Codex implementers (`gpt-6.2-sol`) `medium` ->
 `high` - with the explicit instruction to find the root cause and treat the
 design as the finding: replace or simplify the mechanism (an existing tool, a
 narrower accepted input, refusing the unsupported case before any side effect)
 rather than patch the next hole, and stop and propose a simpler design if new
 holes appear again. Record the escalation, its trigger and both effort levels in
-the slice's review summary, and on the work item in a campaign. An implementer
-already at its escalation level has no step left: when a **Hard-case
-escalation** trigger holds, make that call; otherwise put the design choice to
+the slice's review summary, and on the work item in a campaign. A Codex
+implementer already at `gpt-6.2-sol` `high` has one model step left: when its
+component still produces new Criticals, or the failure turns out to be a
+design or architecture question, re-dispatch it on `gpt-6.2-astra` at `high`
+(`codex exec -m gpt-6.2-astra -c model_reasoning_effort=high`) and record the
+switch like an effort step. An implementer with no step left: when a
+**Hard-case escalation** trigger holds, make that call; otherwise put the design choice to
 the operator (**Judging the evidence a repair offers**). Any other model-tier
 escalation from the table above stays a deliberate, recorded choice.
 
@@ -138,7 +152,7 @@ de-escalation happens at the slice after it. Record the choice on the work
 item; neither is an owner ask.
 
 Reviewer effort does not escalate. `codex-review-loop` already runs at `high`,
-the highest effort its session-record check proves for `gpt-6.1-sol`; no higher
+the highest effort its session-record check proves for `gpt-6.2-sol`; no higher
 level is offered because none has been proven. `claude-review-loop` and
 `pi-review-loop` stay at their defaults or the campaign's configured value. For
 a Critical repair the reviewer lever is keeping the primary reviewer on the
@@ -523,7 +537,7 @@ correctly and it hung only at exit.
    ```bash
    python3 ~/projects/agent-stuff/claude/skills/pi-review-loop/bin/pi-review-loop \
      --repo "$PWD" --run-dir "$(mktemp -d)/pi-review" \
-     --model openai-codex/gpt-6.1-sol
+     --model openai-codex/gpt-6.2-sol
    ```
 
    Pi uses the shared redacted bundle as its starting point and works in a
@@ -561,7 +575,7 @@ correctly and it hung only at exit.
    invocation is not a review result. These environment limitations are not
    caused by the skill's review gate.
 
-   For a `gpt-6.1-sol` review driven from Claude - the default for a
+   For a `gpt-6.2-sol` review driven from Claude - the default for a
    Claude-family implementer - use the supervised
    [codex-review-loop](../../../claude/skills/codex-review-loop/SKILL.md)
    harness instead of the tmux branch below. It pins the model and proves it
@@ -571,7 +585,8 @@ correctly and it hung only at exit.
    exit codes as the Claude and Pi harnesses. An explicitly requested security
    review on Daybreak Blue uses the same harness with
    `--cyber-access-program daybreak_blue`, never the tmux branch. The tmux
-   branch remains for other Codex models.
+   branch remains only for an explicitly chosen other Codex review model at
+   GPT-6.2 or newer; it refuses Astra and every older id.
 
    For `codex` only, use tmux with a read-only review command. Generate the nonce
    and full prompt from step 1. Write a runner using a quoted heredoc:
@@ -580,15 +595,20 @@ correctly and it hung only at exit.
    session="review-$(basename "$PWD")-$(date +%Y%m%d%H%M%S)"
    log_file="/tmp/${session}.out"
    runner_file="$(mktemp -t review-run.XXXXXX.fish)"
-   reviewer_model="${REVIEWER_MODEL:-gpt-6.1-sol}"
+   reviewer_model="${REVIEWER_MODEL:-gpt-6.2-sol}"
    cat > "$runner_file" <<'FISH'
    set prompt_file $argv[1]
    set log_file $argv[2]
    set reviewer_model $argv[3]
-   set reasoning_effort high
-   if string match -q -r 'astra|gpt-6' -- "$reviewer_model"; and not string match -q -- 'gpt-6.1-sol' "$reviewer_model"
-       set reasoning_effort medium
+   # OpenAI model floor: only a numbered GPT id at 6.2 or newer reviews;
+   # older, unnumbered (o-series) and provider-prefixed ids are refused, and
+   # Astra never reviews.
+   if not string match -q -r '^gpt-(6\.([2-9]|[1-9][0-9])|([7-9]|[1-9][0-9]+)(\.[0-9]+)?)([^.0-9]|$)' -- "$reviewer_model"
+       or string match -q -r -i 'astra' -- "$reviewer_model"
+       echo "refused: $reviewer_model is not a GPT-6.2 or newer review model" | tee "$log_file"
+       exit 2
    end
+   set reasoning_effort high
    codex -a never exec --sandbox read-only -m "$reviewer_model" \
      -c "model_reasoning_effort=\"$reasoning_effort\"" - < "$prompt_file" 2>&1 | tee "$log_file"
    set statuses $pipestatus

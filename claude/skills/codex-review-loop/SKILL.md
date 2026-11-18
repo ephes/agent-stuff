@@ -1,6 +1,6 @@
 ---
 name: codex-review-loop
-description: "Use when a change needs a fresh-context review by GPT-6 Sol before committing — runs `gpt-6.1-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff (a dedicated, explicitly requested security review may run OpenAI's Daybreak Blue model with `--cyber-access-program daybreak_blue`). Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.1-sol review\", \"codex review before commit\", \"run the codex review loop\"."
+description: "Use when a change needs a fresh-context review by GPT-6.2 Sol before committing — runs `gpt-6.2-sol` at high (or, on request, medium) reasoning through the Codex CLI as a supervised, fail-closed gate over the current git diff (a dedicated, explicitly requested security review may run OpenAI's Daybreak Blue model with `--cyber-access-program daybreak_blue`). Never falls back to another model, provider, or a self-review: a different model, a reroute, a capacity error, a crash, or a hang is a structured failure, never a verdict. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have sol review this\", \"gpt-6.2-sol review\", \"codex review before commit\", \"run the codex review loop\"."
 ---
 
 The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/codex-review-loop`
@@ -13,7 +13,7 @@ suites, use Python 3.11+ (the Codex tests import `tomllib`), for example
 
 # Codex Review Loop
 
-Run a bounded review cycle: hand the current diff to `gpt-6.1-sol` through the
+Run a bounded review cycle: hand the current diff to `gpt-6.2-sol` through the
 Codex CLI as a fresh-context reviewer and read its structured verdict.
 `cross-agent-review-cycle` owns the continuation, stopping, scope-containment,
 and commit-gate rules for the loop around this harness; an unresolved Critical
@@ -28,7 +28,7 @@ slot pool, and slice ledger rather than copying them.
 
 ## When to use
 
-Before committing a change you want reviewed by `gpt-6.1-sol`. This is the
+Before committing a change you want reviewed by `gpt-6.2-sol`. This is the
 default reviewer for a Claude-family implementer and the only model the harness
 runs. `pi-review-loop` can run the same model through Pi, but it is a different
 harness: use it only when the user asks for Pi. Do not substitute Pi, Claude,
@@ -52,19 +52,19 @@ python3 ~/projects/agent-stuff/claude/skills/codex-review-loop/bin/codex-review-
 The flag goes to `codex exec --cyber-access-program`, and the program decides
 the model: `daybreak_blue` runs `gpt-daybreak-blue-latest` (derived; an
 explicit `--model gpt-daybreak-blue-latest` is the same run), at the same
-`--effort` (`high` default, `medium` on request). `gpt-6.1-sol` under a
+`--effort` (`high` default, `medium` on request). `gpt-6.2-sol` under a
 Daybreak program, or a Daybreak model without its program, is refused before
 Codex starts — the provider answers that combination with a 403 anyway. The
 session record must then show every turn on that model, effort and program,
-otherwise the run is `model_mismatch`. `standard` keeps `gpt-6.1-sol` and
-proves the program too. Without the flag nothing changes: `gpt-6.1-sol` is the
+otherwise the run is `model_mismatch`. `standard` keeps `gpt-6.2-sol` and
+proves the program too. Without the flag nothing changes: `gpt-6.2-sol` is the
 only model, and the server's default program is recorded but not judged.
 `daybreak_red` maps to `gpt-daybreak-red-latest`, which on 2026-10-22 this
 account's catalogue did not list and the provider refused for a ChatGPT login;
 expect `PROVIDER_ERROR` there.
 
 Never use Daybreak by default, for ordinary code reviews, or as a fallback when
-`gpt-6.1-sol` is unavailable. Use a separate `--slice-id` for the security
+`gpt-6.2-sol` is unavailable. Use a separate `--slice-id` for the security
 review so its rounds do not mix with the slice's ordinary review history.
 
 When the provider's cyber filter refuses a review ("This content was flagged
@@ -190,14 +190,14 @@ A verdict is accepted only when all of these hold; otherwise the result is
 - **The model is proven, not assumed.** `codex exec --json` does not say which
   model answered, so the harness reads Codex's own session record
   (`$CODEX_HOME/sessions/.../rollout-*-<thread>.jsonl`). Every turn must name
-  `gpt-6.1-sol` (or, under `--cyber-access-program daybreak_blue`,
+  `gpt-6.2-sol` (or, under `--cyber-access-program daybreak_blue`,
   `gpt-daybreak-blue-latest`) at the effort the run asked for (`--effort`,
   default `high`) and, when a program was requested, under that
   `cyber_access_program`; the record must hold no model-reroute
   entry. A missing record is `model_unproven`, not a pass. The record is copied
   to `session.jsonl` in the run directory.
 - **The review stayed one direct context.** Only the tools `exec` (the code-mode
-  host through which `gpt-6.1-sol` runs sandboxed shell commands), `wait`,
+  host through which `gpt-6.2-sol` runs sandboxed shell commands), `wait`,
   `exec_command`, `write_stdin`, `shell`, and `update_plan` may appear.
   Anything else — a `collaboration.*` call, a subagent record, an unlisted tool
   — is `forbidden_tool`. The session record is checked, not just the event
@@ -228,11 +228,15 @@ by the tests is injected only through `tests/harness_entry.py`.
 
 Demonstrated against Codex 0.159.1 (last re-run on 0.163.0, 2026-10-22) on
 macOS, and on Linux (bubblewrap) against Codex 0.162.1 on 2026-11-04,
-with `gpt-6.1-sol` by `tests/test_canary.py`, which builds a production copy, asks the model to run
+with the Sol model pinned at that time by `tests/test_canary.py`, which builds a production copy, asks the model to run
 commands inside and outside it, and then checks Codex's session record — which
 holds every command's output — and the filesystem. The canary drives the
 production copy builder, command builder and runner with a canary instruction,
 because the review instruction tells a compliant model not to try.
+The switch to `gpt-6.2-sol` (2026-11-18) changed only the pinned model id, not
+the profile, the command or the copy builder; the canary has not been re-run
+against `gpt-6.2-sol` yet (that needs one live Codex run). Re-run it before
+relying on the boundary claim for the new model.
 
 **The repository copy.** Before Codex starts, the harness makes
 `<run-dir>/workspace/repo`: a `git clone --shared --no-checkout` of the
@@ -369,7 +373,7 @@ credentials: `~/.codex` is unreadable.
 The boundary is Codex's enforcement, verified by the canary for this Codex
 version. The permission profile does not depend on the model; a Daybreak run
 uses the same profile and the same tool audit, but the canary itself runs
-`gpt-6.1-sol`. It is not something the harness can re-prove on every run. Re-run the
+`gpt-6.2-sol`. It is not something the harness can re-prove on every run. Re-run the
 canary after a Codex upgrade or any change to `command.py` or the copy
 builder:
 
@@ -437,13 +441,13 @@ CODEX_REVIEW_RUN_SANDBOX=1 python3.14 -m unittest tests.test_sandbox_powsybl -v
 
 ## Hard rules
 
-- `gpt-6.1-sol` only. `--model` accepts nothing else, except the Daybreak
+- `gpt-6.2-sol` only. `--model` accepts nothing else, except the Daybreak
   model of an explicit `--cyber-access-program` for a requested security
   review.
 - Effort `high` by default; `--effort medium` only when the user asked for
   medium. Nothing else is accepted, and the run is proven at the effort it
   asked for, so a run that answered at another effort is `INVALID`. No higher
-  level is offered: none has been proven for `gpt-6.1-sol` in the session
+  level is offered: none has been proven for `gpt-6.2-sol` in the session
   record, and effort escalation (`cross-agent-review-cycle`) raises the
   implementer, not this reviewer.
 - A commit-gate "clean" is exit `0` plus your judgement that any `(scoped)`

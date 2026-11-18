@@ -13,6 +13,35 @@ def json_key(path):
     return command.toml_string(os.path.realpath(path)) + "="
 
 
+#: Ids below the owner's GPT-6.2 floor (2026-11-18); each must be refused.
+PRE_62 = ("gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol",  # model-floor: allow
+          "gpt-6-astra", "gpt-5.6-sol", "gpt-5", "gpt-4o",  # model-floor: allow
+          "GPT-6.1-Sol")  # model-floor: allow
+
+
+class TestModelFloor(unittest.TestCase):
+    def test_every_pinned_model_meets_the_floor(self):
+        self.assertEqual(command.MIN_GPT_VERSION, (6, 2))
+        for model in command.REVIEW_MODELS:
+            self.assertFalse(command.below_floor(model), model)
+        self.assertEqual(command.gpt_version(command.REVIEW_MODEL), (6, 2))
+
+    def test_older_generations_are_below_the_floor(self):
+        for old in PRE_62:
+            self.assertTrue(command.below_floor(old), old)
+            with self.assertRaisesRegex(ValueError, "older than GPT-6.2"):
+                command.check_floor(old)
+
+    def test_current_and_unnumbered_ids_are_not(self):
+        for model in ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.10-sol", "gpt-7",
+                      "gpt-daybreak-blue-latest", "codex-auto-review"):
+            self.assertFalse(command.below_floor(model), model)
+            command.check_floor(model)
+        self.assertEqual(command.gpt_version("gpt-6.2-astra"), (6, 2))
+        self.assertEqual(command.gpt_version("gpt-6-sol"), (6, 0))  # model-floor: allow
+        self.assertIsNone(command.gpt_version("gpt-daybreak-blue-latest"))
+
+
 class TestCommand(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -128,7 +157,7 @@ class TestCommand(unittest.TestCase):
     def test_pins_model_effort_profile_and_stdin(self):
         c = self.cmd
         self.assertEqual(c[:4], ["codex", "-a", "never", "exec"])
-        self.assertEqual(c[c.index("-m") + 1], "gpt-6.1-sol")
+        self.assertEqual(c[c.index("-m") + 1], "gpt-6.2-sol")
         self.assertEqual(c[-1], "-")
         self.assertIn('model_reasoning_effort="high"', self.overrides())
         self.assertIn(f'default_permissions="{command.PROFILE_NAME}"', self.overrides())
@@ -163,22 +192,31 @@ class TestCommand(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-daybreak-blue-latest")
         self.assertEqual(cmd[-1], "-")
         cmd = command.codex_cmd(access_program="standard", **kw)
-        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-6.1-sol")
+        self.assertEqual(cmd[cmd.index("-m") + 1], "gpt-6.2-sol")
         with self.assertRaises(ValueError):
             command.codex_cmd(access_program="daybreak_blue",
-                              model="gpt-6.1-sol", **kw)
+                              model="gpt-6.2-sol", **kw)
         with self.assertRaises(ValueError):
             command.codex_cmd(model="gpt-daybreak-blue-latest", **kw)
         with self.assertRaises(ValueError):
             command.codex_cmd(access_program="daybreak", **kw)
 
     def test_each_program_has_exactly_one_model(self):
-        self.assertEqual(command.model_for(None), "gpt-6.1-sol")
-        self.assertEqual(command.model_for("standard"), "gpt-6.1-sol")
+        self.assertEqual(command.model_for(None), "gpt-6.2-sol")
+        self.assertEqual(command.model_for("standard"), "gpt-6.2-sol")
         self.assertEqual(command.model_for("daybreak_blue"),
                          "gpt-daybreak-blue-latest")
         self.assertEqual(command.model_for("daybreak_red"),
                          "gpt-daybreak-red-latest")
+
+    def test_no_model_below_gpt_6_2_ever_builds_a_command(self):
+        kw = dict(codex_bin="codex", review_root=self.root, copy=self.copy,
+                  schema_path="s.json", last_message_path="m.json",
+                  instruction="x")
+        for old in PRE_62:
+            with self.subTest(model=old), self.assertRaisesRegex(
+                    ValueError, "older than GPT-6.2"):
+                command.codex_cmd(model=old, **kw)
 
     def test_disables_every_listed_feature(self):
         disabled = {self.cmd[i + 1] for i, a in enumerate(self.cmd) if a == "--disable"}

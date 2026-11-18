@@ -12,7 +12,7 @@ def record(path, *entries):
             fh.write(json.dumps(entry) + "\n")
 
 
-TURN = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol", "effort": "high"}}
+TURN = {"type": "turn_context", "payload": {"model": "gpt-6.2-sol", "effort": "high"}}
 
 
 def call(name, namespace=None, kind="function_call"):
@@ -33,7 +33,7 @@ class TestAudit(unittest.TestCase):
     def judged(self, *entries):
         record(self.path, *entries)
         result = audit.audit_session(self.path)
-        return result, audit.judge(result, model="gpt-6.1-sol", effort="high")
+        return result, audit.judge(result, model="gpt-6.2-sol", effort="high")
 
     def test_a_pinned_run_passes(self):
         result, reason = self.judged(TURN, call("exec", kind="custom_tool_call"),
@@ -43,11 +43,22 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(result.tool_uses, ["exec", "wait"])
 
     def test_any_turn_on_another_model_fails(self):
-        other = {"type": "turn_context", "payload": {"model": "gpt-5.6-sol", "effort": "high"}}
-        self.assertIn("gpt-5.6-sol", self.judged(TURN, other)[1])
+        other = {"type": "turn_context", "payload": {"model": "gpt-6.2-astra", "effort": "high"}}
+        self.assertIn("gpt-6.2-astra", self.judged(TURN, other)[1])
+
+    def test_a_turn_below_the_floor_is_named(self):
+        old = {"type": "turn_context",
+               "payload": {"model": "gpt-6.1-sol", "effort": "high"}}  # model-floor: allow
+        reason = self.judged(TURN, old)[1]
+        self.assertIn("below the GPT-6.2 floor", reason)
+        astra = {"type": "turn_context",
+                 "payload": {"model": "gpt-6.2-astra", "effort": "high"}}
+        reason = self.judged(TURN, astra)[1]
+        self.assertIn("not gpt-6.2-sol", reason)
+        self.assertNotIn("floor", reason)
 
     def test_any_turn_at_another_effort_fails(self):
-        other = {"type": "turn_context", "payload": {"model": "gpt-6.1-sol", "effort": "low"}}
+        other = {"type": "turn_context", "payload": {"model": "gpt-6.2-sol", "effort": "low"}}
         self.assertIn("effort", self.judged(TURN, other)[1])
 
     def test_access_program_is_judged_only_when_asked_for(self):
@@ -65,10 +76,10 @@ class TestAudit(unittest.TestCase):
         self.assertIn("not daybreak_red", reason)
         # A record without the field cannot prove a requested program.
         result, _ = self.judged(TURN)
-        self.assertIn("None", audit.judge(result, model="gpt-6.1-sol",
+        self.assertIn("None", audit.judge(result, model="gpt-6.2-sol",
                                           effort="high",
                                           access_program="standard"))
-        self.assertIsNone(audit.judge(result, model="gpt-6.1-sol", effort="high"))
+        self.assertIsNone(audit.judge(result, model="gpt-6.2-sol", effort="high"))
 
     def test_error_info_of_a_failed_turn_is_recorded(self):
         result, _ = self.judged(TURN, {"type": "event_msg", "payload": {
@@ -108,11 +119,11 @@ class TestAudit(unittest.TestCase):
 
     def test_missing_or_broken_record_is_an_error(self):
         self.assertIsNotNone(audit.judge(audit.audit_session(None),
-                                         model="gpt-6.1-sol", effort="high"))
+                                         model="gpt-6.2-sol", effort="high"))
         with open(self.path, "w") as fh:
             fh.write("{not json\n")
         self.assertIn("not JSON", audit.judge(audit.audit_session(self.path),
-                                              model="gpt-6.1-sol", effort="high"))
+                                              model="gpt-6.2-sol", effort="high"))
 
     def test_decode_and_read_errors_are_structured(self):
         from unittest import mock
@@ -121,7 +132,7 @@ class TestAudit(unittest.TestCase):
                 fh.write(json.dumps(TURN).encode() + b'\n' + suffix)
             result = audit.audit_session(self.path)
             self.assertIn('UTF-8', result.error)
-            self.assertIsNotNone(audit.judge(result, model='gpt-6.1-sol', effort='high'))
+            self.assertIsNotNone(audit.judge(result, model='gpt-6.2-sol', effort='high'))
         with mock.patch('builtins.open', side_effect=OSError('synthetic')):
             self.assertIn('cannot read', audit.audit_session(self.path).error)
 
@@ -199,7 +210,7 @@ class TestAudit(unittest.TestCase):
                 result, reason = self.judged(TURN, envelope)
                 self.assertIsNone(reason)
                 self.assertFalse(result.forbidden)
-                self.assertEqual(result.models, ['gpt-6.1-sol'])
+                self.assertEqual(result.models, ['gpt-6.2-sol'])
         _, reason = self.judged({'type': 'response_item', 'payload': {
             'type': 'function_call_output', 'output': json.dumps(TURN)}})
         self.assertIn('no turn', reason)

@@ -40,7 +40,7 @@ import sys
 import time
 import uuid
 
-MODEL, EFFORT = "gpt-6.1-sol", "high"
+MODEL, EFFORT = "gpt-6.2-sol", "high"
 CYBER_REFUSAL = (
     "This content was flagged for possible cybersecurity risk. If this seems "
     "wrong, try rephrasing your request. Otherwise, confirm that the "
@@ -156,7 +156,7 @@ def main():
                     "payload": {"cli_version": "0.156.1", "source": source}})
     if mode != "no_turn_context":
         records.append({"type": "turn_context", "payload": {
-            "model": "gpt-5.6-sol" if mode == "wrong_model" else model,
+            "model": "gpt-6.2-astra" if mode == "wrong_model" else model,
             "effort": "low" if mode == "wrong_effort" else effort,
             "cyber_access_program":
                 "standard" if mode == "wrong_program" else program}})
@@ -165,7 +165,7 @@ def main():
         "input": "text('reroute is just a word in reviewed code')"}})
     if mode == "reroute":
         records.append({"type": "event_msg", "payload": {
-            "type": "model_reroute", "from_model": MODEL, "to_model": "gpt-5.6-sol"}})
+            "type": "model_reroute", "from_model": MODEL, "to_model": "gpt-6.2-astra"}})
     if mode in ("spawn_record", "nonfinite_forbidden"):
         records.append({"type": "response_item", "payload": {
             "type": "function_call", "name": "spawn_agent",

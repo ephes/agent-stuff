@@ -100,6 +100,12 @@ def _positive_float(value):
 
 
 def _model(value):
+    if command_mod.below_floor(value):
+        floor = ".".join(map(str, command_mod.MIN_GPT_VERSION))
+        raise argparse.ArgumentTypeError(
+            f"{value} is older than GPT-{floor}; only "
+            f"{command_mod.REVIEW_MODEL} is permitted and no review runs on "
+            f"a model below {floor}")
     if value not in command_mod.REVIEW_MODELS:
         raise argparse.ArgumentTypeError(
             f"only {command_mod.REVIEW_MODEL} is permitted (or a Daybreak "
@@ -127,7 +133,7 @@ def _resolve_model(args, parser):
 
 def _build_parser():
     p = _Parser(
-        prog=PROG, description="Run one pinned gpt-6.1-sol review over a git diff "
+        prog=PROG, description="Run one pinned gpt-6.2-sol review over a git diff "
                     "(a Daybreak model only under its --cyber-access-program).")
     env_limit = os.environ.get("CODEX_REVIEW_MAX_CONCURRENT")
     default_limit = DEFAULT_MAX_CONCURRENT

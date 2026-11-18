@@ -21,8 +21,10 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from .command import below_floor
+
 #: Tools the reviewer may call. `exec` is the code-mode host through which
-#: gpt-6.1-sol runs sandboxed shell commands; the others are the plain shell tool
+#: gpt-6.2-sol runs sandboxed shell commands; the others are the plain shell tool
 #: names used when code mode is not in play, and the side-effect-free plan and
 #: wait tools. Everything else fails the review, so a new Codex tool is refused
 #: until someone decides it belongs here.
@@ -212,7 +214,9 @@ def judge(audit, *, model, effort, access_program=None):
         return "session record holds no turn, so nothing proves the model"
     wrong_models = sorted({str(m) for m in audit.models if m != model})
     if wrong_models:
-        return f"turn ran on {', '.join(wrong_models)}, not {model}"
+        old = [m for m in wrong_models if below_floor(m)]
+        note = f" ({', '.join(old)} is below the GPT-6.2 floor)" if old else ""
+        return f"turn ran on {', '.join(wrong_models)}, not {model}{note}"
     wrong_efforts = sorted({str(e) for e in audit.efforts if e != effort})
     if wrong_efforts:
         return f"turn ran at effort {', '.join(wrong_efforts)}, not {effort}"

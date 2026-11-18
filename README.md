@@ -19,8 +19,8 @@ chezmoi symlinks.
 | Claude | `goal-handoff` | Generate a compact goal condition for another agent session |
 | Claude | `handoff-impl` | Generate an implementation prompt for a second agent |
 | Claude | `handoff-review` | Generate a code review prompt for a second agent |
-| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-6.1-sol` at medium thinking (high on request), working in an unsandboxed throwaway copy of the repository; shares the bundle and slice ledger with `claude-review-loop` |
-| Claude | `codex-review-loop` | Default reviewer for Claude implementers: fail-closed Codex gate using only `gpt-6.1-sol` at high reasoning (medium on request, `--effort medium`); proves the model from Codex's session record (`--cyber-access-program daybreak_blue` runs `gpt-daybreak-blue-latest` instead, only for explicitly requested security reviews), confines the reviewer to a sandboxed throwaway copy of the repository, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
+| Claude | `pi-review-loop` | Fail-closed Pi gate using only `openai-codex/gpt-6.2-sol` at medium thinking (high on request), working in an unsandboxed throwaway copy of the repository; shares the bundle and slice ledger with `claude-review-loop` |
+| Claude | `codex-review-loop` | Default reviewer for Claude implementers: fail-closed Codex gate using only `gpt-6.2-sol` at high reasoning (medium on request, `--effort medium`); proves the model from Codex's session record (`--cyber-access-program daybreak_blue` runs `gpt-daybreak-blue-latest` instead, only for explicitly requested security reviews), confines the reviewer to a sandboxed throwaway copy of the repository, and shares the bundle, slot pool and slice ledger with `claude-review-loop` |
 | Claude | `claude-review-loop` (shared dependency) | Supervised gate provided by the sibling Codex skill |
 | Claude | `cmsg` (command) | Commit with a clean message, no self-references |
 | Pi | `commit-ready` | Assess commit readiness without creating a commit |
@@ -36,6 +36,7 @@ chezmoi symlinks.
 | [`tools/claude-usage-read`](tools/claude-usage-read/README.md) | Reads a Claude account's weekly usage (percent, reset time) through `claude -p /usage` instead of the interactive `/usage` dialog, which blocked a worker pane; `--report` sends the weekly windows to `work usage report`; reads `~/.claude` with `CLAUDE_CONFIG_DIR` unset (keychain login); run every 15 minutes on the Studio by the chezmoi LaunchAgent `de.wersdoerfer.usage-collect` |
 | [`tools/coord-watchdog`](tools/coord-watchdog/README.md) | Deterministic five-minute check of the coordination pipeline (Studio LaunchAgent via chezmoi): Codex feeder/queue/`automerge.off`, stuck or unacknowledged Katharina workers (`coordination/acks/<name>`), usage freshness, the coordinator heartbeat (`coordination/coordinator.heartbeat`) and sustained load; escalates each finding once (one bounded Opus diagnosis run that may only restart a dead feeder, then a notification to a log file, herdr and the work-app item `coord-watchdog`) |
 | [`tools/pane-watchdog`](tools/pane-watchdog/README.md) | Read-only scan of herdr panes on given machines for open `/usage`, trust and permission dialogs, finished turns that ask the owner a question, and typed input; ignores dim ghost-text suggestions and never sends keys |
+| [`tools/model-floor`](tools/model-floor/README.md) | `model-floor-check` reports OpenAI model ids below GPT-6.2 (owner rule 2026-11-18) outside history; its suite runs the check over this repository |
 | [`tools/guard-projects`](tools/guard-projects/README.md) | Opt-in Claude Code `PreToolUse` hook that keeps `~/projects` read-only for agents and blocks pushes outside `github.com/ephes/`, plus `check-push-remote` for pre-push checks |
 
 ## CI
@@ -45,7 +46,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs only on manual dispatch
 
 - the hermetic unittest suites of `claude-review-loop`, `codex-review-loop`,
   `pi-review-loop`, `tools/workspace-gc`, `tools/guard-projects`, `tools/codex-quota-guard`,
-  `tools/claude-usage-read`, `tools/pane-watchdog` and `tools/coord-watchdog`, on a macOS runner because the
+  `tools/claude-usage-read`, `tools/pane-watchdog`, `tools/coord-watchdog` and `tools/model-floor`, on a macOS runner because the
   harnesses target the Studio. The live model canaries stay skipped: never set
   `CODEX_REVIEW_RUN_CANARY` or `CLAUDE_REVIEW_RUN_CLAUDE_CANARY` in CI.
 - `.github/scripts/check_skill_frontmatter.py`: every `*/skills/*/SKILL.md`
@@ -59,6 +60,10 @@ skill suites use `discover -s tests` from the skill directory). Use Python
 `python3 <skill>/bin/<review-loop>` even with system Python 3.9: before
 importing the harness they select the newest working `python3.1x` on PATH
 (3.19 down to 3.10), or exit with a one-line prerequisite error.
+
+The `tools/model-floor` suite fails when an OpenAI model id below GPT-6.2
+appears outside history in this repository's tracked (and new, not ignored)
+files; run it with the other suites before every push.
 
 The synthetic tmux sampler suite runs explicitly with
 `cd codex/skills/tmux-transient-ui-verify && python3.14 -m unittest discover -s tests`.
@@ -175,10 +180,25 @@ Synthetic behavioral forward checks are in
 [docs/fixtures/handoff-review/requests.md](docs/fixtures/handoff-review/requests.md).
 
 The canonical policy, handoffs and `pi-review-loop` all require Pi
-`openai-codex/gpt-6.1-sol`, the model pinned for both review harnesses on
-2026-09-30. A required Pi gate needs Pi's OpenAI Codex subscription login; when
-that login or the model is unavailable the gate is blocked, without a
-model/provider substitution. The implementer tier keeps `gpt-6-sol`.
+`openai-codex/gpt-6.2-sol`, the model pinned for both review harnesses since
+2026-11-18. A required Pi gate needs Pi's OpenAI Codex subscription login and
+a Pi model catalog that lists `gpt-6.2-sol`; when either is missing the gate
+is blocked, without a model/provider substitution. Codex implementers run
+`gpt-6.2-sol` at medium; `gpt-6.2-astra` is the opt-in choice for hard
+problems.
+
+## OpenAI model floor
+
+Owner rule (2026-11-18): no OpenAI model older than GPT-6.2 is used anywhere
+in the agent tooling. Reviews run `gpt-6.2-sol` at high, Codex implementation
+and scouts `gpt-6.2-sol` at medium, and `gpt-6.2-astra` (selected per job with
+`codex exec -m gpt-6.2-astra -c model_reasoning_effort=high`) is reserved for
+hard problems: design and architecture, repeated Criticals after the effort
+step, hard debugging. `codex-review-loop` and `pi-review-loop` refuse every id
+below 6.2 before anything runs. [`tools/model-floor`](tools/model-floor/README.md)
+fails when such an id appears outside history (`CHANGELOG*`, `docs/archive/`,
+`docs/plans/`, `docs/specs/`, `docs/review-cycle-log.md` and the globs in
+`.model-floor-allow`); its suite runs the check over this repository.
 
 ## Workflow lessons
 

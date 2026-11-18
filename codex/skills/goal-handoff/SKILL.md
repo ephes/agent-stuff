@@ -110,8 +110,8 @@ This skill is for goal tracking and continuation, not full implementation contex
    - for implementation or commit-ready goals, an external different-family
      review-loop gate when available: for Codex-authored work, prefer the
      configured Claude reviewer through `claude-review-loop`; for Claude-authored
-     work, use the fixed `gpt-6.1-sol` reviewer through `codex-review-loop`
-     (or `openai-codex/gpt-6.1-sol` through `pi-review-loop` when Pi is
+     work, use the fixed `gpt-6.2-sol` reviewer through `codex-review-loop`
+     (or `openai-codex/gpt-6.2-sol` through `pi-review-loop` when Pi is
      requested). Do not substitute another model or provider. If Pi's OpenAI Codex
      login or that model is unavailable, report the blocked gate. No commit
      may be made until the applicable loop's commit gate in

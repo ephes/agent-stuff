@@ -68,7 +68,7 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("REVIEW: CLEAN", proc.stdout)
         self.assertEqual(result["state"], "CLEAN")
-        self.assertEqual(result["observed_models"], ["gpt-6.1-sol"])
+        self.assertEqual(result["observed_models"], ["gpt-6.2-sol"])
         self.assertEqual(result["observed_efforts"], ["high"])
         self.assertIsNone(result["failure_kind"])
 
@@ -97,7 +97,7 @@ class TestCliVerdicts(unittest.TestCase):
         self.assertEqual(argv[-1], "-")
         self.assertIn("review-bundle.md", stdin)
         self.assertNotIn(stdin.strip(), " ".join(argv))
-        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.1-sol")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.2-sol")
 
     def test_inherited_codex_home_is_not_used(self):
         stray = os.path.join(self.fx.root, "stray-home")
@@ -129,7 +129,7 @@ class TestCliFailsClosed(unittest.TestCase):
 
     def test_another_model_is_invalid(self):
         result, _ = self.assertFailed("wrong_model", "INVALID", "model_mismatch")
-        self.assertIn("gpt-5.6-sol", result["error"])
+        self.assertIn("gpt-6.2-astra", result["error"])
 
     def test_another_effort_is_invalid(self):
         self.assertFailed("wrong_effort", "INVALID", "model_mismatch")
@@ -261,7 +261,7 @@ class TestMalformedAudit(unittest.TestCase):
             self.assertIn('collaboration.spawn_agent', receipt['forbidden_tool_uses'])
             self.assertTrue(receipt['thread_id'])
             self.assertTrue(receipt['session_record'])
-            self.assertEqual(receipt['observed_models'], ['gpt-6.1-sol'])
+            self.assertEqual(receipt['observed_models'], ['gpt-6.2-sol'])
         finally:
             fx.cleanup()
 
@@ -318,9 +318,25 @@ class TestCliPreflight(unittest.TestCase):
         self.fx.cleanup()
 
     def test_another_model_is_refused_before_anything_runs(self):
-        proc, result, run_dir = self.fx.run("clean", "--model", "gpt-5.6-sol")
+        proc, result, run_dir = self.fx.run("clean", "--model", "gpt-6.2-astra")
         self.assertEqual(proc.returncode, 2)
-        self.assertIn("only gpt-6.1-sol", proc.stderr)
+        self.assertIn("only gpt-6.2-sol", proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
+
+    def test_a_model_below_gpt_6_2_is_refused_before_anything_runs(self):
+        for old in ("gpt-6.1-sol", "gpt-6-sol"):  # model-floor: allow
+            with self.subTest(model=old):
+                proc, result, _ = self.fx.run("clean", "--model", old)
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn("older than GPT-6.2", proc.stderr)
+                self.assertEqual(result["state"], "INVALID")
+                self.assertFalse(os.path.exists(
+                    os.path.join(self.fx.home, "last-argv.json")))
+
+    def test_gpt_6_2_astra_is_not_a_review_model(self):
+        proc, result, _ = self.fx.run("clean", "--model", "gpt-6.2-astra")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("only gpt-6.2-sol", proc.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.fx.home, "last-argv.json")))
 
     def test_an_unlisted_effort_is_refused_before_anything_runs(self):
@@ -371,11 +387,11 @@ class TestCliPreflight(unittest.TestCase):
             self.assertEqual(json.load(fh)["failure_kind"], "preflight")
 
     def test_an_invalid_invocation_leaves_a_structured_result(self):
-        proc, result, _ = self.fx.run("clean", "--model", "gpt-5.6-sol")
+        proc, result, _ = self.fx.run("clean", "--model", "gpt-6.2-astra")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual((result["state"], result["failure_kind"]),
                          ("INVALID", "preflight"))
-        self.assertIn("only gpt-6.1-sol", result["error"])
+        self.assertIn("only gpt-6.2-sol", result["error"])
 
     def test_an_invalid_slot_limit_in_the_environment_leaves_a_result(self):
         proc, result, _ = self.fx.run(

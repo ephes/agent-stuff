@@ -9,7 +9,11 @@ import subprocess
 
 from .env import pi_env
 
-DEFAULT_MODEL = "openai-codex/gpt-6.1-sol"
+DEFAULT_MODEL = "openai-codex/gpt-6.2-sol"
+#: The oldest GPT generation any review may run on (owner, 2026-11-18: no
+#: model below 6.2). Checked on top of the single-model pin.
+MIN_GPT_VERSION = (6, 2)
+_GPT_VERSION_RE = re.compile(r"(?i)^gpt-(\d+)(?:\.(\d+))?(?![\d.])")
 #: Thinking levels a caller may ask for; medium unless the user asked for high.
 REVIEW_EFFORT = "medium"
 REVIEW_EFFORTS = ("medium", "high")
@@ -58,9 +62,31 @@ def resolve_model(list_models_output, fallback=DEFAULT_MODEL):
     return fallback
 
 
+def gpt_version(model_id):
+    """`(major, minor)` of a numbered GPT id (`gpt-6.2-sol`, also with a
+    `provider/` prefix), else None."""
+    m = _GPT_VERSION_RE.match(str(model_id).rsplit("/", 1)[-1])
+    if m is None:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
+def below_floor(model_id):
+    """True for a numbered GPT id older than `MIN_GPT_VERSION`."""
+    version = gpt_version(model_id)
+    return version is not None and version < MIN_GPT_VERSION
+
+
 def validate_review_model(model_pattern):
     """Return the normalized model or reject every non-approved review route."""
     lookup = _THINKING_SUFFIX_RE.sub("", model_pattern)
+    if below_floor(lookup):
+        floor = ".".join(map(str, MIN_GPT_VERSION))
+        raise PiUnavailable(
+            f"unsupported Pi review model: {model_pattern} is older than "
+            f"GPT-{floor}; no review runs on a model below {floor} "
+            f"(only {DEFAULT_MODEL})"
+        )
     if lookup != DEFAULT_MODEL:
         raise PiUnavailable(
             f"unsupported Pi review model: {model_pattern}; mandatory Pi reviews "

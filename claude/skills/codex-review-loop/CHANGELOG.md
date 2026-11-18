@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The review model is now `gpt-6.2-sol` (was `gpt-6.1-sol`), still at `high`
+  by default and `medium` on request, with the same fail-closed pin: any other
+  model, a reroute or a different effort in the session record is
+  `model_mismatch`. New GPT-6.2 floor (owner rule 2026-11-18): `--model` with
+  an id below 6.2 (`gpt-6.1-sol`, `gpt-6-sol`, ...) is refused as `INVALID`
+  before anything runs with "older than GPT-6.2", `codex_cmd` and `model_for`
+  raise for such an id, and an audit that finds a turn on one names it as
+  below the floor. `gpt-6.2-astra` is not a review model and is refused like
+  any other id.
 - A Codex that macOS Gatekeeper holds at its first launch no longer stalls a
   review for ten minutes without a word. On 2026-11-13 Homebrew's `codex`
   cask installed Codex 0.168.0 with the `com.apple.quarantine` attribute; its

@@ -32,7 +32,7 @@ the installed Codex (0.158.0) rather than assumed:
   approval settings. It does not drop account-bound app tools, subagents or
   image generation, so those are disabled one by one below; the canary in
   `tests/test_canary.py` lists the tools the reviewer actually had.
-- `code_mode_host` stays enabled: `gpt-6.1-sol` reaches its shell only through
+- `code_mode_host` stays enabled: `gpt-6.2-sol` reaches its shell only through
   the code-mode `exec` tool, and a review without it could not read anything.
 - `unbounded_connection_retries` is disabled so a capacity failure ends the
   turn instead of retrying forever inside the deadline.
@@ -49,16 +49,22 @@ the installed Codex (0.158.0) rather than assumed:
   repository data under review, never configuration for the reviewer.
 - `--cyber-access-program` is passed only when the caller asked for one. It is
   a per-turn `codex exec` flag (Codex 0.163.0), not a `-c` key. The Daybreak
-  programs are served by their own models: `gpt-6.1-sol` with
+  programs are served by their own models: `gpt-6.2-sol` with
   `daybreak_blue` is refused (403 "Daybreak isn't available for this model"),
   so a Daybreak program always runs with its matching model and nothing else.
 """
 import json
 import os
+import re
 import shutil
 import sys
 
-REVIEW_MODEL = "gpt-6.1-sol"
+REVIEW_MODEL = "gpt-6.2-sol"
+#: The oldest GPT generation any review may run on (owner, 2026-11-18: no
+#: model below 6.2). Checked on top of the single-model pin, so a future edit
+#: of `REVIEW_MODEL` back to an older id fails the suite and every run.
+MIN_GPT_VERSION = (6, 2)
+_GPT_VERSION_RE = re.compile(r"(?i)^gpt-(\d+)(?:\.(\d+))?(?![\d.])")
 REVIEW_EFFORT = "high"
 #: The efforts a caller may ask for. The audit pins every turn to the one asked
 #: for, so a run at medium is proven medium exactly as the default is proven high.
@@ -80,13 +86,38 @@ PROGRAM_MODELS = {
 REVIEW_MODELS = (REVIEW_MODEL,) + tuple(PROGRAM_MODELS.values())
 
 
+def gpt_version(model):
+    """`(major, minor)` of a numbered GPT id such as `gpt-6.2-sol`, else
+    None (Daybreak and other unnumbered ids carry no generation)."""
+    m = _GPT_VERSION_RE.match(str(model))
+    if m is None:
+        return None
+    return int(m.group(1)), int(m.group(2) or 0)
+
+
+def below_floor(model):
+    """True for a numbered GPT id older than `MIN_GPT_VERSION`."""
+    version = gpt_version(model)
+    return version is not None and version < MIN_GPT_VERSION
+
+
+def check_floor(model):
+    """Raise ValueError for a model below the GPT-6.2 floor."""
+    if below_floor(model):
+        floor = ".".join(map(str, MIN_GPT_VERSION))
+        raise ValueError(f"model {model!r} is older than GPT-{floor}; no "
+                         f"review runs on a model below {floor}")
+
+
 def model_for(access_program):
     """The only model a review under `access_program` may run on: the
-    program's Daybreak model, or `gpt-6.1-sol` for none or `standard`."""
+    program's Daybreak model, or `gpt-6.2-sol` for none or `standard`."""
     if access_program is not None and access_program not in ACCESS_PROGRAMS:
         raise ValueError(f"access program {access_program!r} is not one of "
                          f"{ACCESS_PROGRAMS}")
-    return PROGRAM_MODELS.get(access_program, REVIEW_MODEL)
+    model = PROGRAM_MODELS.get(access_program, REVIEW_MODEL)
+    check_floor(model)
+    return model
 
 #: Features the reviewer must not have. Each one either reaches beyond the
 #: repository copy (apps, browser, computer use, plugins, web), delegates the
@@ -299,6 +330,7 @@ def codex_cmd(*, codex_bin, review_root, copy, schema_path, last_message_path,
     required = model_for(access_program)
     if model is None:
         model = required
+    check_floor(model)
     if model != required:
         raise ValueError(f"model {model!r} cannot run under access program "
                          f"{access_program!r}; it requires {required!r}")

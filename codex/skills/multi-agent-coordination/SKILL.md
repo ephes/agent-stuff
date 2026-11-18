@@ -60,9 +60,22 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
 - **Spawn workers directly** from the coordinator. A lead agent that spawns
   its own sub-agents hands back early and loses track of them.
 - **Split work** roughly evenly between the Claude and Codex subscriptions.
-  Codex workers run `gpt-6.1-sol` at low effort; their review gate is
+  Codex workers run `gpt-6.2-sol` at `medium` effort; their review gate is
   `claude-review-loop --model claude-opus-5-5 --effort high`. A campaign brief
   may change these values (**Campaign setup**).
+- **OpenAI model floor** (owner, 2026-11-18): no OpenAI model older than
+  GPT-6.2 runs anywhere - not as worker, scout, reviewer or default. Codex
+  reviews run `gpt-6.2-sol` at `high` (`codex-review-loop`), Codex
+  implementation and scouts run `gpt-6.2-sol` at `medium`, and
+  `gpt-6.2-astra` is the deliberate, recorded choice for hard problems:
+  design or architecture questions, a component that keeps producing new
+  Criticals after the effort step (`cross-agent-review-cycle`, **Effort
+  escalation**), and debugging whose cause a real attempt did not find.
+  Select it per job with `codex exec -m gpt-6.2-astra -c
+  model_reasoning_effort=high` (coordination runner: a `codex-model:
+  gpt-6.2-astra` line in the brief). Astra is never a reviewer: the review
+  harnesses pin `gpt-6.2-sol` and refuse every other id. `tools/model-floor`
+  reports any id below 6.2 left in active configuration.
 
 ## Campaign setup
 
@@ -71,7 +84,8 @@ the campaign's values, because workers see nothing else.
 
 | Setting | Default | Example: emerge frontend deep cleanup (owner, 2026-11-11) |
 |---------|---------|-----------------------------------------------------------|
-| Codex worker | `gpt-6.1-sol` at `low` | `gpt-6.1-sol` at `high` |
+| Codex worker | `gpt-6.2-sol` at `medium` | effort `high` (the model follows the 2026-11-18 floor) |
+| Codex model for hard problems | `gpt-6.2-astra` at `high`, opt-in per job and recorded | same |
 | Claude worker effort | `high` | - |
 | Review of Codex work | `claude-review-loop --model claude-opus-5-5 --effort high`, on the account of the session that runs it | same |
 | Escalation model | `claude-fable-5-2` at `high` with `CLAUDE_CONFIG_DIR=~/.claude-katharina` | same |
@@ -95,7 +109,7 @@ the campaign's values, because workers see nothing else.
   sandbox instead and name what it may write:
 
   ```bash
-  codex exec -m gpt-6.1-sol -c model_reasoning_effort=high \
+  codex exec -m gpt-6.2-sol -c model_reasoning_effort=medium \
     -s workspace-write -c sandbox_workspace_write.network_access=true \
     --add-dir <repo .git dir> --add-dir <run dir> --add-dir ~/.cache/uv \
     -C <worktree> -o <last-message file> "<prompt>" < /dev/null
@@ -232,7 +246,7 @@ its items keep `--campaign codex-burn`, new items never get it.
 ## Quota pacing
 
 - **Choosing the pool for a worker or review** (owner decision 2026-11-04,
-  design and GPT-6.1 Sol review in ws-work-planning
+  design and Codex Sol review in ws-work-planning
   `reviews/quota-aware-dispatch-*-20261104.md`). Pools: Claude main, Claude
   second account (`claude-katharina`), Codex. Read fresh usage first.
   1. Keep only pools allowed for the task (account, model, review rules).
@@ -250,7 +264,7 @@ its items keep `--campaign codex-burn`, new items never get it.
      overrides rule 4 and the different-family default: when Codex is clearly ahead of its even pacing line
      (used % more than ~10 points above the elapsed share of its week) or used
      up, a review may run as Claude Opus 5.5 high (`claude-review-loop`)
-     instead of GPT-6.1 Sol, even for Claude-implemented work (the owner
+     instead of GPT-6.2 Sol, even for Claude-implemented work (the owner
      accepts same-family review in that case; record it as same-family, as
      `cross-agent-review-cycle` requires). Any other review constraint
      a task states still wins; if none fits, rule 6.
@@ -265,8 +279,8 @@ its items keep `--campaign codex-burn`, new items never get it.
   12-14%/h in October 2026), so ~3%/h means about three such workers.
   Workers that mostly wait on reviews cost less; measure before scaling up.
 - **Codex costs far less than it looks; never let its queue run dry.**
-  Measured with scout round 101 (2026-11-15): a Codex scout round of ~15 per-repo jobs (gpt-6.1-sol
-  high) used only ~3% of the weekly window in ~10 hours. Unused Codex quota
+  Measured with scout round 101 (2026-11-15): a Codex scout round of ~15 per-repo jobs (the Sol model
+  of that date at high) used only ~3% of the weekly window in ~10 hours. Unused Codex quota
   expires at the reset, so an empty `queue.txt` before a reset is a
   coordinator bug. The limit is merge capacity, not quota: a finished job
   is worth nothing until a clerk has reviewed, merged and deployed it.
@@ -453,10 +467,11 @@ Every brief states the item slug, goal, acceptance criteria, and:
   `--evidence-file` and `--context-file` as its own quoted argument; a list
   in one shell variable word-splits into a broken invocation.
 - **Effort**: the brief names the implementer's effort (Claude `high`, Codex
-  `low`, or the campaign's value). A slice that hits a trigger in
-  `cross-agent-review-cycle`, **Effort escalation** (e.g. new Criticals in the
-  same component round after round) is re-dispatched one step up (`max` /
-  `high`; a Codex worker already at `high` has no step left) with the
+  `gpt-6.2-sol` at `medium`, or the campaign's value). A slice that hits a
+  trigger in `cross-agent-review-cycle`, **Effort escalation** (e.g. new
+  Criticals in the same component round after round) is re-dispatched one step
+  up (`max` / `high`; a Codex worker already at `high` moves to
+  `gpt-6.2-astra` at `high`, its last step) with the
   instruction to treat the
   design as the finding and simplify rather than patch; record the escalation
   and its reason on the item. It is not a round-cap reset: a parked slice gets

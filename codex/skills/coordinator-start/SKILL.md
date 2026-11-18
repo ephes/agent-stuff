@@ -113,8 +113,10 @@ Periodic coordinator check (coordinator-start).
   `watchdog/latest.json`.
 
 - Codex (ws-work-planning `coordination/codex/`): `run.sh <brief>` runs one
-  Codex job from `<brief>.md` plus `COMMON.md` and appends a runner closeout
-  to `<brief>.out`; `feeder.sh` starts jobs from `queue.txt` (up to `MAX`,
+  Codex job from `<brief>.md` plus `COMMON.md` on `gpt-6.2-sol` at `medium`
+  (a `codex-model: gpt-6.2-astra` or `codex-effort: high` line in the brief
+  selects Astra or more effort; anything below GPT-6.2 is refused) and appends
+  a runner closeout to `<brief>.out`; `feeder.sh` starts jobs from `queue.txt` (up to `MAX`,
   quota guard first; stop with `touch stop.flag`); `autoround.sh` refills the
   queue from scout rounds with the merge-backlog brake, one open branch per
   repo and the empty-round stop (`multi-agent-coordination`, **Quota

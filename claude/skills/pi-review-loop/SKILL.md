@@ -1,6 +1,6 @@
 ---
 name: pi-review-loop
-description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-6 Sol model at medium (or, on request, high) reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
+description: "Use when you want a fresh-context code-review gate before committing — runs Pi only with the approved OpenAI Codex GPT-6.2 Sol model (`gpt-6.2-sol`) at medium (or, on request, high) reasoning over the current git diff in a bounded, observable loop. Never falls back to Claude/Anthropic, local models, OpenRouter, or another provider. Drives review → fix → re-review under the value-driven stopping rules in cross-agent-review-cycle. Triggers: \"have pi review this\", \"pi review before commit\", \"run the pi review loop\"."
 ---
 
 The CLI requires Python 3.10+. Invoke it as `python3 <skill>/bin/pi-review-loop`
@@ -138,7 +138,13 @@ implement and fix; Pi reviews with fresh context.
 
 ## Hard rules
 
-- Pi code review uses `openai-codex/gpt-6.1-sol` only. Claude models (Opus,
+- No OpenAI model older than GPT-6.2 reviews (owner, 2026-11-18): an id
+  below the floor (any older Sol, Astra, Terra or Luna generation) is refused
+  with "older than GPT-6.2" before Pi starts. Pi must list `gpt-6.2-sol` in
+  its `openai-codex` catalog; a Pi that lists only older Sol models leaves the
+  gate blocked (refresh the catalog with `pi update --models`), never routed
+  to the older model.
+- Pi code review uses `openai-codex/gpt-6.2-sol` only. Claude models (Opus,
   Sonnet, Fable, or any other Anthropic model) must run through Claude Code,
   and Claude reviews through `claude-review-loop`, never through Pi.
 - Never use OpenRouter or a local model such as Qwen/Ollama/LM Studio for a
@@ -276,7 +282,7 @@ subprocesses somewhere else deliberately; that override is honored, ambient
 ## Useful flags
 
 `--model <id>` exists for explicitness but accepts only
-`openai-codex/gpt-6.1-sol`; any other value fails before Pi starts. When omitted,
+`openai-codex/gpt-6.2-sol`; any other value fails before Pi starts. When omitted,
 the harness requires that same model to appear in Pi's authenticated listing.
 `--effort <level>` sets Pi's thinking level: `medium` by default, `high` only
 when the user asked for it. `--review-deadline <s>` (hard

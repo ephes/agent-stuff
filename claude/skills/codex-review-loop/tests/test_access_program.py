@@ -28,9 +28,9 @@ class TestAccessProgram(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         argv = self.argv()
         self.assertNotIn("--cyber-access-program", argv)
-        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.1-sol")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.2-sol")
         self.assertIsNone(result["access_program"])
-        self.assertEqual(result["model"], "gpt-6.1-sol")
+        self.assertEqual(result["model"], "gpt-6.2-sol")
         # Recorded as observed, but not judged: the server picks the program.
         self.assertEqual(result["observed_access_programs"], ["standard"])
         self.assertNotIn("access_program=", proc.stdout)
@@ -65,13 +65,13 @@ class TestAccessProgram(unittest.TestCase):
         proc, result, _ = self.fx.run("clean", "--cyber-access-program", "standard")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         argv = self.argv()
-        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.1-sol")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6.2-sol")
         self.assertEqual(argv[argv.index("--cyber-access-program") + 1], "standard")
         self.assertEqual(result["access_program"], "standard")
 
     def test_a_daybreak_program_with_sol_is_refused_before_anything_runs(self):
         proc, result, _ = self.fx.run("clean", "--cyber-access-program",
-                                      "daybreak_blue", "--model", "gpt-6.1-sol")
+                                      "daybreak_blue", "--model", "gpt-6.2-sol")
         self.assertEqual(proc.returncode, 2)
         self.assertEqual((result["state"], result["failure_kind"]),
                          ("INVALID", "preflight"))
