@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import json
 import os
 import socket
@@ -31,6 +32,7 @@ DEFAULT_WORK_ENV = os.path.join(HOME, ".config", "work", "env")
 DEFAULT_WORK_LEDGER = os.path.join(HOME, "projects", "work-ledger")
 COMMANDS = ("scan", "remove", "report")
 DEFAULT_MIN_IDLE = 48.0
+DEFAULT_REMOVE_LOCK_WAIT = 1800.0   # seconds; the daily run usually holds it for minutes
 DEFAULT_LOCK_FILE = os.path.join(HOME, ".local", "state", "workspace-gc", "workspace-gc.lock")
 DEFAULT_STEP_TIMEOUT = 600.0
 DEFAULT_MAX_RUNTIME = 180.0
@@ -41,6 +43,13 @@ def _jobs(value: str) -> int:
     n = int(value)
     if not 1 <= n <= inv_mod.MAX_JOBS:
         raise argparse.ArgumentTypeError(f"must be between 1 and {inv_mod.MAX_JOBS}")
+    return n
+
+
+def _finite(value: str) -> float:
+    n = float(value)
+    if not math.isfinite(n) or n < 0:
+        raise argparse.ArgumentTypeError("must be a finite number, not negative")
     return n
 
 
@@ -91,17 +100,32 @@ def _common(p: argparse.ArgumentParser) -> None:
                         "long between removals (default %(default)g; 0: walk for every removal)")
     p.add_argument("--lock-file", default=DEFAULT_LOCK_FILE,
                    help="run lock taken by report and every --apply; a second run exits "
-                        f"{EXIT_BUSY} at once while it is held (default %(default)s)")
+                        f"{EXIT_BUSY} while it is held (default %(default)s)")
+    p.add_argument("--lock-wait", type=_finite, default=None, metavar="SECONDS",
+                   help="wait up to this long for a held run lock before exiting "
+                        f"{EXIT_BUSY} (default {DEFAULT_REMOVE_LOCK_WAIT:g} for remove, "
+                        "0 for scan and report; never past --max-runtime)")
 
 
 def _idle(p: argparse.ArgumentParser, default: float) -> None:
     p.add_argument("--min-idle-hours", type=float, default=default,
                    help="keep (class D) checkouts with git or directory activity more recent "
                         "than this (default %(default)s; 0 disables)")
+    p.add_argument("--codex-idle-hours", type=_finite, default=inv_mod.CODEX_MIN_IDLE_HOURS,
+                   help="idle time a closed Codex job clone (merged.txt/dropped.txt) or a "
+                        "finished scout clone needs, instead of --min-idle-hours "
+                        "(default %(default)s; 0: none, for the runner or clerk that closed it)")
+    p.add_argument("--codex-stale-hours", type=_finite, default=inv_mod.CODEX_MIN_IDLE_HOURS,
+                   help="instead of --min-stale-hours for a ws-cx-<job>, ws-merge-<job> or "
+                        "ws-cx-scoutN directory whose job is closed or whose round is "
+                        "archived (roundN.archived) and that holds no git repository at "
+                        "all, not even in .cache/uv (default %(default)s; 0: "
+                        "--min-stale-hours applies)")
     p.add_argument("--min-stale-hours", type=float, default=72.0,
                    help="--apply removes a workspace directory without a checkout (no git "
-                        "repository outside .cache/uv, not in use, not keep-listed) once "
-                        "nothing in it changed for this long (default %(default)s; 0 disables)")
+                        "repository outside .cache/uv, no linked worktree, not in use, not "
+                        "keep-listed) once nothing in it changed for this long (default "
+                        "%(default)s; 0 or less disables)")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -167,7 +191,8 @@ def _build(a, sig, only=None):
                          keep_file=a.keep_file, regenerable=_regenerable(a),
                          sizes=not a.no_sizes, jobs=a.jobs, only=only,
                          min_idle_hours=a.min_idle_hours, fetch=not a.no_fetch,
-                         step_timeout=a.step_timeout, run_deadline=_clock(a).deadline)
+                         step_timeout=a.step_timeout, run_deadline=_clock(a).deadline,
+                         codex_idle_hours=a.codex_idle_hours)
     if only is None and not _clock(a).expired():
         # Workspace directories without a checkout: under the run deadline;
         # out of time means they wait for the next run.
@@ -181,7 +206,8 @@ def _build(a, sig, only=None):
             with budget.step(None, _clock(a).deadline):
                 inv.husks = husks.scan(inv, sig, sizes=not a.no_sizes,
                                        min_idle_hours=a.min_idle_hours,
-                                       min_stale_hours=a.min_stale_hours)
+                                       min_stale_hours=a.min_stale_hours,
+                                       codex_stale_hours=a.codex_stale_hours)
         except budget.StepTimeout:
             inv.husks = []
             inv.incomplete.append("workspace directories without a checkout not scanned "
@@ -282,7 +308,7 @@ def _apply(a, inv) -> inv_mod.Run:
     expired = _clock(a).expired
     empties.remove(inv.empty_dirs, inv.keep_patterns, inv.signals, expired=expired)
     husks.remove(inv.husks, roots, inv.keep_patterns, inv.signals, a.min_idle_hours,
-                 a.min_stale_hours, expired=expired)
+                 a.min_stale_hours, expired=expired, codex_stale_hours=a.codex_stale_hours)
     if any(e.reason == budget.TIME_LIMIT for e in inv.empty_dirs) or \
             any(h.outcome == budget.TIME_LIMIT for h in inv.husks):
         run.stopped = budget.TIME_LIMIT
@@ -457,7 +483,13 @@ def main(argv: list[str] | None = None, *, signals: sig_mod.Signals | None = Non
         # Taken before anything is read, so a run never queues behind a hung
         # one; the kernel releases it when this process exits in any way.
         try:
-            lock = runlock.acquire(a.lock_file)
+            wait = a.lock_wait
+            if wait is None:
+                wait = DEFAULT_REMOVE_LOCK_WAIT if a.cmd == "remove" else 0.0
+            # Never wait past the run's own deadline (--max-runtime).
+            if _clock(a).deadline is not None:
+                wait = min(wait, max(_clock(a).deadline - budget._now(), 0.0))
+            lock = runlock.acquire(a.lock_file, wait=wait)
         except runlock.Busy as exc:
             out.write(f"{rep.now_iso()} BUSY, nothing done: {rep.escape(exc)}\n")
             return EXIT_BUSY

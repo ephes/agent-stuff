@@ -10,9 +10,15 @@ workspace-level caches (WORKSPACE_PAYLOADS) and what else is in it. Nothing
 here deletes anything: the owner decides.
 
 Two exceptions. A directory is `stale` when it has no git repository outside
-`.cache/uv`, is not kept (in use, work item, keep list, protected), nothing in
-it was changed for `min_stale_hours` (default 72) and nothing in it is
-unreadable. `remove()` then deletes the whole directory (review logs and notes
+`.cache/uv` (see _cache_repo; uv's empty `.git` marker in its
+`sdists-vN` bucket is no repository; a linked worktree is never exempt), is not kept (in use, work
+item, keep list, protected; a `ws-cx-scoutN` without `roundN.archived` from
+autoround.sh is kept, its report may not be archived), nothing in it was
+changed for `min_stale_hours` (default 72; for the directory of a closed
+Codex job, its merge clerk or an archived scout round `codex_stale_hours`,
+default 6, see `codex_finished`, but only with no git repository left in it
+at all) and nothing in it is unreadable (directories, and files outside the
+caches). `remove()` then deletes the whole directory (review logs and notes
 included); `removed_what` says "directory". And a directory that holds nothing but workspace-level caches
 (`cache_only`: no file outside them, no git repository, nothing unreadable),
 is not kept (in use, work item, keep list) and whose directories were all last
@@ -40,7 +46,9 @@ from .empties import PROTECTED_NAMES, _keep_listed
 from . import signals as sig_mod
 from . import budget
 from . import readonly
-from .inventory import Inventory, _du_kb, _is_under, keep_match
+from .inventory import (CODEX_MIN_IDLE_HOURS, DEFAULT_CODEX_DIR, SCOUT_RE, Inventory, _du_kb,
+                        scout_unarchived,
+                        _git_marker, _is_under, keep_match, read_codex_closed)
 from .signals import Signals
 
 # Workspace-level directories that tooling rebuilds (relative to the workspace).
@@ -56,6 +64,8 @@ class Husk:
     files: int = 0
     entries: list[dict] = field(default_factory=list)   # path, kb, payload
     git_dirs: list[str] = field(default_factory=list)   # repositories found inside
+    worktree_dirs: list[str] = field(default_factory=list)   # of those: linked worktrees (.git file)
+    codex_finished: str = ""   # why the shorter codex_stale_hours applies
     kept: str = ""        # why it must not be touched (in use, keep-listed, ...)
     note: str = ""        # walk truncated or unreadable parts
     readonly_dirs: int = 0   # directories without the owner write bit
@@ -170,13 +180,37 @@ def inspect(path: str, sizes: bool = True) -> Husk:
         if walked > MAX_WALK:
             h.note = f"more than {MAX_WALK} entries, walk stopped"
             break
-        if ".git" in dirnames or ".git" in filenames:
+        if ".git" in dirnames or (".git" in filenames
+                                  and not _git_marker(os.path.join(dirpath, ".git"))):
             h.git_dirs.append(os.path.relpath(dirpath, path))
+            # Only a real `.git` directory makes a plain repository; any other
+            # `.git` (a file, whatever it holds - a pointer, a damaged one -, a
+            # symlink, which os.walk may list as a directory) may belong to a
+            # linked worktree and is never exempt as a cache repository.
+            gp = os.path.join(dirpath, ".git")
+            try:
+                real_dir = stat.S_ISDIR(os.lstat(gp).st_mode)
+            except OSError:
+                real_dir = False
+            if not real_dir:
+                h.worktree_dirs.append(os.path.relpath(dirpath, path))
         elif "objects" in dirnames and "refs" in dirnames and "HEAD" in filenames:
             h.git_dirs.append(os.path.relpath(dirpath, path))    # a bare repository
         # Caches are walked for repositories but their files are not counted.
         if not any(_is_under(dirpath, p) for p in payload_abs):
             h.files += len(filenames)
+            # A file the owner cannot read is an unreadable part too (caches
+            # excepted: regenerable by definition).
+            for name in filenames:
+                fp = os.path.join(dirpath, name)
+                try:
+                    fst = os.lstat(fp)
+                except OSError:
+                    errors.append(fp)
+                    continue
+                if stat.S_ISREG(fst.st_mode) and not os.access(fp, os.R_OK,
+                                                                follow_symlinks=False):
+                    errors.append(fp)
         dirnames[:] = [d for d in dirnames if d != ".git" and d not in skip]
     if errors:
         # Sizes stay informative: du cannot descend into unreadable trees
@@ -235,16 +269,65 @@ def _newest_change(path: str, limit_hours: float) -> float:
     return max(now - newest, 0.0) / 3600
 
 
-def _uv_cache(rel: str) -> bool:
-    return rel == ".cache/uv" or rel.startswith(".cache/uv/")
+def _cache_repo(h: Husk, rel: str) -> bool:
+    """A repository inside `.cache/uv` (uv's git checkouts), as before, unless
+    it is a linked worktree (a `.git` file or symlink that may point
+    elsewhere). Only the ordinary stale rule (`--min-stale-hours`, 72 h)
+    accepts these; the shorter rule for finished Codex work accepts no
+    repository at all (no git is run to judge one)."""
+    return (rel == ".cache/uv" or rel.startswith(".cache/uv/")) and rel not in h.worktree_dirs
 
 
-def _classify(h: Husk, min_idle_hours: float, min_stale_hours: float = 72.0) -> None:
+def scout_pending(path: str, codex_dir: str | None = None) -> str:
+    """See inventory.scout_unarchived (empties.py applies it too)."""
+    return scout_unarchived(path, codex_dir)
+
+
+def codex_finished(path: str, codex_dir: str | None = None) -> str:
+    """Why the workspace directory `path` belongs to finished Codex work, or "":
+    ws-cx-<job> or ws-merge-<job> whose job is in merged.txt or dropped.txt,
+    or ws-cx-scoutN whose round autoround.sh expanded and archived
+    (roundN.archived)."""
+    codex_dir = codex_dir or os.environ.get("WORKSPACE_GC_CODEX_DIR") or DEFAULT_CODEX_DIR
+    name = os.path.basename(path)
+    m = SCOUT_RE.fullmatch(name)
+    if m:
+        n = m.group(1)
+        return (f"scout round {n} expanded and archived" if os.path.exists(
+            os.path.join(codex_dir, f"round{n}.archived")) else "")
+    for prefix in ("ws-merge-", "ws-cx-"):
+        if name.startswith(prefix):
+            entry = read_codex_closed(codex_dir).get(name[len(prefix):])
+            if entry:
+                return f"job {name[len(prefix):]} is {entry[1]}"
+    return ""
+
+
+def _classify(h: Husk, min_idle_hours: float, min_stale_hours: float = 72.0,
+              codex_stale_hours: float | None = None) -> None:
+    if codex_stale_hours is None:
+        codex_stale_hours = CODEX_MIN_IDLE_HOURS
+    name = os.path.basename(h.path)
+    if name.startswith("ws-"):
+        pending = scout_pending(h.path)
+        if pending and not h.kept:
+            h.kept = pending
+    fast = False
+    if name.startswith("ws-"):
+        h.codex_finished = codex_finished(h.path)
+        # --min-stale-hours 0 (or less) turns the stale rule off for everything.
+        # The shorter age only when no repository at all is left (not even
+        # in .cache/uv); otherwise the ordinary rule decides.
+        if (h.codex_finished and codex_stale_hours > 0 and min_stale_hours > 0
+                and not h.git_dirs):
+            min_stale_hours = codex_stale_hours
+            fast = True
     # Only workspace directories (`ws-*`): `.venv` or a hand-made directory
     # under the root is not one.
-    h.stale = bool(os.path.basename(h.path).startswith("ws-")
-                   and not h.kept and not h.note and min_stale_hours > 0
-                   and not [g for g in h.git_dirs if not _uv_cache(g)]
+    h.stale = bool(name.startswith("ws-")
+                   and not h.kept and not h.note
+                   and not [g for g in h.git_dirs if fast or not _cache_repo(h, g)]
+                   and min_stale_hours > 0
                    and _newest_change(h.path, min_stale_hours) >= min_stale_hours)
     h.cache_only = (not h.kept and not h.files and not h.git_dirs and not h.note
                     and h.payload_kb > 0)
@@ -254,7 +337,8 @@ def _classify(h: Husk, min_idle_hours: float, min_stale_hours: float = 72.0) -> 
 
 
 def scan(inv: Inventory, sig: Signals, sizes: bool = True,
-         min_idle_hours: float = 48.0, min_stale_hours: float = 72.0) -> list[Husk]:
+         min_idle_hours: float = 48.0, min_stale_hours: float = 72.0,
+         codex_stale_hours: float | None = None) -> list[Husk]:
     """Direct child directories of the roots that hold no discovered checkout
     and are not empty (those are empties.py's)."""
     with_checkout = {co.workspace for co in inv.checkouts}
@@ -275,7 +359,7 @@ def scan(inv: Inventory, sig: Signals, sizes: bool = True,
                 continue
             h = inspect(path, sizes)
             h.kept = kept
-            _classify(h, min_idle_hours, min_stale_hours)
+            _classify(h, min_idle_hours, min_stale_hours, codex_stale_hours)
             found.append(h)
     return found
 
@@ -315,6 +399,7 @@ def _keep_inside(path: str, keep_patterns: list[str]) -> str:
     if not keep_patterns:
         return ""
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        budget.check()
         for name in dirnames + filenames:
             p = os.path.join(dirpath, name)
             for pat in keep_patterns:
@@ -453,7 +538,8 @@ def _snapshot(path: str):
 
 
 def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signals,
-                min_idle_hours: float, min_stale_hours: float) -> str:
+                min_idle_hours: float, min_stale_hours: float,
+                codex_stale_hours: float | None = None) -> str:
     """Delete one husk (the whole directory if it is stale, else only its
     cache directories); returns "" or why not.
     Everything is decided again now, from a fresh inspection."""
@@ -472,7 +558,7 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
     if isinstance(before, str):
         return before
     fresh = inspect(h.path, sizes=True)
-    _classify(fresh, min_idle_hours, min_stale_hours)
+    _classify(fresh, min_idle_hours, min_stale_hours, codex_stale_hours)
     h.kb, h.payload_kb = fresh.kb, fresh.payload_kb      # measured now, for the audit
     if not fresh.stale and not fresh.removable:
         # The inspection's own reason (device boundary, unreadable part, walk
@@ -509,7 +595,8 @@ def _remove_one(h: Husk, roots: list[str], keep_patterns: list[str], sig: Signal
 
 def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
            sig: Signals, min_idle_hours: float = 48.0,
-           min_stale_hours: float = 72.0, expired=None) -> None:
+           min_stale_hours: float = 72.0, expired=None,
+           codex_stale_hours: float | None = None) -> None:
     """Remove the stale husks (whole directory) and the caches of the
     cache-only ones, each re-checked right before, with all ownership sources
     read afresh for every one. Updates the entries. Once `expired()` is
@@ -528,7 +615,7 @@ def remove(entries: list[Husk], roots: list[str], keep_patterns: list[str],
             h.removable = h.stale = False
             continue
         h.outcome = _remove_one(h, roots, keep_patterns, live, min_idle_hours,
-                                min_stale_hours)
+                                min_stale_hours, codex_stale_hours)
         h.removed = not h.outcome
         h.removed_kb = (h.kb if h.removed_what == "directory" else h.payload_kb) if h.removed else 0
         if not h.removed:

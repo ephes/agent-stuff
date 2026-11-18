@@ -3,7 +3,10 @@
 `acquire(path)` takes a non-blocking exclusive flock on `path` and writes the
 holder's pid and start time into it. The kernel drops the lock when the
 holder exits, however it exits, so a crashed or killed run never leaves a
-stale lock behind. A second run that finds the lock held gives up at once.
+stale lock behind. A second run that finds the lock held gives up at once,
+or, with `wait` seconds, retries every `poll` seconds until the lock is free
+or the wait is over (`remove` waits by default, so a runner's or clerk's
+removal is not skipped just because the daily run is busy).
 """
 
 from __future__ import annotations
@@ -37,23 +40,30 @@ class RunLock:
         self.release()
 
 
-def acquire(path: str) -> RunLock:
+def acquire(path: str, wait: float = 0.0, poll: float = 5.0) -> RunLock:
     path = os.path.expanduser(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    deadline = time.monotonic() + max(wait, 0.0)
+    while True:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
-            holder = os.pread(fd, 200, 0).decode("utf-8", "replace").strip()
-        except OSError:
-            holder = ""
-        os.close(fd)
-        raise Busy(f"another workspace-gc run holds {path}"
-                   + (f" ({holder})" if holder else ""))
-    except BaseException:
-        os.close(fd)
-        raise
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            try:
+                holder = os.pread(fd, 200, 0).decode("utf-8", "replace").strip()
+            except OSError:
+                holder = ""
+            os.close(fd)
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise Busy(f"another workspace-gc run holds {path}"
+                           + (f" ({holder})" if holder else "")
+                           + (f"; waited {wait:g}s" if wait > 0 else ""))
+            time.sleep(min(poll, left))
+        except BaseException:
+            os.close(fd)
+            raise
     try:
         os.ftruncate(fd, 0)
         os.pwrite(fd, f"pid {os.getpid()}, started {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"

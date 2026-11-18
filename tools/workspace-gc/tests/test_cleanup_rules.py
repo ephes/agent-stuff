@@ -386,8 +386,7 @@ class TestHusks(GitFixture):
     def test_stale_husk_with_logs_is_removed_whole_and_audited(self):
         ws = os.path.join(self.ws, "ws-stale")
         self.write(ws, "review.log", "log")
-        self.write(ws, ".cache/uv/git-v1/checkouts/x/f", "x")
-        os.makedirs(os.path.join(ws, ".cache", "uv", "git-v1", "checkouts", "x", ".git"))
+        self.uv_checkout(ws, "git-v1")
         hs = self._remove(hours=100)
         h = hs[ws]
         self.assertTrue(h.removed, h.outcome)

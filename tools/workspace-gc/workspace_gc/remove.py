@@ -162,6 +162,11 @@ def _recheck_remote(co: Checkout, path: str, real: str, fresh: Inspector, roots:
     if co.scout_round and (scout_round(co) != co.scout_round
                            or not fresh.scout_done(co.scout_round)):
         raise Refused(f"scout round {co.scout_round} has no runner closeout now")
+    if co.codex_job and co.codex_closed and not count:
+        # The close record may have given this clone the shorter Codex idle
+        # threshold (--codex-idle-hours): it must still close the job now.
+        if codex_job(co) != co.codex_job or not fresh.codex_closed(co.codex_job, urls)[0]:
+            raise Refused(f"Codex job {co.codex_job} is no longer closed (merged.txt/dropped.txt)")
 
 
 def _recheck_codex(co: Checkout, path: str, urls: list[str], alternates: list[str],

@@ -106,6 +106,18 @@ class GitFixture(unittest.TestCase):
         sh("git", "commit", "-qm", msg, cwd=repo)
         return sh("git", "rev-parse", "HEAD", cwd=repo).strip()
 
+    def uv_checkout(self, ws, version="git-v0"):
+        """A git checkout the way uv lays it out in its cache:
+        .cache/uv/<version>/checkouts/<hash>/<short rev>, branch at HEAD, `.ok`."""
+        tmp = os.path.join(self.tmp, "uv-src-" + str(len(os.listdir(self.tmp))))
+        sh("git", "init", "-q", "-b", "main", tmp)
+        rev = self.commit(tmp, "pkg.py", "x = 1\n", "pkg")
+        dest = os.path.join(ws, ".cache", "uv", version, "checkouts", "65ee95975e8b3dc7", rev[:7])
+        os.makedirs(os.path.dirname(dest))
+        os.rename(tmp, dest)
+        self.write(dest, ".ok", "")
+        return dest
+
     @staticmethod
     def write(repo, name, text):
         p = os.path.join(repo, name)
@@ -133,6 +145,8 @@ class GitFixture(unittest.TestCase):
                 "--keep-file", os.path.join(self.tmp, "no-keep-file"), "--no-sizes"]
         if "--lock-file" not in argv:
             base += ["--lock-file", os.path.join(self.tmp, "workspace-gc.lock")]
+        if "--lock-wait" not in argv:
+            base += ["--lock-wait", "0"]   # a held lock is BUSY at once in tests
         if "--regenerable-file" not in argv:
             base += ["--regenerable-file", os.path.join(self.tmp, "no-regenerable-file")]
         if "--min-idle-hours" not in argv:

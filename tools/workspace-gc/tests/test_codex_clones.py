@@ -140,6 +140,24 @@ class LocalJobCloneTest(CodexCloneFixture):
         self.assertEqual(co.cls, "D", co.reasons)
         self.assertIn("< 48h for a closed Codex job clone", co.reasons[0])
 
+    def test_closed_job_ignores_min_idle_hours(self):
+        cl = self.job_clone()
+        self.record("merged.txt", f"{JOB}\tproj\tabc1234")
+        co = self.co(cl, min_idle_hours=48, codex_idle_hours=0)
+        self.assertEqual(co.cls, "A", co.reasons)
+
+    def test_closed_job_default_codex_idle_is_6h(self):
+        self.assertEqual(inventory.CODEX_MIN_IDLE_HOURS, 0.0)  # patched by the fixture
+        cl = self.job_clone()
+        self.record("merged.txt", f"{JOB}\tproj\tabc1234")
+        later = time.time() + 7 * 3600
+        with mock.patch.object(inventory.time, "time", return_value=later):
+            co = self.co(cl, min_idle_hours=48, codex_idle_hours=6)
+        self.assertEqual(co.cls, "A", co.reasons)
+        co = self.co(cl, min_idle_hours=48, codex_idle_hours=6)
+        self.assertEqual(co.cls, "D", co.reasons)
+        self.assertIn("< 6h for a closed Codex job clone", co.reasons[0])
+
     def test_idle_closed_job_is_A_with_real_threshold(self):
         cl = self.job_clone()
         self.record("merged.txt", f"{JOB}\tproj\tabc1234")
@@ -323,5 +341,21 @@ class ScoutCloneTest(CodexCloneFixture):
     def test_finished_scout_recently_active_is_D(self):
         cl = self.clone(self.url, "ws-cx-scout7")
         self.record("scout7.out", "## Runner closeout")
-        self.assertEqual(self.co(cl, min_idle_hours=48).cls, "D")
+        co = self.co(cl, min_idle_hours=0, codex_idle_hours=6)
+        self.assertEqual(co.cls, "D", co.reasons)
+        self.assertIn("< 6h for a finished scout clone", co.reasons[0])
+
+    def test_finished_scout_uses_codex_idle_not_min_idle(self):
+        # A finished round has no further user: --min-idle-hours (48) does not
+        # apply, --codex-idle-hours (patched to 0 here) does.
+        cl = self.clone(self.url, "ws-cx-scout7")
+        self.record("scout7.out", "## Runner closeout")
+        co = self.co(cl, min_idle_hours=48)
+        self.assertEqual(co.cls, "A", co.reasons)
+
+    def test_unfinished_scout_keeps_min_idle(self):
+        cl = self.clone(self.url, "ws-cx-scout7")
+        co = self.co(cl, min_idle_hours=48)
+        self.assertEqual(co.cls, "D", co.reasons)
+        self.assertIn("< 48h)", co.reasons[0])
 

@@ -25,6 +25,10 @@ class SyntheticWorkspace(unittest.TestCase):
         patcher = mock.patch.object(husks, '_now', return_value=time.time() + 100 * 3600)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # _remove_one reads the ownership sources again: never the real ones here
+        refresh = mock.patch.object(husks.sig_mod, 'refresh', side_effect=lambda s: s)
+        refresh.start()
+        self.addCleanup(refresh.stop)
 
     def remove(self):
         return husks._remove_one(husks.Husk(self.path), [self.root], [],

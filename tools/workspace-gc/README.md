@@ -160,8 +160,10 @@ commits on no remote, so it would be class B. It is class A instead when
 `merged.txt` or `dropped.txt` lists its job for the repository its network
 remote names, every one of those commits is on HEAD (no other local branch
 or tag holds unique work), it is clean, has no stash, only regenerable ignored files, is
-not in use and has been idle for at least 48 hours (whatever
-`--min-idle-hours` says; before that it is class D). A job clone whose job is
+not in use and has been idle for at least `--codex-idle-hours` (default 6;
+this replaces `--min-idle-hours`, because a closed job has no further user;
+before that it is class D). The Codex runner and the merge clerk that closed
+the job pass `--codex-idle-hours 0` to `remove`. A job clone whose job is
 in neither file stays class B, whatever its commits look like, with one
 exception for legacy jobs that pushed their branch to GitHub and whose clerk
 deleted it there after merging a rebased copy: such a clone is class A
@@ -171,7 +173,8 @@ every commit on no remote branch or tag is on HEAD, and the remote's default
 branch or `develop` has a commit with the same patch (`git cherry`) for each
 of them. A scout clone (`ws-cx-scoutN/<repo>`, read-only, nothing unique)
 follows the usual class A rules, but stays class D until `scoutN.out` in the
-coordination directory has a `## Runner closeout`. The removal re-check reads
+coordination directory has a `## Runner closeout`; after that its idle
+threshold is `--codex-idle-hours` as well. The removal re-check reads
 `merged.txt`/`dropped.txt` again (legacy: fresh `ls-remote` and `git cherry`),
 requires the same branches, tags and commits on no remote as at the inventory
 (no work added since), every such commit on HEAD and no remote tip missing
@@ -256,15 +259,45 @@ read again). The empty shell stays and is removed by the empty-directory rule
 once it is 6 hours old.
 
 A directory named `ws-*` is `stale, removable` when it has no git repository outside
-`.cache/uv`, is not kept for any of the reasons above (a keep-list entry
-naming anything inside it counts), has nothing unreadable, and nothing in it
+`.cache/uv` (uv's git checkouts; a linked worktree, i.e. a `.git` file or
+symlink that may point elsewhere, is never exempt, wherever it is; uv's
+marker files, empty `.git` files in uv's
+`sdists-vN` bucket whose parent holds a regular `CACHEDIR.TAG` starting with
+the standard signature `Signature: 8a477f597d28d172789f06886806bc55`, are no
+repository at all (an invalid or missing tag keeps such a `.git` a repository); any other `.git` file counts as one), is not kept for any of the reasons above (a keep-list entry
+naming anything inside it counts), has nothing unreadable (a directory, or a file outside the
+workspace caches, the owner cannot read), and nothing in it
 (files and directories) changed for `--min-stale-hours` (default 72; 0
-disables the rule). With `--apply` the run deletes the whole directory,
+disables the rule). Finished Codex work without any git repository left in
+it (not even in `.cache/uv`) gets `--codex-stale-hours` (default 6;
+0: `--min-stale-hours` applies) instead, shorter or longer:
+`ws-cx-<job>` and `ws-merge-<job>` when `merged.txt` or `dropped.txt`
+lists the job, and `ws-cx-scoutN` when `roundN.archived` exists in the
+coordination directory (the report says which, `codex_finished` in
+`latest.json`); `--min-stale-hours 0` turns this off as well. A
+`ws-cx-scoutN` without `roundN.archived` is kept whatever its age (`scout
+round N not archived`): `autoround.sh` writes that marker only after it has
+copied the round's report and bundle lists to the reviews directory
+(`roundN.queued` alone does not count: before 2026-11-18 an empty round got
+it without archiving). uv's `.git`
+marker files (as above: the empty `.git` in a `sdists-vN` bucket next to a
+valid `CACHEDIR.TAG`) are not checkouts for discovery either; any other `.git` file is. Other tool caches with
+git repositories (prek, pre-commit, cargo, Homebrew taps) keep a directory
+(the Codex brief therefore asks for `UV_CACHE_DIR=<workspace>/.cache/uv`, the
+exempt place, when uv's shared cache is blocked). With `--apply` the run deletes the whole directory,
 review logs and notes included, after a fresh inspection and a fresh read of
 all ownership sources, through directory descriptors that do not
 follow symlinks. Directories with a git repository elsewhere are never
 touched. Every removed path and size is listed under "Removed in this run" in
 `latest.txt` and in `husks_removed` in `latest.json`.
+
+The Codex runner, `autoround.sh` and the merge clerk remove the clones of
+finished work themselves (`remove --apply --codex-idle-hours 0`, the guarded
+single-checkout removal); the directories they leave behind (logs, reviews,
+caches) go with this stale rule at the next daily run where nothing in them
+changed for 6 hours (age is measured from the newest change inside the
+directory, not from the closing record, so the first run after the record
+may already remove one).
 
 The summary line (also the work item's next action) ends with the number of
 top-level directories under the roots and their approximate size.
@@ -350,9 +383,14 @@ walked all of `~/workspaces` and `~/projects` again for borrowed objects,
   `~/.local/state/workspace-gc/workspace-gc.lock`): `report` and every
   `--apply` take an exclusive `flock` before reading anything. A second run
   that finds it held prints `BUSY, nothing done: another workspace-gc run
-  holds ... (pid N, started ...)`, writes no report and exits 3. The kernel
-  releases the lock when the holder exits, however it exits, so a killed run
-  leaves nothing to clean up. A dry-run `scan` takes no lock.
+  holds ... (pid N, started ...)`, writes no report and exits 3. `remove`
+  first waits for it, up to `--lock-wait SECONDS` (finite,
+  default 1800; 0 for `scan` and `report`; never longer than what is left of
+  `--max-runtime`), checking every 5 seconds: before 2026-11-18 a
+  runner's or clerk's removal that met the daily run failed at once and left
+  the checkout behind (`LEFT ... BUSY` in hundreds of Codex reports). The
+  kernel releases the lock when the holder exits, however it exits, so a
+  killed run leaves nothing to clean up. A dry-run `scan` takes no lock.
 
 ## Removal guards
 
@@ -402,7 +440,11 @@ machine (no herdr, no work env file) is tolerated.
 
 `remove <path>` does not apply the idle guard by default (pass
 `--min-idle-hours`), because it is meant for a coordinator closing out an item
-right after its merge. Every other guard still applies.
+right after its merge, except for a closed Codex job clone or a finished
+scout clone: those need `--codex-idle-hours` (default 6 for `remove` too;
+the runner, `autoround.sh` and the merge clerk pass 0, the removal re-reads
+`merged.txt`/`dropped.txt` or the scout closeout first). Every other guard
+still applies.
 
 Limits: an agent that works in a checkout without a herdr pane, and without a
 process whose working directory is in it, is detected only through the work

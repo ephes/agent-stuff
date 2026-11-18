@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Finished Codex work no longer piles up in `~/workspaces` (954 top-level
+  directories, about 526 GB, on 2026-11-18). A closed Codex job clone or a
+  finished scout round clone now needs `--codex-idle-hours` (default 6, was a
+  fixed 48) instead of `--min-idle-hours`; the runner, `autoround.sh` and the
+  merge clerk pass 0 to `remove`. `ws-cx-<job>`/`ws-merge-<job>` of a closed
+  job and `ws-cx-scoutN` of an archived round (`roundN.archived`, written by
+  `autoround.sh` after copying the report and bundle lists) are stale after
+  `--codex-stale-hours` (default 6) instead of 72, but only when no git
+  repository at all is left in them (not even in `.cache/uv`); a
+  `ws-cx-scoutN` without `roundN.archived` is kept. uv's marker files (the empty `.git`
+  in uv's `sdists-vN` bucket whose parent holds a regular `CACHEDIR.TAG` with
+  the standard signature; anything else stays a repository) are no longer taken for
+  repositories (they made such directories "not inspectable" or blocked the
+  stale rule), a `ws-cx-scoutN` without `roundN.archived` is never removed as
+  an empty directory either, a closed job clone's removal re-reads its close
+  record, and a linked worktree is never
+  exempt inside `.cache/uv`. A file the owner cannot read (outside caches)
+  keeps a directory like an unreadable directory does. `remove` waits for a
+  held run lock (`--lock-wait`, default 1800 s, capped by `--max-runtime`)
+  instead of exiting `BUSY` at once.
+
 - Keep husks and cache-only workspaces containing nested device boundaries.
   Check admission and the entire pinned workspace before any deletion or
   Go-cache permission changes; refuse unreadable boundaries and workspaces

@@ -35,7 +35,15 @@ review gates are in `cross-agent-review-cycle` (driven by `codex-review-loop`,
   sha>` to `coordination/codex/merged.txt` (or `<job>\t<repo>\t<reason>` to
   `dropped.txt` when it is not merged; a parked clerk keeps the rebased work
   in its own worktree first). That line takes the job out of the merge
-  backlog and lets `workspace-gc` remove the Codex clone after 48 hours. No
+  backlog. Right after it, unless it parked, the clerk removes the Codex clone
+  (`workspace-gc remove --apply --codex-idle-hours 0 <clone>`) and its own
+  worktree (`workspace-gc remove --apply`). A parked clerk leaves all of that
+  in place. The daily `workspace-gc` run removes the rest: the closed job's
+  Codex clone after 6 hours idle, the clerk's worktree under the usual class
+  A rules (48 hours idle), and the two workspace directories once the job is
+  closed, no git repository is left in them and nothing in them changed for 6
+  hours (measured inside the directory, so the first run after closing may
+  already qualify). No
   remote feature branch is created or deleted. Legacy jobs that still pushed
   `codex-q/*` to GitHub (briefs from before 2026-11-16) are merged from
   GitHub, and their clerk deletes the merged remote branch: the one exception
@@ -532,8 +540,10 @@ Every brief states the item slug, goal, acceptance criteria, and:
   others borrow objects from (git alternates); check commit containment against
   all remote refs, tags included. Prefer `tools/workspace-gc`. Its daily job on
   the Studio already removes class A checkouts (clean, fully pushed, idle 48
-  hours, not in use, no active item) and workspace directories that have been
-  empty for 6 hours, without asking; do not plan or request that cleanup.
+  hours, not in use, no active item; closed Codex job and finished scout
+  clones after 6 hours), workspace directories that have been empty for 6
+  hours and stale ones without a checkout (72 hours; finished Codex work 6),
+  without asking; do not plan or request that cleanup.
   Classes B and C stay for the owner, listed in
   `~/.local/state/workspace-gc/latest.txt`.
 - Restricted areas stay untouched (e.g. a stopped investigation). Real financial

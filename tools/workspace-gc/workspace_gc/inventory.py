@@ -83,11 +83,13 @@ MAX_JOBS = 32   # inspections in parallel, whatever --jobs says
 # in ws-cx-scoutN/<repo>. The coordination directory records finished jobs
 # (<job>.out, scoutN.out with a "## Runner closeout") and closed ones (merged.txt
 # and dropped.txt: <job>\t<repo>\t<merge sha | reason>). Both rules need
-# CODEX_MIN_IDLE_HOURS idle whatever --min-idle-hours says.
+# CODEX_MIN_IDLE_HOURS idle (--codex-idle-hours) instead of --min-idle-hours:
+# a closed job or a finished round has no further user, so 6 h (not 48) is
+# enough, and the runner or clerk that closed it passes 0.
 CODEX_WS_PREFIX = "ws-cx-"
 CODEX_JOB_PREFIX = "cx-"
 CODEX_BRANCH_PREFIX = "codex-q/"
-CODEX_MIN_IDLE_HOURS = 48.0
+CODEX_MIN_IDLE_HOURS = 6.0
 CODEX_CLOSEOUT = "## Runner closeout"
 SCOUT_RE = re.compile(r"ws-cx-scout([0-9]+)")
 DEFAULT_CODEX_DIR = os.path.join(HOME, "workspaces", "ws-work-planning", "coordination", "codex")
@@ -213,6 +215,54 @@ def keep_match(path: str, patterns: list[str]) -> str:
     return ""
 
 
+UV_MARKER_BUCKET = re.compile(r"sdists-v[0-9]+")
+# The Cache Directory Tagging Specification's signature (uv writes it).
+CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
+
+
+def _git_marker(path: str) -> bool:
+    """The empty `.git` file uv writes into its source-distribution bucket:
+    `<uv cache>/sdists-vN/.git`, where `<uv cache>` holds a `CACHEDIR.TAG`
+    with the standard signature. It is not a repository for git. Anything else named
+    `.git` - an empty file elsewhere (a truncated worktree pointer, say), a
+    non-empty one, a symlink - is treated as a repository. Opened without
+    following links and without blocking; any doubt means "not a marker"."""
+    bucket = os.path.dirname(path)
+    if not UV_MARKER_BUCKET.fullmatch(os.path.basename(bucket)):
+        return False
+    try:
+        tfd = os.open(os.path.join(os.path.dirname(bucket), "CACHEDIR.TAG"),
+                      os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            if (not stat.S_ISREG(os.fstat(tfd).st_mode)
+                    or os.read(tfd, len(CACHEDIR_SIGNATURE)) != CACHEDIR_SIGNATURE):
+                return False
+        finally:
+            os.close(tfd)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        st = os.fstat(fd)
+        return stat.S_ISREG(st.st_mode) and st.st_size == 0
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def scout_unarchived(path: str, codex_dir: str | None = None) -> str:
+    """Why `path` (ws-cx-scoutN) must stay: autoround.sh has not attested
+    that the round's report and bundle lists are archived (no
+    roundN.archived; roundN.queued alone does not say so, older autoround
+    versions wrote it without archiving an empty round); else ""."""
+    codex_dir = codex_dir or os.environ.get("WORKSPACE_GC_CODEX_DIR") or DEFAULT_CODEX_DIR
+    m = SCOUT_RE.fullmatch(os.path.basename(path))
+    if m and not os.path.exists(os.path.join(codex_dir, f"round{m.group(1)}.archived")):
+        return f"scout round {m.group(1)} not archived (no round{m.group(1)}.archived)"
+    return ""
+
+
 def discover(roots: list[str], max_depth: int = MAX_DEPTH) -> list[tuple[str, str]]:
     """(checkout, root) pairs. Symlinks are never followed; the root itself is
     never a checkout."""
@@ -223,7 +273,8 @@ def discover(roots: list[str], max_depth: int = MAX_DEPTH) -> list[tuple[str, st
             continue
         for dirpath, dirnames, filenames in os.walk(rroot, followlinks=False):
             depth = 0 if dirpath == rroot else dirpath[len(rroot) + 1:].count(os.sep) + 1
-            if dirpath != rroot and (".git" in dirnames or ".git" in filenames):
+            if dirpath != rroot and (".git" in dirnames or (
+                    ".git" in filenames and not _git_marker(os.path.join(dirpath, ".git")))):
                 found.append((dirpath, rroot))
                 dirnames[:] = []
                 continue
@@ -1350,7 +1401,23 @@ def apply_signals(co: Checkout, sig: Signals) -> None:
         co.work_unknown = work.detail or "work items unreadable"
 
 
-def classify(co: Checkout, min_idle_hours: float = 0) -> None:
+def _codex_finished(co: Checkout) -> bool:
+    """A closed Codex job clone or a finished scout round clone: such a clone
+    has no further user, so --codex-idle-hours replaces --min-idle-hours."""
+    if co.unpushed > 0:
+        return bool(codex_superseded(co))
+    return bool(co.scout_round and co.scout_done) or bool(co.codex_job and co.codex_closed)
+
+
+def classify(co: Checkout, min_idle_hours: float = 0,
+             codex_idle_hours: float | None = None) -> None:
+    if codex_idle_hours is None:
+        codex_idle_hours = CODEX_MIN_IDLE_HOURS
+    idle_what = ""
+    if _codex_finished(co):
+        min_idle_hours = codex_idle_hours
+        idle_what = (" for a finished scout clone" if co.scout_round and not co.codex_job
+                     else " for a closed Codex job clone")
     r = co.reasons
     if co.keep_listed:
         co.cls = "C"
@@ -1375,7 +1442,7 @@ def classify(co: Checkout, min_idle_hours: float = 0) -> None:
                          + co.work_unknown + ")")
     if min_idle_hours > 0 and 0 <= co.idle_hours < min_idle_hours:
         d_reasons.append(f"recently active ({co.last_activity}, idle {co.idle_hours:g}h "
-                         f"< {min_idle_hours:g}h)")
+                         f"< {min_idle_hours:g}h{idle_what})")
     if co.borrowed_by:
         d_reasons.append("objects borrowed (alternates) by " + ", ".join(co.borrowed_by[:3]))
     if co.linked_worktrees:
@@ -1411,14 +1478,14 @@ def classify(co: Checkout, min_idle_hours: float = 0) -> None:
         co.cls = "C"
         r.extend(c_reasons)
     elif co.unpushed > 0 and codex_superseded(co):
-        if co.idle_hours >= CODEX_MIN_IDLE_HOURS:
+        if co.idle_hours >= codex_idle_hours:
             co.cls = "A"
             co.superseded = codex_superseded(co)
             r.append(co.superseded)
         else:
             co.cls = "D"
             r.append(f"recently active ({co.last_activity}, idle {co.idle_hours:g}h < "
-                     f"{CODEX_MIN_IDLE_HOURS:g}h for a closed Codex job clone)")
+                     f"{codex_idle_hours:g}h for a closed Codex job clone)")
             co.notes.append(codex_superseded(co))
     elif co.unpushed > 0:
         co.cls = "B"
@@ -1477,7 +1544,8 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
           regenerable: list[str] | None = None, sizes: bool = True, jobs: int = 8,
           only: str | None = None, use_cache: bool = True,
           min_idle_hours: float = 0, fetch: bool = True,
-          step_timeout: float | None = None, run_deadline: float | None = None) -> Inventory:
+          step_timeout: float | None = None, run_deadline: float | None = None,
+          codex_idle_hours: float | None = None) -> Inventory:
     """Inventory every checkout under the roots, `jobs` at a time. Each
     checkout's inspection is one step of at most `step_timeout` seconds; a
     checkout whose step runs out of time, or that is reached after
@@ -1512,7 +1580,7 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
         co.cls, co.reasons, co.in_use, co.work_items = "", [], [], []
         co.work_unknown, co.deletion_blockers = "", []
         apply_signals(co, sig)
-        classify(co, min_idle_hours)
+        classify(co, min_idle_hours, codex_idle_hours)
         return co
 
     def _work(co: Checkout) -> Checkout:
@@ -1533,7 +1601,7 @@ def build(roots: list[str], sig: Signals, *, main_roots: list[str] | None = None
         if co.owner_repo and keep_match(co.owner_repo, patterns):
             co.error = f"owning repository {co.owner_repo} is keep-listed"
         apply_signals(co, sig)
-        classify(co, min_idle_hours)
+        classify(co, min_idle_hours, codex_idle_hours)
         if co.cls == "A":
             co.deletion_blockers = deletion_scan(co.path)
             if co.deletion_blockers:

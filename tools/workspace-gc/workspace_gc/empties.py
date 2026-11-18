@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass
 
 from . import budget
 from . import signals as sig_mod
-from .inventory import _is_under, keep_match
+from .inventory import _is_under, keep_match, scout_unarchived
 from .signals import Signals
 
 # Younger than this (creation, modification or status change, whichever is
@@ -165,6 +165,9 @@ def _keep_reason(path: str, dirs: list[tuple[str, int]], newest: float,
                  keep_patterns: list[str], sig: Signals) -> str:
     if os.path.basename(path) in PROTECTED_NAMES:
         return "protected name"
+    pending = scout_unarchived(path)
+    if pending:
+        return pending
     if _keep_listed(path, dirs, keep_patterns):
         return "keep-listed"
     for cwd in list(sig.process_cwds) + list(sig.herdr_cwds):
