@@ -45,6 +45,8 @@ DEFAULTS: dict[str, tuple[str, str]] = {
     "USAGE_PROVIDERS": ("claude", "str"),  # comma list; empty: every provider
     "LOAD_THRESHOLD": ("", "float"),  # default: 2.5 x CPU count
     "LOAD_SUSTAIN_MIN": ("30", "float"),
+    "SWAP_THRESHOLD_GB": ("16", "float"),
+    "SWAP_SUSTAIN_MIN": ("15", "float"),
     "ESCALATE_MIN": ("15", "float"),
     "DIAG_ENABLED": ("1", "bool"),
     "DIAG_TIMEOUT_MIN": ("15", "float"),
@@ -61,6 +63,7 @@ DEFAULTS: dict[str, tuple[str, str]] = {
     # Test hooks.
     "PS_OUT": ("", "path"),
     "LOADAVG": ("", "str"),
+    "SWAPUSAGE": ("", "str"),  # instead of `sysctl -n vm.swapusage`
     "NOW": ("", "float"),
 }
 
@@ -438,6 +441,45 @@ def check_load(cfg: Config, now: float, state: dict, res: CheckResult) -> None:
                 f"5-min load {load5:.1f} above {threshold:.1f} for {minutes(now - since)}")
 
 
+def swap_used_bytes(text: str) -> float | None:
+    """``used`` from ``sysctl -n vm.swapusage`` ("total = 1024.00M  used = 252.88M  free = ...")."""
+
+    m = re.search(r"used\s*=\s*(\d+(?:\.\d+)?)([KMGT]?)", text)
+    if not m:
+        return None
+    return float(m.group(1)) * 1024 ** "_KMGT".index(m.group(2) or "_")
+
+
+def check_swap(cfg: Config, now: float, state: dict, res: CheckResult) -> None:
+    text = cfg.s("SWAPUSAGE")
+    if not text:
+        try:
+            text = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True,
+                                  text=True, timeout=10, check=False).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            text = ""
+    used = swap_used_bytes(text)
+    threshold = cfg.f("SWAP_THRESHOLD_GB")
+    if used is None:
+        res.info.append("swap unknown")
+        since = state.get("swap_high_since")
+        if since is not None and "swap" in state.get("findings", {}):
+            # A failed read is no recovery: an open finding stays open (no resolve/reopen pair).
+            # Only a readable high sample opens one.
+            res.add("swap", "swap-high",
+                    f"swap above {threshold:.0f} GB since {minutes(now - since)} ago (current reading failed)")
+        return
+    gb = used / 1024 ** 3
+    res.info.append(f"swap {gb:.1f} GB (threshold {threshold:.0f} GB)")
+    if gb <= threshold:
+        state.pop("swap_high_since", None)
+        return
+    since = state.setdefault("swap_high_since", now)
+    if now - since >= cfg.f("SWAP_SUSTAIN_MIN") * 60:
+        res.add("swap", "swap-high",
+                f"swap in use {gb:.1f} GB above {threshold:.0f} GB for {minutes(now - since)}")
+
+
 def run_checks(cfg: Config, state: dict, now: float) -> CheckResult:
     res = CheckResult()
     procs = read_procs(cfg)
@@ -446,6 +488,7 @@ def run_checks(cfg: Config, state: dict, now: float) -> CheckResult:
     check_usage(cfg, res)
     check_heartbeat(cfg, now, res)
     check_load(cfg, now, state, res)
+    check_swap(cfg, now, state, res)
     return res
 
 

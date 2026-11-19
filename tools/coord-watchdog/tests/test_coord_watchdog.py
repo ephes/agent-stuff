@@ -61,6 +61,7 @@ class Fixture(unittest.TestCase):
             "CW_PS_OUT": str(self.ps),
             "CW_LOADAVG": "1.0",
             "CW_LOAD_THRESHOLD": "40",
+            "CW_SWAPUSAGE": "total = 1024.00M  used = 252.88M  free = 771.12M  (encrypted)",
             "CW_WORK_BIN": str(self.bin / "work"),
             "CW_HERDR_BIN": str(self.bin / "herdr"),
             "CW_CLAUDE_BIN": str(self.bin / "claude"),
@@ -304,6 +305,65 @@ class UsageHeartbeatLoadTest(Fixture):
         self.heartbeat(age_min=44)
         _, out = self.run_check()
         self.assertEqual(self.keys(out), [])
+
+    def test_swap_must_be_sustained(self):
+        high = {"CW_SWAPUSAGE": "total = 20480.00M  used = 17408.00M  free = 3072.00M  (encrypted)"}
+        _, out = self.run_check(T0, high)
+        self.assertEqual(self.keys(out), [])
+        _, out = self.run_check(T0 + 14 * MIN, high)
+        self.assertEqual(self.keys(out), [])
+        _, out = self.run_check(T0 + 16 * MIN, dict(high, CW_ESCALATE_MIN="999"))
+        self.assertEqual(self.keys(out), ["swap"])
+        self.assertIn("17.0 GB above 16 GB", out)
+        _, out = self.run_check(T0 + 17 * MIN)
+        self.assertEqual(self.keys(out), [])
+        self.assertNotIn("swap_high_since", self.state())
+        _, out = self.run_check(T0 + 18 * MIN, high)
+        self.assertEqual(self.keys(out), [])
+
+    def test_failed_swap_read_keeps_an_open_finding(self):
+        high = {"CW_SWAPUSAGE": "total = 20480.00M  used = 17408.00M  free = 3072.00M"}
+        unreadable = {"CW_SWAPUSAGE": "garbage"}
+        self.run_check(T0, high)
+        _, out = self.run_check(T0 + 16 * MIN, dict(high, CW_ESCALATE_MIN="999"))
+        self.assertEqual(self.keys(out), ["swap"])
+        _, out = self.run_check(T0 + 17 * MIN, dict(unreadable, CW_ESCALATE_MIN="999"))
+        self.assertEqual(self.keys(out), ["swap"])
+        self.assertIn("current reading failed", out)
+        log = (self.coord / "watchdog" / "watchdog.log").read_text()
+        self.assertNotIn("resolved swap", log)
+        self.assertEqual(log.count("new swap"), 1)
+        # a failed read never opens a finding, also not after the sustain time
+        self.run_check(T0 + 18 * MIN)
+        self.run_check(T0 + 19 * MIN, high)
+        _, out = self.run_check(T0 + 20 * MIN, unreadable)
+        self.assertEqual(self.keys(out), [])
+        _, out = self.run_check(T0 + 36 * MIN, unreadable)
+        self.assertEqual(self.keys(out), [])
+        _, out = self.run_check(T0 + 37 * MIN, dict(high, CW_ESCALATE_MIN="999"))
+        self.assertEqual(self.keys(out), ["swap"])
+
+    def test_swap_usage_parsing(self):
+        self.assertEqual(cw.swap_used_bytes("total = 1024.00M  used = 252.88M  free = 771.12M"),
+                         252.88 * 1024 ** 2)
+        self.assertEqual(cw.swap_used_bytes("total = 80.00G  used = 71.50G  free = 8.50G"), 71.5 * 1024 ** 3)
+        self.assertEqual(cw.swap_used_bytes("used = 0"), 0.0)
+        self.assertIsNone(cw.swap_used_bytes(""))
+        self.assertIsNone(cw.swap_used_bytes("vm.swapusage: unknown oid"))
+
+    def test_unreadable_swap_is_not_a_finding(self):
+        real_run = cw.subprocess.run
+
+        def run(argv, *args, **kwargs):
+            if argv[0] == "sysctl":
+                raise OSError("no sysctl")
+            return real_run(argv, *args, **kwargs)
+
+        with mock.patch.object(cw.subprocess, "run", side_effect=run):
+            _, out = self.run_check(T0, {"CW_SWAPUSAGE": ""})
+        self.assertEqual(self.keys(out), [])
+        latest = json.loads((self.coord / "watchdog" / "latest.json").read_text())
+        self.assertIn("swap unknown", latest["info"])
 
     def test_load_must_be_sustained(self):
         high = {"CW_LOADAVG": "50"}

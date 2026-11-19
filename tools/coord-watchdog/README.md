@@ -35,6 +35,7 @@ configuration, 3 another check holds the lock.
 | `usage-check` | `usage-check-failed` | that command fails otherwise (API down, no token) |
 | `heartbeat` | `heartbeat-stale` | `coordinator.heartbeat` is missing or older than `HEARTBEAT_MIN` |
 | `load` | `load-high` | the 5-minute load average stayed above `LOAD_THRESHOLD` for `LOAD_SUSTAIN_MIN` |
+| `swap` | `swap-high` | swap in use (`sysctl -n vm.swapusage`) stayed above `SWAP_THRESHOLD_GB` for `SWAP_SUSTAIN_MIN`; an unreadable value never opens the finding but keeps an open one open (a failed read is no recovery) |
 
 Notes:
 
@@ -127,6 +128,8 @@ Defaults below; override with `CW_<NAME>` environment variables or a
 | `USAGE_PROVIDERS` | `claude` | comma list for `--provider`; empty checks every provider in one call |
 | `LOAD_THRESHOLD` | 2.5 × CPU count | 5-minute load average limit (40 on the 16-core Studio) |
 | `LOAD_SUSTAIN_MIN` | 30 | minutes above the limit before `load-high` |
+| `SWAP_THRESHOLD_GB` | 16 | swap limit in GiB (the Studio swapped 71 GB on 2026-11-08; normal is below 1) |
+| `SWAP_SUSTAIN_MIN` | 15 | minutes above the limit before `swap-high` |
 | `ESCALATE_MIN` | 15 | minutes a finding persists before stage (b) |
 | `DIAG_ENABLED` | 1 | 0 skips stage (b) and notifies directly |
 | `DIAG_TIMEOUT_MIN` | 15 | hard limit of a diagnosis run |
@@ -137,13 +140,13 @@ Defaults below; override with `CW_<NAME>` environment variables or a
 | `NOTIFY_HERDR` | 1 | `herdr notification show` in stage (c) |
 | `NOTIFY_WORK_ITEM` | `coord-watchdog` | work-app item for the stage (c) note; empty disables |
 | `CLAUDE_BIN`, `WORK_BIN`, `HERDR_BIN`, `PYTHON_BIN` | `claude`, `work`, `herdr`, this Python | commands |
-| `PS_OUT`, `LOADAVG`, `NOW` | empty | test hooks: `ps -axwwS -o pid=,ppid=,time=,command=` output file, load value, epoch |
+| `PS_OUT`, `LOADAVG`, `SWAPUSAGE`, `NOW` | empty | test hooks: `ps -axwwS -o pid=,ppid=,time=,command=` output file, load value, `vm.swapusage` text, epoch |
 
 ## State files (`STATE_DIR`)
 
 | File | Content |
 |------|---------|
-| `state.json` | `since` (first cycle), open findings with their stage, worker progress snapshots, load-high start, last diagnosis run |
+| `state.json` | `since` (first cycle), open findings with their stage, worker progress snapshots, load-high and swap-high start, last diagnosis run |
 | `latest.json` | last cycle: info lines and findings |
 | `watchdog.log` | one line per cycle plus new/resolved findings and stage actions (rotated at 1 MB to `.1`) |
 | `notifications.log` | every owner notification |
