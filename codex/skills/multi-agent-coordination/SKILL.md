@@ -341,7 +341,10 @@ its items keep `--campaign codex-burn`, new items never get it.
   on every periodic check, run `work usage status --max-age 30m --provider
   claude`; when a window is stale, look at
   `~/.local/state/usage-collect/latest.txt` on the Studio (every step's latest
-  outcome and output) and report by hand meanwhile. A Codex reading is only as new
+  outcome and output; `stale` there means /usage printed no windows, e.g. its
+  usage fetch got HTTP 429, and Claude Code's cached reading was read instead;
+  the output says whether it was sent, with its real, older `observed_at`, or
+  was not newer than the last cached reading sent for that login) and report by hand meanwhile. A Codex reading is only as new
   as the last Codex session, so it ages while Codex is idle. Claude: `tools/claude-usage-read/bin/claude-usage-read
   [config dir] --report --pool <pool>`, or read the desktop app's usage tool
   (`get_usage`), then for each weekly window it shows `work usage report --provider claude --pool claude

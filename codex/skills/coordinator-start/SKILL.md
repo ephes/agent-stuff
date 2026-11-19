@@ -69,6 +69,11 @@ Periodic coordinator check (coordinator-start).
    ~/projects/agent-stuff/tools/claude-usage-read/bin/claude-usage-read --report --pool claude;
    ~/projects/agent-stuff/tools/claude-usage-read/bin/claude-usage-read ~/.claude-katharina --report --pool claude-katharina;
    work usage collect-codex.
+   Exit 3 / "stale" in latest.txt: /usage printed no windows (the reason names it, e.g. HTTP 429 when many
+   sessions of one login poll the usage endpoint) and the reader read Claude Code's cached reading instead; its
+   output says whether that was sent (with its real, older observed_at) or was not newer than the last cached
+   reading sent for that login.
+   Do not re-run it in a loop: the CLI does not ask again for up to ~50 minutes.
    Only if claude-usage-read cannot read the main account: read get_usage and report each weekly window it shows
    ("Weekly · all models", "Weekly · Fable", ...) with
    work usage report --provider claude --pool claude --window "<window>" --used N --resets-at <iso> --observed-at now --source "claude-desktop get_usage".
