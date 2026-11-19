@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `launchd-check` skips a plist launchd has not loaded (`launchctl print`
+  exit 113, "Could not find service") instead of counting it in `errors`:
+  on the Studio five jobs kept unloaded on purpose (opsgate API and runner,
+  Daybook photos-offload and voice-memo-attention, the Coreso windows
+  publisher) held Nyxmon's "Studio launchd crash loops" check in a
+  permanent warning. Other failures and timeouts still count.
+
 - New tool: the daily observability review. Fetches macmini's evidence pack
   over root SSH (an inventory of hosts, services and volumes, raw log samples
   of every service at any level, changes against the baseline), adds the

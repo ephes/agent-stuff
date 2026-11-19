@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import sys
 import tempfile
@@ -453,6 +454,45 @@ class UnitTests(unittest.TestCase):
         previous = {"loop": 100, "busy-but-fine": 100, "one-failure": 100}
 
         self.assertEqual([j["label"] for j in ot.launchd_changes(jobs, previous)], ["loop"])
+
+    def test_launchd_jobs_skip_unloaded_plists_and_count_failed_prints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            agents = home / "Library/LaunchAgents"
+            agents.mkdir(parents=True)
+            daemons = home / "LaunchDaemons"
+            daemons.mkdir()
+            (daemons / "de.wersdoerfer.daemon-off.plist").write_text("")
+            for label in ("de.wersdoerfer.ok", "de.wersdoerfer.unloaded", "de.wersdoerfer.broken", "com.other.x"):
+                (agents / f"{label}.plist").write_text("")
+            launchctl = home / "launchctl"
+            calls = home / "calls"
+            script(
+                launchctl,
+                f'echo "$2" >> {shlex.quote(str(calls))}\n'
+                'case "$2" in\n'
+                '  */de.wersdoerfer.ok) printf "\\tstate = running\\n\\truns = 4\\n\\tlast exit code = 0\\n";;\n'
+                '  */de.wersdoerfer.unloaded) echo "Could not find service" >&2; exit 113;;\n'
+                '  */de.wersdoerfer.broken) exit 5;;\n'
+                '  *) exit 113;;\n'
+                "esac\n",
+            )
+            errors: list[str] = []
+            with (
+                mock.patch.dict(os.environ, {"OBS_TRIAGE_LAUNCHCTL": str(launchctl)}),
+                mock.patch.object(ot.Path, "home", return_value=home),
+                mock.patch.object(ot, "SYSTEM_DAEMONS", daemons),
+            ):
+                jobs = ot.launchd_jobs(errors)
+            self.assertEqual(jobs, [{"label": "de.wersdoerfer.ok", "state": "running", "runs": 4, "last_exit": "0"}])
+            self.assertEqual(errors, ["de.wersdoerfer.broken"])
+            # Foreign labels are never asked about; only the fixture plists are.
+            uid = os.getuid()
+            self.assertEqual(
+                calls.read_text().split(),
+                ["system/de.wersdoerfer.daemon-off"]
+                + [f"gui/{uid}/de.wersdoerfer.{name}" for name in ("broken", "ok", "unloaded")],
+            )
 
     def test_launchd_check_reports_to_macmini(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

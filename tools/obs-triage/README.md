@@ -160,10 +160,13 @@ Reads `launchctl print` for this machine's own jobs (plists in
 `de.wersdoerfer.`, `local.`, `eu.coreso.`, `org.ops-library.` or
 `com.ollama.`). A job is in a crash loop when its `runs` rose by 5 or more
 since the previous sample (`launchd-sample.json`) and its last exit code is
-not 0. A job whose `launchctl print` fails or times out keeps its last good
+not 0. A plist that launchd has not loaded (`launchctl print` exit 113,
+"Could not find service", e.g. a job kept unloaded on purpose) is skipped: it
+cannot loop and does not count as an error. A job whose `launchctl print`
+fails otherwise or times out counts in `errors` and keeps its last good
 counter, and the sample advances only after macmini accepted the report. The report goes to macmini (`obs_ctl.py launchd`); Nyxmon's "Studio
-launchd crash loops" check warns on a loop or on a report older than 45
-minutes.
+launchd crash loops" check is critical on a loop and warns on a report older than 45
+minutes or with `errors` above 0 (a genuine sampling failure).
 
 ## `weekly`
 

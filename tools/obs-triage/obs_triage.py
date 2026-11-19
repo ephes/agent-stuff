@@ -260,14 +260,21 @@ def known_items(items: list[dict[str, Any]], now: float) -> list[dict[str, str]]
     return compact
 
 
+# ``launchctl print`` of a label launchd does not know ("Could not find service").
+NOT_LOADED = 113
+SYSTEM_DAEMONS = Path("/Library/LaunchDaemons")
+
+
 def launchd_jobs(errors: list[str] | None = None) -> list[dict[str, Any]]:
     """This machine's own launchd jobs (system daemons and the user's agents): state, runs, last exit.
 
-    Labels whose ``launchctl print`` failed are appended to ``errors``.
+    Labels whose ``launchctl print`` failed are appended to ``errors``. A plist that is
+    not loaded (``launchctl print`` exit 113, "Could not find service") is skipped: it
+    cannot loop, and jobs kept unloaded on purpose must not keep the report in error.
     """
 
     jobs = []
-    domains = [("system", Path("/Library/LaunchDaemons")), (f"gui/{os.getuid()}", Path.home() / "Library/LaunchAgents")]
+    domains = [("system", SYSTEM_DAEMONS), (f"gui/{os.getuid()}", Path.home() / "Library/LaunchAgents")]
     for domain, directory in domains:
         try:
             names = sorted(p.stem for p in directory.glob("*.plist"))
@@ -283,6 +290,8 @@ def launchd_jobs(errors: list[str] | None = None) -> list[dict[str, Any]]:
                 )  # fmt: skip
             except (OSError, subprocess.SubprocessError):
                 done = None
+            if done is not None and done.returncode == NOT_LOADED:
+                continue
             if done is None or done.returncode != 0:
                 if errors is not None:
                     errors.append(label)
