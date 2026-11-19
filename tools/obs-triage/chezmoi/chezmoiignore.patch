@@ -1,0 +1,14 @@
+diff --git a/.chezmoiignore b/.chezmoiignore
+index 595998b..01cf492 100644
+--- a/.chezmoiignore
++++ b/.chezmoiignore
+@@ -26,6 +26,9 @@ Library/LaunchAgents/de.wersdoerfer.ssh-add-keychain.plist
+ {{ if or (ne .chezmoi.os "darwin") (ne (output "scutil" "--get" "LocalHostName" | trim) "studio") }}
+ Library/LaunchAgents/de.wersdoerfer.workspace-gc.plist
+ Library/LaunchAgents/de.wersdoerfer.coord-watchdog.plist
++Library/LaunchAgents/de.wersdoerfer.obs-triage.plist
++Library/LaunchAgents/de.wersdoerfer.obs-launchd-check.plist
++Library/LaunchAgents/de.wersdoerfer.obs-weekly.plist
+ Library/LaunchAgents/de.wersdoerfer.emerge-relay-sync.plist
+ .local/bin/emerge-relay-sync
+ Library/LaunchAgents/de.wersdoerfer.usage-collect.plist

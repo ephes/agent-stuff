@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Managed by chezmoi; edit the source template, not this file.
+
+         Every 10 minutes: this machine's own launchd jobs in a crash loop
+         (runs rising with a failing last exit) are reported to macmini, where
+         Nyxmon's "Studio launchd crash loops" check reads them.
+         agent-stuff tools/obs-triage; ops-control docs/OBSERVABILITY_ROUTINE.md.
+         Studio only. -->
+    <key>Label</key>
+    <string>de.wersdoerfer.obs-launchd-check</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .brew_prefix }}/opt/python@3/libexec/bin/python</string>
+        <string>{{ .chezmoi.homeDir }}/projects/agent-stuff/tools/obs-triage/bin/obs-triage</string>
+        <string>launchd-check</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ .brew_prefix }}/bin:{{ .chezmoi.homeDir }}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>WORK_AGENT</key>
+        <string>obs-triage</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-launchd-check.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-launchd-check.log</string>
+</dict>
+</plist>

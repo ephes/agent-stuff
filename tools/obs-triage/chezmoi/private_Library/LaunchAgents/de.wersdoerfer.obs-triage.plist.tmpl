@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Managed by chezmoi; edit the source template, not this file.
+
+         Daily at 07:30: the observability review. Fetches macmini's evidence
+         pack (built at 06:30) over root SSH, lets read-only Codex
+         (gpt-6.2-sol, medium; no fallback model) review the day with
+         drill-down queries on macmini (up to 150 minutes), files new
+         findings as work items and sends one digest through Nyxmon's
+         Telegram notifier.
+         agent-stuff tools/obs-triage; ops-control docs/OBSERVABILITY_ROUTINE.md.
+         Studio only. -->
+    <key>Label</key>
+    <string>de.wersdoerfer.obs-triage</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .brew_prefix }}/opt/python@3/libexec/bin/python</string>
+        <string>{{ .chezmoi.homeDir }}/projects/agent-stuff/tools/obs-triage/bin/obs-triage</string>
+        <string>run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ .brew_prefix }}/bin:{{ .chezmoi.homeDir }}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>WORK_AGENT</key>
+        <string>obs-triage</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-triage.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-triage.log</string>
+</dict>
+</plist>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Managed by chezmoi; edit the source template, not this file.
+
+         Mondays at 08:30: the weekly observability review. Writes the brief
+         coordination/katharina/obs-weekly.md and starts it with that folder's
+         run.sh on the main account (ACCOUNT=main); read-only review, report
+         in ws-work-planning/reviews, items only for new findings.
+         agent-stuff tools/obs-triage; ops-control docs/OBSERVABILITY_ROUTINE.md.
+         Studio only. -->
+    <key>Label</key>
+    <string>de.wersdoerfer.obs-weekly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ .brew_prefix }}/opt/python@3/libexec/bin/python</string>
+        <string>{{ .chezmoi.homeDir }}/projects/agent-stuff/tools/obs-triage/bin/obs-triage</string>
+        <string>weekly</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ .brew_prefix }}/bin:{{ .chezmoi.homeDir }}/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>WORK_AGENT</key>
+        <string>obs-triage</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>AbandonProcessGroup</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ .chezmoi.homeDir }}/Library/Logs/obs-weekly.log</string>
+</dict>
+</plist>

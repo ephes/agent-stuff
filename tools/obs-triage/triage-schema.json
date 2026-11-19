@@ -1,0 +1,141 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "notes",
+    "queries",
+    "findings",
+    "known",
+    "note"
+  ],
+  "properties": {
+    "notes": {
+      "type": "string"
+    },
+    "queries": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "query",
+          "start",
+          "end",
+          "limit",
+          "step",
+          "fn",
+          "why"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "loki",
+              "influx",
+              "influx_series"
+            ]
+          },
+          "query": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "why": {
+            "type": "string"
+          },
+          "fn": {
+            "type": "string",
+            "enum": [
+              "",
+              "mean",
+              "max",
+              "min",
+              "last",
+              "count",
+              "sum"
+            ]
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "title",
+          "summary",
+          "evidence",
+          "severity",
+          "project",
+          "next_action"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "next_action": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "known": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "observation"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "observation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "note": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{{ if and (eq .chezmoi.os "darwin") (eq (output "scutil" "--get" "LocalHostName" | trim) "studio") -}}
+#!/bin/bash
+# (Re)load the three obs-triage LaunchAgents when a plist changes.
+# Studio only, keyed on LocalHostName (.chezmoi.hostname follows reverse DNS).
+# plist hash: {{ include "private_Library/LaunchAgents/de.wersdoerfer.obs-triage.plist.tmpl" | sha256sum }}
+# plist hash: {{ include "private_Library/LaunchAgents/de.wersdoerfer.obs-launchd-check.plist.tmpl" | sha256sum }}
+# plist hash: {{ include "private_Library/LaunchAgents/de.wersdoerfer.obs-weekly.plist.tmpl" | sha256sum }}
+set -euo pipefail
+uid="$(id -u)"
+mkdir -p "$HOME/.local/state/obs-triage"
+for label in de.wersdoerfer.obs-triage de.wersdoerfer.obs-launchd-check de.wersdoerfer.obs-weekly; do
+    plist="$HOME/Library/LaunchAgents/$label.plist"
+    launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+    # No GUI session (e.g. chezmoi apply over ssh before login): it loads at next login.
+    launchctl bootstrap "gui/$uid" "$plist" 2>/dev/null \
+        && echo "$label LaunchAgent (re)loaded" \
+        || echo "$label LaunchAgent installed; loads at next GUI login"
+done
+{{ end -}}
