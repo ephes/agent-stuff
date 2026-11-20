@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reject negative and non-finite waits from `--max-wait` and
+  `HEAVY_SLOT_MAX_WAIT` before accessing slots or running the command.
+
 - New tool: `heavy-slot -- COMMAND` runs a heavy command (full test suite,
   cold build) only while one of N machine-wide `flock` slots is free
   (`HEAVY_SLOTS`, default 3; `~/.cache/heavy-slot`), so parallel workers no

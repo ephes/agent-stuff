@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import math
 import os
 import resource
 import signal
@@ -40,6 +41,13 @@ def positive_int(text: str) -> int:
     return value
 
 
+def nonnegative_finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value) or value < 0:
+        raise argparse.ArgumentTypeError("must be a finite, nonnegative number")
+    return value
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="heavy-slot",
@@ -48,7 +56,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--slots", type=positive_int, default=None,
                    help=f"number of slots (HEAVY_SLOTS, default {DEFAULT_SLOTS})")
     p.add_argument("--dir", default=None, help=f"slot directory (HEAVY_SLOT_DIR, default {DEFAULT_DIR})")
-    p.add_argument("--max-wait", type=float, default=None,
+    p.add_argument("--max-wait", type=nonnegative_finite_float, default=None,
                    help=f"seconds to wait for a slot, then exit {EX_TEMPFAIL}; 0 waits forever "
                         f"(HEAVY_SLOT_MAX_WAIT, default {DEFAULT_MAX_WAIT:.0f})")
     p.add_argument("--label", default="", help="shown to waiting callers (default: the command)")
@@ -181,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     slots = setting(args.slots, "HEAVY_SLOTS", DEFAULT_SLOTS, positive_int)
-    max_wait = setting(args.max_wait, "HEAVY_SLOT_MAX_WAIT", DEFAULT_MAX_WAIT, float)
+    max_wait = setting(args.max_wait, "HEAVY_SLOT_MAX_WAIT", DEFAULT_MAX_WAIT, nonnegative_finite_float)
     directory = Path(setting(args.dir, "HEAVY_SLOT_DIR", DEFAULT_DIR, str)).expanduser()
     if not args.status and not command:
         warn("heavy-slot: no command (usage: heavy-slot [options] -- COMMAND [ARGS...])")

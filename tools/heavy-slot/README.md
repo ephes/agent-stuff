@@ -38,7 +38,9 @@ step at once.
   shorter), the last one just before the deadline. A slot acquired after
   `--max-wait` seconds (e.g. by a waiter that was suspended) is given back:
   heavy-slot exits 75 and does not run the command; `--max-wait 0` waits
-  forever.
+  forever. Both `--max-wait` and `HEAVY_SLOT_MAX_WAIT` require finite,
+  nonnegative seconds. Invalid values are rejected before accessing slots or
+  running the command.
 - The command gets `HEAVY_SLOT_HELD=<slot file>`. A heavy-slot call inside a
   slot (for example a `just test` that wraps its own steps) runs at once, so
   nesting cannot deadlock.

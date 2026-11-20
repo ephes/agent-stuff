@@ -116,6 +116,17 @@ class CapTest(Fixture):
         self.assertEqual(out, "")
         self.assertIn("no free slot", err)
 
+    def test_zero_max_wait_waits_until_a_slot_is_free(self):
+        fd = self.hold()
+        marker = self.tmp / "ran"
+        p = self.start("--", "touch", str(marker), HEAVY_SLOT_MAX_WAIT="0")
+        self.assertTrue(self.wait_for(lambda: self.waiting(p)))
+        self.assertIsNone(p.poll())
+        self.assertFalse(marker.exists())
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        self.assertEqual(self.finish(p)[0], 0)
+        self.assertTrue(marker.exists())
+
     def test_release_after_max_wait_is_too_late(self):
         fd = self.hold()
         p = self.start("--max-wait", "0.3", "--", "echo", "ran")
@@ -286,6 +297,19 @@ class RunTest(Fixture):
         rc, _, err = self.finish(self.start("--", "true", HEAVY_SLOTS="many"))
         self.assertNotEqual(rc, 0)
         self.assertIn("HEAVY_SLOTS='many' is not valid", err)
+
+    def test_invalid_max_wait_is_rejected_before_admission(self):
+        marker = self.tmp / "ran"
+        for value in ("nan", "inf", "-inf", "1e999", "-1", "bad"):
+            for source in ("--max-wait", "HEAVY_SLOT_MAX_WAIT"):
+                with self.subTest(value=value, source=source):
+                    args = (f"--max-wait={value}",) if source == "--max-wait" else ()
+                    env = {source: value} if source == "HEAVY_SLOT_MAX_WAIT" else {}
+                    rc, _, err = self.finish(self.start(*args, "--", "touch", str(marker), **env))
+                    self.assertNotEqual(rc, 0)
+                    self.assertIn(source, err)
+                    self.assertFalse(marker.exists())
+                    self.assertFalse(self.dir.exists())
 
     def test_unknown_program(self):
         rc, _, err = self.finish(self.start("--", str(self.tmp / "nope")))
