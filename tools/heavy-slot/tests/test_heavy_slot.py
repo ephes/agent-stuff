@@ -261,7 +261,7 @@ class RunTest(Fixture):
         flag = self.tmp / "term"
         p = self.start("--", "sh", "-c", "trap 'echo got > \"$1\"; exit 9' TERM; while :; do sleep 0.1; done",
                        "sh", str(flag))
-        self.assertTrue(self.wait_for(lambda: "sh -c" in hs.holder(self.dir / "slot-0.lock")))
+        self.assertTrue(self.wait_for(lambda: hs.holder(self.dir / "slot-0.lock").endswith(": sh")))
         time.sleep(0.3)
         p.send_signal(signal.SIGTERM)
         rc, _, _ = self.finish(p)
@@ -338,6 +338,39 @@ class RunTest(Fixture):
         self.assertEqual(rc, 0)
         self.assertEqual(out.splitlines(), ["slot-0.lock\tfree",
                                             "slot-1.lock\theld\tpid 1 since 00:00:00: test holder"])
+
+    def test_default_label_omits_command_arguments(self):
+        path = self.dir / "slot-0.lock"
+        self.start("--", "/bin/sh", "-c", ": synthetic-holder-argument; exec sleep 30")
+        self.assertTrue(self.wait_for(lambda: bool(hs.holder(path))))
+
+        stored = path.read_text()
+        self.assertEqual(stored.split(": ", 1)[1], "sh\n")
+        rc, out, _ = self.finish(self.start("--status"))
+        self.assertEqual((rc, out), (0, f"slot-0.lock\theld\t{stored}"))
+
+        rc, _, err = self.finish(self.start("--max-wait", "0.5", "--", "/bin/echo", "synthetic-waiter-argument"))
+        self.assertEqual(rc, hs.EX_TEMPFAIL)
+        self.assertIn(f"holders: {stored.rstrip()})", err)
+        self.assertTrue(err.rstrip().endswith("not run: echo"), err)
+        self.assertNotIn("synthetic-waiter-argument", err)
+
+    def test_explicit_label_is_bounded_to_one_printable_line(self):
+        path = self.dir / "slot-0.lock"
+        label = "batch\nnext\rstep\u2028then\t" + "x" * 150
+        self.start("--label", label, "--", "sleep", "30")
+        self.assertTrue(self.wait_for(lambda: bool(hs.holder(path))))
+
+        stored = path.read_text()
+        self.assertEqual(stored.split(": ", 1)[1], ("batch next step then " + "x" * 150)[:120] + "\n")
+        rc, out, _ = self.finish(self.start("--status"))
+        self.assertEqual((rc, out), (0, f"slot-0.lock\theld\t{stored}"))
+
+    def test_status_normalizes_existing_multiline_holder_metadata(self):
+        fd = self.hold()
+        os.write(fd, b"continuation\n")
+        rc, out, _ = self.finish(self.start("--status"))
+        self.assertEqual((rc, out), (0, "slot-0.lock\theld\tpid 1 since 00:00:00: test holder continuation\n"))
 
     def test_free_slot_shows_no_old_holder(self):
         self.finish(self.start("--", "true"))

@@ -8,7 +8,7 @@ H=~/projects/agent-stuff/tools/heavy-slot/bin/heavy-slot
 $H -- just test                      # waits until one of 3 slots is free, then runs
 $H --label "daybook gates" -- sh -c 'just lint && just typecheck && just test'
 $H --slots 2 --max-wait 600 -- uv run pytest -n 4
-$H --status                          # slot-0.lock  held  pid 123 since 18:02:11: just test
+$H --status                          # slot-0.lock  held  pid 123 since 18:02:11: just
 ```
 
 Why: the Studio's load peaked at 897 (2026-11-08) and 714 (2026-11-17) with
@@ -72,7 +72,13 @@ step at once.
 | `--slots N` | `HEAVY_SLOTS` | 3 |
 | `--dir PATH` | `HEAVY_SLOT_DIR` | `~/.cache/heavy-slot` |
 | `--max-wait SEC` | `HEAVY_SLOT_MAX_WAIT` | 7200 |
-| `--label TEXT` | | the command line |
+| `--label TEXT` | | executable basename |
+
+The default label is the executable's basename. Labels are limited to
+120 characters, with nonprintable characters replaced by spaces. An explicit
+`--label` is visible in status and waiter diagnostics while the slot is held,
+and remains in the lock file until the next command overwrites it. Use
+non-sensitive text for explicit labels.
 
 Every caller must use the same directory and slot count, or the cap is per
 group. Three slots of `pytest -n 4` keep the 16-core Studio at about 12 busy

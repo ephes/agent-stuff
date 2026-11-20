@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Use the executable basename as the default slot label. Keep labels on a
+  single bounded line in slot files and diagnostics. Explicit labels remain
+  in the lock file after the command exits.
+
 - Reject negative and non-finite waits from `--max-wait` and
   `HEAVY_SLOT_MAX_WAIT` before accessing slots or running the command.
 

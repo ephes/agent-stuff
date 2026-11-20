@@ -59,7 +59,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-wait", type=nonnegative_finite_float, default=None,
                    help=f"seconds to wait for a slot, then exit {EX_TEMPFAIL}; 0 waits forever "
                         f"(HEAVY_SLOT_MAX_WAIT, default {DEFAULT_MAX_WAIT:.0f})")
-    p.add_argument("--label", default="", help="shown to waiting callers (default: the command)")
+    p.add_argument("--label", default="", help="shown to waiting callers (default: executable basename)")
     p.add_argument("--status", action="store_true", help="list the slots and their holders, then exit")
     p.add_argument("command", nargs=argparse.REMAINDER, help="-- COMMAND [ARGS...]")
     return p
@@ -112,11 +112,18 @@ def is_held(path: Path) -> bool:
     return False
 
 
+def single_line(text: str) -> str:
+    return "".join(char if char.isprintable() else " " for char in text).strip()
+
+
 def holder(path: Path) -> str:
     """The holder line of a held slot (a free slot's file may still name its last holder)."""
 
     try:
-        return path.read_text(errors="replace").strip()[:200] if is_held(path) else ""
+        if is_held(path):
+            with path.open(encoding="utf-8", errors="replace") as stream:
+                return single_line(stream.read(200))
+        return ""
     except OSError:
         return ""
 
@@ -204,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         return unguarded(command, f"cannot create {directory}: {exc}")
 
-    label = args.label or " ".join(command)[:120]
+    label = single_line((args.label or os.path.basename(command[0]))[:120])
     interval = min(POLL, max_wait / 4) if max_wait else POLL
     started = time.monotonic()
     announced = False
