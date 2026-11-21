@@ -377,6 +377,19 @@ class CycleTests(Base):
         self.assertIn("by an earlier probe", self.sent()["tmutil_detail"])
         self.assertEqual(self.tmutil_calls(), 0)
 
+    def test_a_live_record_with_a_bad_timestamp_still_blocks_tmutil(self) -> None:
+        lstart = "Fri Nov 20 11:00:00 2026"
+        (self.tmp / "ps").write_text(lstart + "\n")
+        self.state.mkdir()
+        for stamp in ({}, {"started_at": "bad"}, {"started_at": 10**100}, {"killed_at": 10**100},
+                      {"started_at": float("inf")}, {"killed_at": None}, {"started_at": True}):
+            with self.subTest(stamp=stamp):
+                record = {"pid": 4242, "lstart_utc": lstart, **stamp}
+                (self.state / "hung.json").write_text(json.dumps([record]))
+                status, detail, fields = tg.read_tmutil(self.state)
+                self.assertEqual((status, fields, self.tmutil_calls()), ("hung", {}, 0))
+                self.assertIn("unknown time", detail)
+
     def test_the_record_is_written_before_tmutil_may_start_and_cleared_after(self) -> None:
         seen: list = []
         real = tg.bounded
@@ -396,6 +409,45 @@ class CycleTests(Base):
         self.assertEqual(set(record[0]), {"pid", "started_at", "lstart_utc"})
         self.assertEqual(json.loads((self.state / "hung.json").read_text()), [])
         self.assertEqual((self.sent()["tmutil"], self.tmutil_calls()), ("ok", 1))
+
+    def test_ownership_publication_is_durable_before_gate_release(self) -> None:
+        self.state.mkdir()
+        (self.tmp / "ps").write_text("Fri Nov 20 11:00:00 2026\n")
+        events = []
+        replace, popen = os.replace, tg.subprocess.Popen
+
+        def sync(fd):
+            events.append("sync directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "sync file")
+
+        def publish(source, destination):
+            events.append("replace")
+            replace(source, destination)
+
+        def start(argv, **kwargs):
+            proc = popen(argv, **kwargs)
+            if proc.stdin is not None:
+                write = proc.stdin.write
+
+                def release(data):
+                    events.append("release")
+                    return write(data)
+
+                proc.stdin.write = release
+            return proc
+
+        with (mock.patch.object(os, "fsync", sync), mock.patch.object(os, "replace", publish),
+              mock.patch.object(tg.subprocess, "Popen", start)):
+            self.assertEqual(tg.read_tmutil(self.state)[0], "ok")
+        publication = ["sync file", "replace", "sync directory"]
+        self.assertEqual(events, publication * 2 + ["release"] + publication)
+        self.assertEqual(self.tmutil_calls(), 1)
+
+    def test_ownership_sync_failure_keeps_the_gate_closed(self) -> None:
+        self.state.mkdir()
+        with mock.patch.object(os, "fsync", side_effect=[None, OSError("directory sync failed")]):
+            status, detail, fields = tg.read_tmutil(self.state)
+        self.assertEqual((status, fields, self.tmutil_calls()), ("error", {}, 0))
+        self.assertIn("directory sync failed", detail)
 
     def test_the_gate_never_starts_tmutil_without_its_go_line(self) -> None:
         tmutil = os.environ["TM_GUARD_TMUTIL"]

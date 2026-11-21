@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Sync ownership records before releasing the `tmutil` gate and report
+  publication failures as probe errors. Persist progress state durably.
+- Report an unknown start or kill time for live ownership records with
+  unreadable timestamps and keep further probes blocked.
+
 - New tool: a five-minute Time Machine stall probe for the Studio
   (LaunchAgent `de.wersdoerfer.tm-guard`, chezmoi). Records whether `tmutil
   status` answers within 120 s (a child killed by its own PID when it does

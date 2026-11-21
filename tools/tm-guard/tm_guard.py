@@ -127,7 +127,18 @@ def bounded(
         return Outcome("error", stderr=str(error).encode())
     assert proc.stdout is not None and proc.stderr is not None
     if on_start is not None:
-        on_start(proc.pid)  # bounded on its own (its ps call has PS_TIMEOUT)
+        try:
+            on_start(proc.pid)  # its ps call has PS_TIMEOUT
+        except OSError as error:
+            if proc.stdin is not None:
+                proc.stdin.close()  # EOF, with no go line
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(proc.pid, signal.SIGKILL)
+            reaped = _wait_until(proc, time.monotonic() + KILL_GRACE) is not None
+            proc.stdout.close()
+            proc.stderr.close()
+            return Outcome("error", stderr=f"cannot record process ownership: {error}".encode(),
+                           pid=proc.pid, reaped=reaped)
     deadline = time.monotonic() + seconds
     if stdin is not None:
         assert proc.stdin is not None
@@ -236,7 +247,14 @@ def write_atomic(path: Path, data: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(data, handle, sort_keys=True)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -355,6 +373,15 @@ def parse_status(raw: bytes) -> dict[str, Any]:
     }
 
 
+def _recorded_time(value: Any) -> str:
+    if type(value) in (int, float):
+        try:
+            return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
+        except (OverflowError, OSError, ValueError):
+            pass
+    return "unknown time"
+
+
 def read_tmutil(state: Path) -> tuple[str, str, dict[str, Any]]:
     """(``ok``/``timeout``/``hung``/``error``, detail, parsed fields)."""
 
@@ -365,10 +392,10 @@ def read_tmutil(state: Path) -> tuple[str, str, dict[str, Any]]:
         write_atomic(hung_path, alive)
     if alive:
         first = alive[0]
-        if isinstance(first.get("killed_at"), int):
-            since = datetime.fromtimestamp(first["killed_at"]).strftime("%Y-%m-%d %H:%M")
+        if "killed_at" in first:
+            since = _recorded_time(first["killed_at"])
             return "hung", f"tmutil pid {first['pid']} killed at {since} has not exited", {}
-        since = datetime.fromtimestamp(first.get("started_at", 0)).strftime("%Y-%m-%d %H:%M")
+        since = _recorded_time(first.get("started_at"))
         return "hung", f"tmutil pid {first['pid']} started at {since} by an earlier probe has not exited", {}
     entry: dict[str, Any] = {}
 
@@ -387,7 +414,7 @@ def read_tmutil(state: Path) -> tuple[str, str, dict[str, Any]]:
     # after record() returned; a probe that dies before that closes the pipe and sh exits instead.
     gate = ["/bin/sh", "-c", 'read -r go || exit 97; exec "$0" "$@"', tmutil, "status", "-X"]
     done = bounded(gate, TMUTIL_TIMEOUT, stdin=b"go\n", on_start=record)
-    if entry:
+    if entry and done.status != "error":
         if done.reaped:
             write_atomic(hung_path, [])
         else:

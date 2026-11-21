@@ -85,6 +85,12 @@ it runs has a hard limit, so the whole cycle ends within about 5 minutes
 even when everything hangs; launchd does not start a second copy while one
 runs, and a manual run alongside exits 3.
 
+The probe syncs the ownership record and its directory before allowing
+`tmutil` to start. A publication failure closes the gate and reports a
+probe error. Progress state uses the same durable JSON publication. A
+live recorded process still blocks a new run when its timestamp is
+unreadable. The diagnostic shows `unknown time` in that case.
+
 ## Nyxmon rules
 
 Check "Studio Time Machine progress" (service `observability-routine`,
