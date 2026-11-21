@@ -3,6 +3,7 @@ import errno
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -82,7 +83,8 @@ class TestScan(unittest.TestCase):
         self.write("docs/plans/p.md", "gpt-5.5\n")
         self.write("docs/specs/s.md", "gpt-5.5\n")
         self.write("docs/review-cycle-log.md", "GPT-6 Sol\n")
-        self.write(".git/config", "gpt-5\n")
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        self.write(".git/notes", "gpt-5\n")
         found = model_floor.scan(self.root)
         self.assertEqual([(f[0], f[1], f[2]) for f in found],
                          [("skills/a/SKILL.md", 2, "gpt-6.1")])
@@ -128,6 +130,24 @@ class TestScan(unittest.TestCase):
         found = sorted(f[0] for f in model_floor.scan(self.root))
         self.assertEqual(found, ["kept.md", "new.md"])
 
+    def test_git_enumeration_errors_are_reported_without_falling_back(self):
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        self.write("would-find.md", "gpt-6.1\n")
+        for listing, detail in (
+            (subprocess.CompletedProcess([], 128, stdout=b""), "exit 128"),
+            (subprocess.TimeoutExpired("git ls-files", 60), "timed out"),
+            (FileNotFoundError(errno.ENOENT, "git executable missing"), "git executable missing"),
+        ):
+            with self.subTest(detail=detail), patch.object(model_floor.subprocess, "run") as run:
+                if isinstance(listing, Exception):
+                    run.side_effect = listing
+                else:
+                    run.return_value = listing
+                rc, out, err = self.run_main(self.root)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("git ls-files", err)
+                self.assertIn(detail, err)
+
     def test_git_listing_preserves_undecodable_path_bytes(self):
         name = b"kept-\xff.md"
         try:
@@ -138,10 +158,7 @@ class TestScan(unittest.TestCase):
         path = os.path.join(self.root, rel)
         os.mkdir(os.path.join(self.root, ".git"))
         listing = subprocess.CompletedProcess([], 0, stdout=name + b"\0")
-        with (
-            patch.object(model_floor.subprocess, "run", return_value=listing),
-            patch.object(model_floor.os.path, "isfile", side_effect=lambda p: p == path),
-        ):
+        with patch.object(model_floor.subprocess, "run", return_value=listing):
             self.assertEqual(model_floor.git_files(self.root), [path])
 
     def test_diagnostics_escape_surrogate_paths(self):
@@ -184,6 +201,46 @@ class TestScan(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn(r"kept\nname.md:1: gpt-6.1:", out)
         self.assertEqual(len(out.splitlines()), 1)
+
+    def test_growing_file_cannot_exceed_the_scan_budget(self):
+        self.write("a-growing", "gpt-5\n")
+        self.write("b-kept", "gpt-6.1\n")
+        growing = os.path.join(self.root, "a-growing")
+        getsize, fstat = os.path.getsize, os.fstat
+        identity = os.stat(growing)
+
+        def grow():
+            with open(growing, "ab") as fh:
+                fh.write(b"x" * 32)
+
+        def getsize_then_grow(path):
+            size = getsize(path)
+            if path == growing:
+                grow()
+            return size
+
+        def fstat_then_grow(fd):
+            info = fstat(fd)
+            if os.path.samestat(info, identity):
+                grow()
+            return info
+
+        with (
+            patch.object(model_floor, "MAX_BYTES", 32),
+            patch.object(os.path, "getsize", getsize_then_grow),
+            patch.object(os, "fstat", fstat_then_grow),
+        ):
+            self.assertEqual([hit[0] for hit in model_floor.scan(self.root)], ["b-kept"])
+        self.assertGreater(getsize(growing), 32)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires a FIFO")
+    def test_fallback_scan_skips_fifo_and_continues(self):
+        os.mkfifo(os.path.join(self.root, "a-pipe"))
+        self.write("b-kept", "gpt-6.1\n")
+        cmd = [sys.executable, os.path.join(REPO, "tools/model-floor/bin/model-floor-check"), self.root]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("b-kept:1: gpt-6.1:", result.stdout)
 
     def test_binary_files_are_skipped(self):
         with open(os.path.join(self.root, "blob.bin"), "wb") as fh:

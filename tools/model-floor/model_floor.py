@@ -18,12 +18,13 @@ whole tree is walked.
 
 Unnumbered ids (`gpt-daybreak-blue-latest`, `codex-auto-review`) carry no
 generation and are not reported. Exit 0 when clean, 1 with one line per
-finding, 2 on a usage error.
+finding, 2 on a usage or Git enumeration error.
 """
 import argparse
 import fnmatch
 import os
 import re
+import stat
 import subprocess
 import sys
 from unicodedata import decimal
@@ -95,16 +96,26 @@ def is_allowed_path(rel, globs):
     return any(fnmatch.fnmatchcase(rel, g) for g in globs)
 
 
+def _open_nonblocking(path, flags):
+    return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
+
+
 def scan_file(path):
     """Findings `(line_number, id, line)` in one text file."""
+    data = bytearray()
     try:
-        if os.path.getsize(path) > MAX_BYTES:
-            return []
-        with open(path, "rb") as fh:
-            data = fh.read()
+        with open(path, "rb", buffering=0, opener=_open_nonblocking) as fh:
+            info = os.fstat(fh.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+                return []
+            while len(data) <= MAX_BYTES:
+                chunk = fh.read(MAX_BYTES + 1 - len(data))
+                if not chunk:
+                    break
+                data.extend(chunk)
     except OSError:
         return []
-    if b"\0" in data[:8192]:
+    if len(data) > MAX_BYTES or b"\0" in data[:8192]:
         return []
     text = data.decode("utf-8", errors="replace")
     lines = text.splitlines()
@@ -119,23 +130,31 @@ def scan_file(path):
     return findings
 
 
+class GitEnumerationError(RuntimeError):
+    """Git could not enumerate files for a checkout."""
+
+
 def git_files(root):
-    """Tracked and new (not ignored) files of a git checkout at `root`, or
-    None when `root` is not the top of a git checkout."""
-    if not os.path.exists(os.path.join(root, ".git")):
+    """Tracked and new (not ignored) files, or None if there is no .git entry."""
+    try:
+        os.lstat(os.path.join(root, ".git"))
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise GitEnumerationError(f"cannot inspect .git: {exc.strerror}") from exc
     try:
         proc = subprocess.run(
             ["git", "-C", root, "ls-files", "-z", "--cached", "--others",
              "--exclude-standard"],
             capture_output=True, timeout=60, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except subprocess.TimeoutExpired as exc:
+        raise GitEnumerationError("git ls-files timed out") from exc
+    except OSError as exc:
+        raise GitEnumerationError(f"cannot run git ls-files: {exc.strerror}") from exc
     if proc.returncode != 0:
-        return None
+        raise GitEnumerationError(f"git ls-files failed (exit {proc.returncode})")
     names = sorted({os.fsdecode(n) for n in proc.stdout.split(b"\0") if n})
-    return [os.path.join(root, n) for n in names
-            if os.path.isfile(os.path.join(root, n))]
+    return [os.path.join(root, n) for n in names]
 
 
 def iter_files(root):
@@ -188,8 +207,12 @@ def main(argv=None):
     total = 0
     for target in args.paths:
         if os.path.isdir(target):
-            hits = [(os.path.join(target, rel), n, m, line)
-                    for rel, n, m, line in scan(target, args.allow)]
+            try:
+                hits = [(os.path.join(target, rel), n, m, line)
+                        for rel, n, m, line in scan(target, args.allow)]
+            except GitEnumerationError as exc:
+                print(f"model-floor-check: {_display_path(target)}: {exc}", file=sys.stderr)
+                return 2
         elif os.path.isfile(target):
             hits = [(target, n, m, line) for n, m, line in scan_file(target)]
         else:

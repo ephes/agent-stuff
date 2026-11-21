@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Skip nonregular files without blocking and enforce the 2 MB limit even
+  when a file grows during the scan.
+- Report failed or timed-out Git enumeration as a scan error. Keep the
+  directory walk for targets outside a checkout root.
+
 - Compare long version components without interrupting the scan or losing
   findings later in the input.
 - Preserve Git filename bytes when scanning and escape diagnostic paths so

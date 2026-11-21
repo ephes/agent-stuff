@@ -13,7 +13,7 @@ tools/model-floor/bin/model-floor-check path/to/run.sh path/to/COMMON.md   # sin
 ```
 
 Output: one line per finding, `path:line: id: text`. Exit 0 clean, 1 findings,
-2 a path that does not exist.
+2 a path that does not exist or a Git enumeration error.
 Diagnostic paths escape backslashes (except on Windows, where they separate
 path components), non-printable characters and undecodable filename bytes
 (shown as filesystem surrogate escapes such as `\udcff`).
@@ -52,9 +52,12 @@ At the top of a git checkout only tracked and new, not ignored files are
 scanned (`git ls-files --cached --others --exclude-standard`), so local
 scratch output that `.gitignore` covers does not count. Git path records
 retain their original bytes under the platform's filesystem encoding policy.
+If enumeration of a checkout fails or times out, the scan reports the
+failure and exits 2.
 Elsewhere the whole tree is walked, skipping `.git`, virtual environments,
-`node_modules` and caches. Binary files and files over 2 MB are skipped
-everywhere.
+`node_modules` and caches. Both scans check for regular files on the opened
+handle and skip binary files and files over 2 MB, including files that grow
+past the limit during the read.
 
 ## Tests
 
