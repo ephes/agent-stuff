@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve exact byte and file counts in reports and progress tracking.
+  Reject fractional counts.
+- Treat status with an invalid `Running` flag as unreadable. Accept
+  plist booleans and the legacy integers 0 and 1.
+
 - Sync ownership records before releasing the `tmutil` gate and report
   publication failures as probe errors. Persist progress state durably.
 - Report an unknown start or kill time for live ownership records with

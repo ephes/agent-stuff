@@ -46,6 +46,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -320,19 +321,28 @@ def _number(value: Any) -> float | None:
 
 
 def _count(value: Any) -> int | None:
-    number = _number(value)
-    if number is None or not 0 <= number < 10**16:
-        return None
-    return int(number)
+    if type(value) is int:
+        return value if 0 <= value < 10**16 else None
+    if isinstance(value, float):
+        return int(value) if 0 <= value < 10**16 and value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            number = Decimal(value)
+        except InvalidOperation:
+            return None
+        if number.is_finite() and 0 <= number < 10**16 and number == number.to_integral_value():
+            return int(number)
+    return None
 
 
 def _flag(value: Any) -> bool | None:
-    """A plist flag: ``<true/>``/``<false/>`` or an integer (``Running = 1`` in older output)."""
+    """A plist boolean or a legacy integer flag (0 or 1)."""
 
     if isinstance(value, bool):
         return value
-    number = _number(value)
-    return None if number is None else number != 0
+    if type(value) is int and value in (0, 1):
+        return bool(value)
+    return None
 
 
 def parse_status(raw: bytes) -> dict[str, Any]:

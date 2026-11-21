@@ -55,7 +55,9 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
    `Running` flag is an `error`): `Running`, `Stopping`,
    `BackupPhase` (characters outside `[A-Za-z0-9_. -]` become `_`, as macmini
    accepts), `Percent` (`-1`, unknown, becomes null), bytes and files
-   done and planned (`Progress`), `DateOfStateChange`.
+   done and planned (`Progress`), `DateOfStateChange`. `Running` must be a
+   plist boolean or the legacy integer 0 or 1. Other values make the
+   status unreadable.
 3. **`defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup`**
    (20 s): `auto_backup` true, false or null. Automatic backups off is a
    normal state (the owner turned them off on 2026-11-20 and turns them on
@@ -72,7 +74,9 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
 5. **Progress tracking** (`state.json`): a running backup makes progress
    when the phase, a counter, the percent, `Stopping` or
    `DateOfStateChange` changes, or a band write is newer than the newest one
-   seen so far. `stalled_seconds` is the time since the last progress (0
+   seen so far. Byte and file counts are kept as exact integers from zero up to (but
+   excluding) 10¹⁶. Fractional and out-of-range counts are unavailable.
+   `stalled_seconds` is the time since the last progress (0
    when no backup runs; a backup that was not running in the previous cycle
    starts at 0). While `tmutil` does not answer, the count carries on from
    the last known progress, and band writes still count.

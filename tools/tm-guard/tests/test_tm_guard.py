@@ -109,6 +109,17 @@ class ParseTests(unittest.TestCase):
             },
         )
 
+    def test_counts_accept_only_exact_integers_in_range(self) -> None:
+        for value, expected in (
+            ("9007199254740993", 9007199254740993), ("1.0", 1), ("1e3", 1000), (4.0, 4),
+            (10**16 - 1, 10**16 - 1), (10**16, None), ("0.01", None),
+            ("9007199254740992.01", None), (1.5, None), (True, None), (-1, None),
+            ("Infinity", None), ("NaN", None),
+        ):
+            with self.subTest(value=value):
+                fields = tg.parse_status(plistlib.dumps({"Running": True, "bytes": value}))
+                self.assertEqual(fields["bytes"], expected)
+
     def test_idle_status_has_no_percent(self) -> None:
         fields = tg.parse_status(plistlib.dumps(IDLE))
         self.assertFalse(fields["running"])
@@ -275,6 +286,15 @@ class CycleTests(Base):
         self.assertEqual((sent["running"], sent["phase"], sent["stalled_seconds"]), (True, "Copying", 3 * 3600))
         self.assertEqual((sent["bytes"], sent["percent"]), (1000, 0.25))
 
+    def test_one_byte_of_progress_above_float_precision(self) -> None:
+        for now, count in ((NOW, 2**53), (NOW + 300, 2**53 + 1)):
+            with self.subTest(count=count):
+                self.set_status({**RUNNING, "Progress": {"bytes": count}})
+                with mock.patch.object(time, "time", return_value=now):
+                    self.assertEqual(self.run_check(), 0)
+                report = self.sent()
+                self.assertEqual((report["bytes"], report["stalled_seconds"]), (count, 0))
+
     def test_a_failed_band_read_fails_the_cross_check_only_while_running(self) -> None:
         (self.tmp / "band.fail").write_text("")
         self.assertEqual(self.run_check(), 0)
@@ -301,6 +321,18 @@ class CycleTests(Base):
         self.assertEqual(self.sent()["tmutil"], "error")
         self.assertIn("exit 4", self.sent()["tmutil_detail"])
         self.assertIsNone(self.sent()["running"])
+
+    def test_only_boolean_and_legacy_integer_running_flags_reach_the_report(self) -> None:
+        for raw, expected in ((True, True), (False, False), (1, True), (0, False),
+                              (0.5, None), (-1, None), (2, None), (1.0, None), ("1", None)):
+            with self.subTest(raw=raw):
+                self.set_status({**IDLE, "Running": raw})
+                self.assertEqual(self.run_check(), 0)
+                report = self.sent()
+                self.assertIs(report["running"], expected)
+                self.assertEqual(report["tmutil"], "error" if expected is None else "ok")
+                if expected is None:
+                    self.assertIn("no readable Running field", report["tmutil_detail"])
 
     def test_a_tmutil_that_does_not_answer_is_killed_and_reported(self) -> None:
         (self.tmp / "tmutil.sleep").write_text("")
