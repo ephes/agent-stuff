@@ -1,9 +1,12 @@
 # model-floor: allow-file -- fixtures name pre-6.2 ids to prove they are found.
+import errno
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest.mock import patch
 
 import model_floor
 
@@ -115,7 +118,6 @@ class TestScan(unittest.TestCase):
         self.assertIn("1 id(s) below GPT-6.2", err)
 
     def test_a_git_checkout_scans_only_tracked_and_new_files(self):
-        import subprocess
         subprocess.run(["git", "init", "-q", self.root], check=True)
         self.write(".gitignore", "scratch/\n")
         self.write("scratch/session.jsonl", "gpt-6.1-sol\n")
@@ -125,6 +127,58 @@ class TestScan(unittest.TestCase):
                        check=True)
         found = sorted(f[0] for f in model_floor.scan(self.root))
         self.assertEqual(found, ["kept.md", "new.md"])
+
+    def test_git_listing_preserves_undecodable_path_bytes(self):
+        name = b"kept-\xff.md"
+        try:
+            rel = os.fsdecode(name)
+        except UnicodeError as exc:
+            self.skipTest(f"filesystem decoder cannot represent filename bytes: {exc}")
+        self.assertEqual(os.fsencode(rel), name)
+        path = os.path.join(self.root, rel)
+        os.mkdir(os.path.join(self.root, ".git"))
+        listing = subprocess.CompletedProcess([], 0, stdout=name + b"\0")
+        with (
+            patch.object(model_floor.subprocess, "run", return_value=listing),
+            patch.object(model_floor.os.path, "isfile", side_effect=lambda p: p == path),
+        ):
+            self.assertEqual(model_floor.git_files(self.root), [path])
+
+    def test_diagnostics_escape_surrogate_paths(self):
+        target = "missing-\udcff.md"
+        rc, _, err = self.run_main(target)
+        self.assertEqual(rc, 2)
+        self.assertIn(r"missing-\udcff.md", err)
+
+    def test_git_diagnostics_escape_undecodable_paths(self):
+        name = b"kept-\xff.md"
+        try:
+            rel = os.fsdecode(name)
+            self.write(rel, "gpt-6.1\n")
+        except UnicodeError as exc:
+            self.skipTest(f"filesystem cannot represent filename bytes: {exc}")
+        except OSError as exc:
+            if exc.errno not in (errno.EPERM, errno.EINVAL, errno.EILSEQ):
+                raise
+            self.skipTest(f"cannot create a filename with undecodable bytes: {exc}")
+        if name not in os.listdir(os.fsencode(self.root)):
+            self.skipTest("filesystem changed the filename bytes")
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        subprocess.run(["git", "-C", self.root, "add", "--", rel], check=True)
+        self.assertEqual(model_floor.scan(self.root)[0][:3], (rel, 1, "gpt-6.1"))
+        rc, out, _ = self.run_main(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"{ascii(rel)[1:-1]}:1: gpt-6.1:", out)
+
+    def test_git_diagnostics_escape_line_breaks_in_paths(self):
+        rel = "kept\nname.md"
+        self.write(rel, "gpt-6.1\n")
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        subprocess.run(["git", "-C", self.root, "add", "--", rel], check=True)
+        rc, out, _ = self.run_main(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn(r"kept\nname.md:1: gpt-6.1:", out)
+        self.assertEqual(len(out.splitlines()), 1)
 
     def test_binary_files_are_skipped(self):
         with open(os.path.join(self.root, "blob.bin"), "wb") as fh:

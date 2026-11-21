@@ -4,6 +4,8 @@
 
 - Compare long version components without interrupting the scan or losing
   findings later in the input.
+- Preserve Git filename bytes when scanning and escape diagnostic paths so
+  unusual filenames stay on one output line.
 - New tool: `model-floor-check` reports OpenAI model ids below GPT-6.2
   (`gpt-6.1-*`, `gpt-6-*`, `GPT-6 Sol`, `gpt-5*` and older) outside history
   (`CHANGELOG*`, `docs/archive/`, `docs/plans/`, `docs/specs/`,

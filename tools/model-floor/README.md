@@ -14,6 +14,8 @@ tools/model-floor/bin/model-floor-check path/to/run.sh path/to/COMMON.md   # sin
 
 Output: one line per finding, `path:line: id: text`. Exit 0 clean, 1 findings,
 2 a path that does not exist.
+Diagnostic paths escape backslashes, non-printable characters and undecodable
+filename bytes (shown as filesystem surrogate escapes such as `\udcff`).
 
 ## What counts
 
@@ -47,9 +49,11 @@ Model ids in history name what ran at that time and stay as written:
 
 At the top of a git checkout only tracked and new, not ignored files are
 scanned (`git ls-files --cached --others --exclude-standard`), so local
-scratch output that `.gitignore` covers does not count. Elsewhere the whole
-tree is walked, skipping `.git`, virtual environments, `node_modules` and
-caches. Binary files and files over 2 MB are skipped everywhere.
+scratch output that `.gitignore` covers does not count. Git path records
+retain their original bytes under the platform's filesystem encoding policy.
+Elsewhere the whole tree is walked, skipping `.git`, virtual environments,
+`node_modules` and caches. Binary files and files over 2 MB are skipped
+everywhere.
 
 ## Tests
 

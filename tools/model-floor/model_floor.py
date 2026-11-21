@@ -133,7 +133,7 @@ def git_files(root):
         return None
     if proc.returncode != 0:
         return None
-    names = sorted({n for n in proc.stdout.decode("utf-8", "replace").split("\0") if n})
+    names = sorted({os.fsdecode(n) for n in proc.stdout.split(b"\0") if n})
     return [os.path.join(root, n) for n in names
             if os.path.isfile(os.path.join(root, n))]
 
@@ -163,6 +163,12 @@ def scan(root, extra_allow=()):
     return findings
 
 
+def _display_path(path):
+    """Keep a diagnostic on one line and escape undecodable filename bytes."""
+    return "".join(char if char.isprintable() else ascii(char)[1:-1]
+                   for char in path.replace("\\", "\\\\"))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="model-floor-check",
@@ -181,11 +187,11 @@ def main(argv=None):
         elif os.path.isfile(target):
             hits = [(target, n, m, line) for n, m, line in scan_file(target)]
         else:
-            print(f"model-floor-check: no such file or directory: {target}",
+            print(f"model-floor-check: no such file or directory: {_display_path(target)}",
                   file=sys.stderr)
             return 2
         for path, number, model_id, line in hits:
-            print(f"{path}:{number}: {model_id}: {line[:200]}")
+            print(f"{_display_path(path)}:{number}: {model_id}: {line[:200]}")
         total += len(hits)
     if total:
         print(f"model-floor-check: {total} id(s) below GPT-6.2", file=sys.stderr)
