@@ -117,6 +117,42 @@ class CapTest(Fixture):
         self.assertEqual(out, "")
         self.assertIn("no free slot", err)
 
+    def test_short_wait_sleeps_to_deadline_and_releases_a_late_slot(self):
+        budget = 0.015625
+        for release_late in (False, True):
+            with self.subTest(release_late=release_late):
+                fd = self.hold()
+                elapsed = 0.0
+                sleeps = []
+
+                def sleep(seconds):
+                    nonlocal elapsed
+                    sleeps.append(seconds)
+                    self.assertGreater(seconds, 0)
+                    elapsed += seconds
+                    if release_late and elapsed >= budget:
+                        elapsed += 0.001  # the waiter resumes after the deadline
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+
+                with (
+                    mock.patch.dict(os.environ, self.env, clear=True),
+                    mock.patch.object(hs.time, "monotonic", side_effect=lambda: elapsed),
+                    mock.patch.object(hs.time, "sleep", side_effect=sleep),
+                    mock.patch.object(hs, "try_acquire", wraps=hs.try_acquire) as probe,
+                    mock.patch.object(hs, "warn"),
+                    mock.patch.object(hs, "become") as become,
+                ):
+                    try:
+                        rc = hs.main(["--max-wait", str(budget), "--", "true"])
+                        self.assertEqual(rc, hs.EX_TEMPFAIL)
+                        self.assertEqual(sleeps, [budget / 4] * 4)
+                        self.assertEqual(probe.call_count, 5)
+                        become.assert_not_called()
+                        if release_late:
+                            self.assertFalse(hs.is_held(self.dir / "slot-0.lock"))
+                    finally:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+
     def test_zero_max_wait_waits_until_a_slot_is_free(self):
         fd = self.hold()
         marker = self.tmp / "ran"

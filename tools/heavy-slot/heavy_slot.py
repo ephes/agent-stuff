@@ -238,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
         return unguarded(command, f"cannot create {directory}: {exc}")
 
     label = single_line((args.label or os.path.basename(command[0]))[:120])
-    interval = min(POLL, max_wait / 4) if max_wait else POLL
+    # Use the full budget if dividing a tiny positive wait rounds down to zero.
+    interval = min(POLL, max_wait / 4 or max_wait) if max_wait else POLL
     started = time.monotonic()
     announced = False
     while True:
@@ -263,8 +264,12 @@ def main(argv: list[str] | None = None) -> int:
             held = "; ".join(h for h in (holder(p) for p in paths) if h)
             warn(f"heavy-slot: all {slots} slots busy, waiting (holders: {held or 'unknown'})")
             announced = True
-        # The last retry falls just before the deadline; a wait suspended past it ends above.
-        time.sleep(max(0.0, min(interval, max_wait - waited - 0.01)) if max_wait else interval)
+        if max_wait:
+            remaining = max_wait - (time.monotonic() - started)
+            if remaining > 0:
+                time.sleep(min(interval, remaining))
+        else:
+            time.sleep(interval)
     fd, path = got
     # First move the lock off a standard descriptor it may have taken (a closed stdin/stdout/stderr),
     # before anything is written, so no diagnostic or command output can land in the lock file.

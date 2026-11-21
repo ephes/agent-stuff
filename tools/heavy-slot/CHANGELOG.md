@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Sleep for the remaining wait near the deadline so busy slots are
+  not repeatedly probed in the final milliseconds.
+
 - Admit only regular single-link slot files and read status metadata from
   the same descriptor used to check the lock. Unusable slots use the
   existing warning and unguarded execution behavior.

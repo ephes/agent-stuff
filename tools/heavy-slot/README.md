@@ -39,8 +39,8 @@ step at once.
   the original holder line.
 - All slots busy: one line on stderr (`all 3 slots busy, waiting (holders:
   …)`), then a retry every 2 s (every quarter of `--max-wait` when that is
-  shorter), the last one just before the deadline. A slot acquired after
-  `--max-wait` seconds (e.g. by a waiter that was suspended) is given back:
+  shorter). The last sleep is capped at the remaining wait time. A slot
+  acquired after `--max-wait` seconds (e.g. by a waiter that was suspended) is given back:
   heavy-slot exits 75 and does not run the command; `--max-wait 0` waits
   forever. Both `--max-wait` and `HEAVY_SLOT_MAX_WAIT` require finite,
   nonnegative seconds. Invalid values are rejected before accessing slots or
