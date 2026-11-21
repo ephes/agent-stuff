@@ -50,7 +50,8 @@ step at once.
   nesting cannot deadlock.
 - Slot directory not usable (cannot be created or written, e.g. a sandbox
   without it as a writable root) before the deadline: a `WARNING … running WITHOUT a slot` line,
-  and the command runs (`HEAVY_SLOT_HELD=none`). Warnings go to stderr
+  and the command runs (`HEAVY_SLOT_HELD=none`). Nested calls after an
+  unguarded launch try to acquire a slot using their own settings. Warnings go to stderr
   and are lost when the caller closed it. The cap is a load brake;
   blocking a worker's gates because of a configuration slip would be worse.
 - Right after it is taken, the lock descriptor is moved off the low

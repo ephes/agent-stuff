@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Try to acquire a slot when a nested call inherits `HEAVY_SLOT_HELD=none`.
+
 - Sleep for the remaining wait near the deadline so busy slots are
   not repeatedly probed in the final milliseconds.
 

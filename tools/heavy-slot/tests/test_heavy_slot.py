@@ -194,6 +194,18 @@ class CapTest(Fixture):
         rc, out, err = self.finish(self.start("--", "sh", "-c", inner))
         self.assertEqual((rc, out), (0, "inner\n"), err)
 
+    def test_nested_call_acquires_a_slot_after_unguarded_parent(self):
+        blocker = self.tmp / "file"
+        blocker.touch()
+        rc, out, err = self.finish(self.start(
+            "--dir", str(blocker / "slots"), "--", "sh", "-c",
+            'echo "$HEAVY_SLOT_HELD"; exec "$@"', "sh",
+            sys.executable, str(BIN), "--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"',
+        ))
+        self.assertEqual((rc, out), (0, "none\nslot-0.lock\n"), err)
+        self.assertTrue((self.dir / "slot-0.lock").is_file())
+        self.assertEqual(err.count("running WITHOUT a slot"), 1)
+
     def test_killed_holder_frees_its_slot(self):
         holder = self.start("--", "sleep", "30")
         self.assertTrue(self.wait_for(lambda: hs.is_held(self.dir / "slot-0.lock")))

@@ -7,7 +7,7 @@ descriptor on. The command therefore has heavy-slot's pid, gets every signal dir
 its own status, and the slot stays taken as long as any process holding that descriptor lives (the
 command and the children it starts without closing inherited descriptors). The kernel releases the
 lock when the last of them exits in any way, so a slot can never stay stale. A command that is already
-inside a slot (``HEAVY_SLOT_HELD`` set) runs at once, so nested use cannot deadlock.
+inside a slot (``HEAVY_SLOT_HELD`` names a slot) runs at once, so nested use cannot deadlock.
 
 Python 3 stdlib only (3.9+). See README.md.
 """
@@ -34,6 +34,7 @@ EX_TEMPFAIL = 75  # no slot within --max-wait
 EX_USAGE = 2
 EX_NOEXEC = 127
 LOCK_FD_MIN = 200  # the inherited lock lives on a high descriptor, out of the way of `exec 3>&1` & co.
+UNGUARDED = "none"
 
 
 def positive_int(text: str) -> int:
@@ -215,7 +216,7 @@ def unguarded(command: list[str], reason: str) -> int:
     would be worse. The warning names the cause so the runner configuration can be fixed."""
 
     warn(f"heavy-slot: WARNING {reason}; running WITHOUT a slot")
-    return become(command, "none")
+    return become(command, UNGUARDED)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -227,8 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.status and not command:
         warn("heavy-slot: no command (usage: heavy-slot [options] -- COMMAND [ARGS...])")
         return EX_USAGE
-    if os.environ.get("HEAVY_SLOT_HELD") and not args.status:
-        return become(command, os.environ["HEAVY_SLOT_HELD"])  # nested: must not wait for itself
+    held = os.environ.get("HEAVY_SLOT_HELD")
+    if held and held != UNGUARDED and not args.status:
+        return become(command, held)  # nested: must not wait for itself
     paths = slot_paths(directory, slots)
     if args.status:
         return status(paths)
