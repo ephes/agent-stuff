@@ -79,6 +79,10 @@ step at once.
 | `--max-wait SEC` | `HEAVY_SLOT_MAX_WAIT` | 7200 |
 | `--label TEXT` | | executable basename |
 
+Both `--slots` and `HEAVY_SLOTS` accept integers from 1 through 64. Values
+outside that range are rejected before constructing slot paths for either
+status or acquisition.
+
 The default label is the executable's basename. Labels are limited to
 120 characters, with nonprintable characters replaced by spaces. An explicit
 `--label` is visible in status and waiter diagnostics while the slot is held,

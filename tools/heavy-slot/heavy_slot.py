@@ -28,6 +28,7 @@ from pathlib import Path
 
 DEFAULT_DIR = "~/.cache/heavy-slot"
 DEFAULT_SLOTS = 3
+MAX_SLOTS = 64
 DEFAULT_MAX_WAIT = 7200.0
 POLL = 2.0
 EX_TEMPFAIL = 75  # no slot within --max-wait
@@ -37,10 +38,10 @@ LOCK_FD_MIN = 200  # the inherited lock lives on a high descriptor, out of the w
 UNGUARDED = "none"
 
 
-def positive_int(text: str) -> int:
+def slot_count(text: str) -> int:
     value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError("must be at least 1")
+    if not 1 <= value <= MAX_SLOTS:
+        raise argparse.ArgumentTypeError(f"must be between 1 and {MAX_SLOTS}")
     return value
 
 
@@ -56,8 +57,8 @@ def parser() -> argparse.ArgumentParser:
         prog="heavy-slot",
         description="Run COMMAND once one of N machine-wide slots is free (cap for parallel heavy runs).",
     )
-    p.add_argument("--slots", type=positive_int, default=None,
-                   help=f"number of slots (HEAVY_SLOTS, default {DEFAULT_SLOTS})")
+    p.add_argument("--slots", type=slot_count, default=None,
+                   help=f"number of slots, 1 to {MAX_SLOTS} (HEAVY_SLOTS, default {DEFAULT_SLOTS})")
     p.add_argument("--dir", default=None, help=f"slot directory (HEAVY_SLOT_DIR, default {DEFAULT_DIR})")
     p.add_argument("--max-wait", type=nonnegative_finite_float, default=None,
                    help=f"seconds to wait for a slot, then exit {EX_TEMPFAIL}; 0 waits forever "
@@ -222,7 +223,7 @@ def unguarded(command: list[str], reason: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    slots = setting(args.slots, "HEAVY_SLOTS", DEFAULT_SLOTS, positive_int)
+    slots = setting(args.slots, "HEAVY_SLOTS", DEFAULT_SLOTS, slot_count)
     max_wait = setting(args.max_wait, "HEAVY_SLOT_MAX_WAIT", DEFAULT_MAX_WAIT, nonnegative_finite_float)
     directory = Path(setting(args.dir, "HEAVY_SLOT_DIR", DEFAULT_DIR, str)).expanduser()
     if not args.status and not command:

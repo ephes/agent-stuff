@@ -418,6 +418,29 @@ class RunTest(Fixture):
                     self.assertFalse(marker.exists())
                     self.assertFalse(self.dir.exists())
 
+    def test_oversized_slot_count_is_rejected_before_path_allocation(self):
+        for source in ("--slots", "HEAVY_SLOTS"):
+            args = ["--slots", "65"] if source == "--slots" else []
+            env = dict(self.env, HEAVY_SLOTS="65") if source == "HEAVY_SLOTS" else self.env
+            for action in (["--status"], ["--", "true"]):
+                with (
+                    self.subTest(source=source, action=action),
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(hs, "slot_paths", side_effect=AssertionError("allocated paths")) as paths,
+                    mock.patch("sys.stderr"),
+                ):
+                    with self.assertRaises(SystemExit) as error:
+                        hs.main(args + action)
+                    self.assertNotEqual(error.exception.code, 0)
+                    paths.assert_not_called()
+
+    def test_maximum_slot_count_allows_status_and_acquisition(self):
+        rc, out, err = self.finish(self.start("--slots", "64", "--status"))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.splitlines(), [f"slot-{index}.lock\tfree" for index in range(64)])
+        rc, out, err = self.finish(self.start("--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"', HEAVY_SLOTS="64"))
+        self.assertEqual((rc, out), (0, "slot-0.lock\n"), err)
+
     def test_unknown_program(self):
         rc, _, err = self.finish(self.start("--", str(self.tmp / "nope")))
         self.assertEqual(rc, 127)

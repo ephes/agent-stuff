@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Limit `--slots` and `HEAVY_SLOTS` to 1–64 before constructing slot paths.
+
 - Try to acquire a slot when a nested call inherits `HEAVY_SLOT_HELD=none`.
 
 - Sleep for the remaining wait near the deadline so busy slots are
