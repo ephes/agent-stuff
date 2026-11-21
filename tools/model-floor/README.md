@@ -23,6 +23,9 @@ provider prefix: `gpt-6.1-sol`, `gpt-6-astra`, `GPT-6 Sol`, `openai/gpt-5.6`,
 `gpt-6.2-astra`, `gpt-7`) and unnumbered ids (`gpt-daybreak-blue-latest`,
 `codex-auto-review`) are not reported.
 
+Major and minor components are compared numerically, including long digit
+sequences, leading zeros, and Unicode decimal digits.
+
 Only `gpt-<number>` ids are recognized. Older OpenAI families without that
 form - the o-series (`o3`, `o4-mini`), `codex-mini-latest`, spellings such as
 `gpt5` or `GPT 6.1` - pass unreported, because their short names collide with

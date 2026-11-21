@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+from unicodedata import decimal
 
 MIN_GPT_VERSION = (6, 2)
 ALLOW_LINE = "model-floor: allow"
@@ -45,25 +46,32 @@ MAX_BYTES = 2_000_000
 _ID_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])gpt-(\d+)(?:\.(\d+))?(?![\d]|\.\d)")
 
 
-def gpt_version(text):
-    """`(major, minor)` of a numbered GPT id at the start of `text`, else None."""
-    m = _ID_RE.match(text)
-    if m is None:
-        return None
-    return int(m.group(1)), int(m.group(2) or 0)
+def _component_key(digits):
+    """Order decimal components by significant length, then by digit value."""
+    if not digits.isascii():
+        digits = "".join(str(decimal(digit)) for digit in digits)
+    digits = digits.lstrip("0")
+    return len(digits), digits
+
+
+_FLOOR_KEY = tuple(_component_key(str(part)) for part in MIN_GPT_VERSION)
+
+
+def _match_below_floor(match):
+    major, minor = match.groups(default="0")
+    return (_component_key(major), _component_key(minor)) < _FLOOR_KEY
 
 
 def below_floor(model_id):
-    version = gpt_version(str(model_id).rsplit("/", 1)[-1])
-    return version is not None and version < MIN_GPT_VERSION
+    match = _ID_RE.match(str(model_id).rsplit("/", 1)[-1])
+    return match is not None and _match_below_floor(match)
 
 
 def old_ids(line):
     """Every id in `line` that is below the floor, in order."""
     found = []
     for m in _ID_RE.finditer(line):
-        version = (int(m.group(1)), int(m.group(2) or 0))
-        if version < MIN_GPT_VERSION:
+        if _match_below_floor(m):
             found.append(m.group(0))
     return found
 

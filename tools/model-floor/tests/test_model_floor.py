@@ -36,6 +36,20 @@ class TestIds(unittest.TestCase):
         self.assertFalse(model_floor.below_floor("openai-codex/gpt-6.2-sol"))
         self.assertFalse(model_floor.below_floor("gpt-daybreak-blue-latest"))
 
+    def test_orders_oversized_version_components(self):
+        for version, expected in (
+            ("9" * 5000, False),
+            ("6." + "9" * 5000, False),
+            ("5." + "9" * 5000, True),
+            ("０" * 5000 + "６.０１", True),
+        ):
+            model_id = "gpt-" + version
+            with self.subTest(length=len(version), suffix=version[-8:]):
+                self.assertEqual(model_floor.below_floor("openai/" + model_id), expected)
+                old = "gpt-6.1"
+                self.assertEqual(model_floor.old_ids(f"{model_id} {old}"),
+                                 [model_id, old] if expected else [old])
+
 
 class TestScan(unittest.TestCase):
     def setUp(self):
@@ -91,6 +105,14 @@ class TestScan(unittest.TestCase):
         rc, out, _ = self.run_main(os.path.join(self.root, "b.toml"))
         self.assertEqual(rc, 1)
         self.assertEqual(self.run_main(os.path.join(self.root, "missing"))[0], 2)
+
+    def test_scan_continues_after_oversized_version(self):
+        self.write("a.toml", "model = gpt-6." + "9" * 5000 + "\n")
+        self.write("b.toml", "model = gpt-6.1\n")
+        rc, out, err = self.run_main(self.root)
+        self.assertEqual(rc, 1)
+        self.assertIn("b.toml:1: gpt-6.1:", out)
+        self.assertIn("1 id(s) below GPT-6.2", err)
 
     def test_a_git_checkout_scans_only_tracked_and_new_files(self):
         import subprocess
