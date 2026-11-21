@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bind nested admission to the requested slot pool, including symlink
+  aliases of its directory.
+- Validate the inherited lock descriptor before reusing admission. Acquire
+  normally when the descriptor was closed or points to a different file.
+
 - Limit `--slots` and `HEAVY_SLOTS` to 1–64 before constructing slot paths.
 
 - Try to acquire a slot when a nested call inherits `HEAVY_SLOT_HELD=none`.

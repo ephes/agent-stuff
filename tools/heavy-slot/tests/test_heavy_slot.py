@@ -194,6 +194,48 @@ class CapTest(Fixture):
         rc, out, err = self.finish(self.start("--", "sh", "-c", inner))
         self.assertEqual((rc, out), (0, "inner\n"), err)
 
+    def test_nested_call_acquires_a_slot_in_another_pool(self):
+        other = self.tmp / "other"
+        rc, out, err = self.finish(self.start(
+            "--", sys.executable, str(BIN), "--dir", str(other), "--max-wait", "0.3",
+            "--", sys.executable, str(BIN), "--dir", str(other), "--status",
+        ))
+        self.assertEqual(rc, 0, err)
+        self.assertIn("slot-0.lock\theld\t", out)
+
+    def test_nested_call_recognizes_a_symlink_alias_of_the_pool(self):
+        alias = self.tmp / "alias"
+        self.dir.mkdir()
+        alias.symlink_to(self.dir, target_is_directory=True)
+        rc, out, err = self.finish(self.start(
+            "--", sys.executable, str(BIN), "--dir", str(alias), "--max-wait", "0.3", "--", "echo", "inner",
+        ))
+        self.assertEqual((rc, out), (0, "inner\n"), err)
+
+    def test_nested_call_waits_when_a_launcher_drops_or_replaces_the_lock(self):
+        launch = """
+import os
+import subprocess
+import sys
+
+replacement, *command = sys.argv[1:]
+pass_fds = ()
+if replacement:
+    fd = int(os.environ.get("HEAVY_SLOT_HELD_FD", "200"))
+    original = os.dup(fd)  # the launcher still holds the outer lock while it waits
+    other = os.open(replacement, os.O_RDWR)
+    os.dup2(other, fd)
+    pass_fds = (fd,)
+raise SystemExit(subprocess.call(command, pass_fds=pass_fds))
+"""
+        for replacement in ("", os.devnull, str(self.dir / "slot-0.lock")):
+            with self.subTest(replacement=replacement):
+                rc, out, err = self.finish(self.start(
+                    "--", sys.executable, "-c", launch, replacement,
+                    sys.executable, str(BIN), "--max-wait", "0.3", "--", "echo", "inner",
+                ))
+                self.assertEqual((rc, out), (hs.EX_TEMPFAIL, ""), err)
+
     def test_nested_call_acquires_a_slot_after_unguarded_parent(self):
         blocker = self.tmp / "file"
         blocker.touch()

@@ -45,9 +45,13 @@ step at once.
   forever. Both `--max-wait` and `HEAVY_SLOT_MAX_WAIT` require finite,
   nonnegative seconds. Invalid values are rejected before accessing slots or
   running the command.
-- The command gets `HEAVY_SLOT_HELD=<slot file>`. A heavy-slot call inside a
-  slot (for example a `just test` that wraps its own steps) runs at once, so
-  nesting cannot deadlock.
+- The command gets `HEAVY_SLOT_HELD=<slot file>`,
+  `HEAVY_SLOT_HELD_DIR=<canonical pool directory>` and
+  `HEAVY_SLOT_HELD_FD=<inherited descriptor>`. A nested call can reuse
+  admission when the slot belongs to its requested pool and the descriptor
+  still holds that slot. Directory symlink aliases refer to the same pool.
+  A launcher that closes the lock descriptor makes its nested call go
+  through normal acquisition, which can wait while the parent holds the slot.
 - Slot directory not usable (cannot be created or written, e.g. a sandbox
   without it as a writable root) before the deadline: a `WARNING … running WITHOUT a slot` line,
   and the command runs (`HEAVY_SLOT_HELD=none`). Nested calls after an

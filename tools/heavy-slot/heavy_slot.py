@@ -7,7 +7,7 @@ descriptor on. The command therefore has heavy-slot's pid, gets every signal dir
 its own status, and the slot stays taken as long as any process holding that descriptor lives (the
 command and the children it starts without closing inherited descriptors). The kernel releases the
 lock when the last of them exits in any way, so a slot can never stay stale. A command that is already
-inside a slot (``HEAVY_SLOT_HELD`` names a slot) runs at once, so nested use cannot deadlock.
+inside a slot can run at once when it requests the same pool and still holds the slot descriptor.
 
 Python 3 stdlib only (3.9+). See README.md.
 """
@@ -163,10 +163,32 @@ def status(paths: list[Path]) -> int:
     return 0
 
 
-def become(command: list[str], held: str) -> int:
+def inherited_slot_fd(path: Path) -> int | None:
+    try:
+        fd = int(os.environ.get("HEAVY_SLOT_HELD_FD", ""))
+        if fd <= 2:
+            return None
+        inherited = os.fstat(fd)
+        current = path.lstat()
+        if not stat.S_ISREG(current.st_mode) or current.st_nlink != 1 or not os.path.samestat(inherited, current):
+            return None
+        # A separately opened descriptor to the same inode does not share an existing lock.
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, ValueError, OverflowError):
+        return None
+    return fd
+
+
+def become(command: list[str], held: str, pool: str | None = None, fd: int | None = None) -> int:
     """Replace this process with ``command`` (returns only when it cannot be started)."""
 
     os.environ["HEAVY_SLOT_HELD"] = held
+    if pool is None:
+        os.environ.pop("HEAVY_SLOT_HELD_DIR", None)
+        os.environ.pop("HEAVY_SLOT_HELD_FD", None)
+    else:
+        os.environ["HEAVY_SLOT_HELD_DIR"] = pool
+        os.environ["HEAVY_SLOT_HELD_FD"] = str(fd)
     for stream in (sys.stdout, sys.stderr):  # None when the caller closed that descriptor
         if stream is not None:
             try:
@@ -229,12 +251,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.status and not command:
         warn("heavy-slot: no command (usage: heavy-slot [options] -- COMMAND [ARGS...])")
         return EX_USAGE
-    held = os.environ.get("HEAVY_SLOT_HELD")
-    if held and held != UNGUARDED and not args.status:
-        return become(command, held)  # nested: must not wait for itself
     paths = slot_paths(directory, slots)
     if args.status:
         return status(paths)
+    pool = os.path.realpath(directory)
+    held = os.environ.get("HEAVY_SLOT_HELD")
+    if held and os.environ.get("HEAVY_SLOT_HELD_DIR") == pool:
+        path = directory / held
+        if path in paths:
+            fd = inherited_slot_fd(path)
+            if fd is not None:
+                return become(command, path.name, pool, fd)
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -293,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     if announced:
         warn(f"heavy-slot: got {path.name} after {time.monotonic() - started:.0f} s")
     os.set_inheritable(high, True)  # the command (same pid after exec) and its children keep the lock
-    rc = become(command, path.name)
+    rc = become(command, path.name, pool, high)
     os.close(high)
     return rc
 
