@@ -150,6 +150,11 @@ class TestScan(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn(r"missing-\udcff.md", err)
 
+    def test_display_path_keeps_windows_separators(self):
+        self.assertEqual(model_floor._display_path("a\\b\n.md"), r"a\\b\n.md")
+        with patch.object(model_floor.os, "sep", "\\"):
+            self.assertEqual(model_floor._display_path("a\\b\n.md"), r"a\b\n.md")
+
     def test_git_diagnostics_escape_undecodable_paths(self):
         name = b"kept-\xff.md"
         try:

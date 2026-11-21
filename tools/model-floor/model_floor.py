@@ -164,9 +164,15 @@ def scan(root, extra_allow=()):
 
 
 def _display_path(path):
-    """Keep a diagnostic on one line and escape undecodable filename bytes."""
+    """Keep a diagnostic on one line and escape undecodable filename bytes.
+
+    A backslash is doubled only where it can be part of a filename; on
+    Windows it is the path separator and stays as written.
+    """
+    if os.sep != "\\":
+        path = path.replace("\\", "\\\\")
     return "".join(char if char.isprintable() else ascii(char)[1:-1]
-                   for char in path.replace("\\", "\\\\"))
+                   for char in path)
 
 
 def main(argv=None):

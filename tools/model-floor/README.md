@@ -14,8 +14,9 @@ tools/model-floor/bin/model-floor-check path/to/run.sh path/to/COMMON.md   # sin
 
 Output: one line per finding, `path:line: id: text`. Exit 0 clean, 1 findings,
 2 a path that does not exist.
-Diagnostic paths escape backslashes, non-printable characters and undecodable
-filename bytes (shown as filesystem surrogate escapes such as `\udcff`).
+Diagnostic paths escape backslashes (except on Windows, where they separate
+path components), non-printable characters and undecodable filename bytes
+(shown as filesystem surrogate escapes such as `\udcff`).
 
 ## What counts
 
