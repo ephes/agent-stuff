@@ -15,11 +15,13 @@ Python 3 stdlib only (3.9+). See README.md.
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import math
 import os
 import resource
 import signal
+import stat
 import sys
 import time
 from pathlib import Path
@@ -81,11 +83,24 @@ def slot_paths(directory: Path, slots: int) -> list[Path]:
     return [directory / f"slot-{k}.lock" for k in range(slots)]
 
 
+def open_slot(path: Path, flags: int) -> int:
+    # A FIFO must not block open before its type can be checked.
+    fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o644)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise OSError(errno.EINVAL, "slot requires a regular file with one link", str(path))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
     """An open fd holding the first free slot's lock, or None when all are taken."""
 
     for path in paths:
-        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = open_slot(path, os.O_RDWR | os.O_CREAT)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -98,18 +113,28 @@ def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
     return None
 
 
-def is_held(path: Path) -> bool:
+def slot_state(path: Path, *, read_holder: bool = False) -> tuple[bool, str]:
     try:
-        fd = os.open(path, os.O_RDONLY)
+        fd = open_slot(path, os.O_RDONLY)
     except FileNotFoundError:
-        return False
+        return False, ""
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        return True
+        if read_holder:
+            try:
+                with open(fd, encoding="utf-8", errors="replace", closefd=False) as stream:
+                    return True, single_line(stream.read(200))
+            except OSError:
+                pass  # The lock probe succeeded even if the holder line is unreadable.
+        return True, ""
     finally:
         os.close(fd)
-    return False
+    return False, ""
+
+
+def is_held(path: Path) -> bool:
+    return slot_state(path)[0]
 
 
 def single_line(text: str) -> str:
@@ -120,18 +145,19 @@ def holder(path: Path) -> str:
     """The holder line of a held slot (a free slot's file may still name its last holder)."""
 
     try:
-        if is_held(path):
-            with path.open(encoding="utf-8", errors="replace") as stream:
-                return single_line(stream.read(200))
-        return ""
+        return slot_state(path, read_holder=True)[1]
     except OSError:
         return ""
 
 
 def status(paths: list[Path]) -> int:
     for path in paths:
-        line = holder(path)
-        print(f"{path.name}\t" + (f"held\t{line}" if is_held(path) else "free"))
+        try:
+            held, line = slot_state(path, read_holder=True)
+        except OSError:
+            print(f"{path.name}\tunavailable")
+        else:
+            print(f"{path.name}\t" + (f"held\t{line}" if held else "free"))
     return 0
 
 

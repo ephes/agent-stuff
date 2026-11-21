@@ -26,6 +26,10 @@ step at once.
   (`exec`), passing the locked descriptor on. There is no wrapper process:
   the command has heavy-slot's pid, receives every signal directly (Ctrl-C,
   a tool timeout, `kill`) and exits with its own status.
+- A slot must be a regular file with exactly one filesystem link.
+  heavy-slot rejects symlinks, hard-linked files and special files as
+  unusable slots. `--status` lists rejected entries as `unavailable` and
+  reads holder metadata from the same descriptor it checks for a lock.
 - The slot stays taken as long as any process holding that descriptor
   lives: the command and the children it starts without closing inherited
   descriptors (shell children do; Python's `subprocess` closes them by

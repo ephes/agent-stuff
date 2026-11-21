@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 TOOL = Path(__file__).resolve().parents[1]
 BIN = TOOL / "bin" / "heavy-slot"
@@ -173,6 +174,64 @@ class CapTest(Fixture):
         self.assertEqual(rc, hs.EX_TEMPFAIL)
         rc, out, _ = self.finish(self.start("--max-wait", "10", "--", "echo", "later"))
         self.assertEqual((rc, out), (0, "later\n"))
+
+class SlotFileTest(Fixture):
+    def test_aliases_leave_target_untouched(self):
+        self.dir.mkdir()
+        path = self.dir / "slot-0.lock"
+        target = self.tmp / "unrelated"
+        for link in (path.symlink_to, path.hardlink_to):
+            with self.subTest(link=link.__name__):
+                target.write_bytes(b"unrelated data\n")
+                link(target)
+                try:
+                    rc, out, err = self.finish(self.start("--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"'))
+                    self.assertEqual(target.read_bytes(), b"unrelated data\n")
+                    self.assertEqual((rc, out), (0, "none\n"))
+                    self.assertIn("running WITHOUT a slot", err)
+                finally:
+                    path.unlink()
+
+    def test_status_does_not_read_holder_through_symlink(self):
+        self.hold("other.lock")
+        path = self.dir / "slot-0.lock"
+        path.symlink_to("other.lock")
+        self.assertEqual(hs.holder(path), "")
+        rc, out, _ = self.finish(self.start("--status"))
+        self.assertEqual((rc, out), (0, "slot-0.lock\tunavailable\n"))
+
+    def test_holder_reads_the_probed_inode_if_the_path_is_replaced(self):
+        path = self.dir / "slot-0.lock"
+        self.hold()
+        flock = fcntl.flock
+
+        def replace_then_flock(fd, operation):
+            path.rename(self.dir / "original.lock")
+            path.write_text("unrelated data")
+            return flock(fd, operation)
+
+        with mock.patch.object(fcntl, "flock", side_effect=replace_then_flock):
+            self.assertEqual(hs.holder(path), "pid 1 since 00:00:00: test holder")
+
+    def test_fifo_slot_is_rejected_without_blocking(self):
+        self.dir.mkdir()
+        os.mkfifo(self.dir / "slot-0.lock")
+        rc, out, err = self.finish(self.start("--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"'), timeout=5)
+        self.assertEqual((rc, out), (0, "none\n"))
+        self.assertIn("running WITHOUT a slot", err)
+        rc, out, _ = self.finish(self.start("--status"), timeout=5)
+        self.assertEqual((rc, out), (0, "slot-0.lock\tunavailable\n"))
+
+    def test_contenders_reuse_the_same_regular_inode(self):
+        path = self.dir / "slot-0.lock"
+        fd = self.hold()
+        self.assertIsNone(hs.try_acquire([path]))
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        acquired, slot = hs.try_acquire([path])
+        self.addCleanup(os.close, acquired)
+        self.assertEqual(slot, path)
+        self.assertTrue(os.path.samestat(os.fstat(fd), os.fstat(acquired)))
+
 
 class RunTest(Fixture):
     def test_exit_code_passes_through(self):

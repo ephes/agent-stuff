@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Admit only regular single-link slot files and read status metadata from
+  the same descriptor used to check the lock. Unusable slots use the
+  existing warning and unguarded execution behavior.
+
 - Use the executable basename as the default slot label. Keep labels on a
   single bounded line in slot files and diagnostics. Explicit labels remain
   in the lock file after the command exits.
