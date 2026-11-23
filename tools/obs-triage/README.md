@@ -9,8 +9,14 @@ core is an open-ended review of the last 24 hours of raw logs and metrics
 by an LLM that forms its own hypotheses and drills down. macmini builds a
 deterministic evidence pack every morning (ops-deploy `services.obs_daily`,
 ops-control `docs/OBSERVABILITY_ROUTINE.md`) that helps it navigate without
-filtering anything; this tool runs the review with Codex and files what is
+filtering anything; this tool runs the review with Claude and files what is
 new.
+
+Model: `claude-opus-5-5` (effort medium) on the claude-katharina account
+(`CLAUDE_CONFIG_DIR=~/.claude-katharina`), since 2026-11-23. Until then the
+review ran on Codex (`gpt-6.2-sol`, last run 2026-11-21); the owner stopped all OpenAI use on
+2026-11-21 ("bitte nichts mehr über openai laufen lassen ... wenn dann
+claude-katharina"), and the triage was skipped every day from 22.11. on.
 
 ```sh
 tools/obs-triage/bin/obs-triage run              # the daily triage (LaunchAgent, 07:30)
@@ -32,17 +38,19 @@ tools/obs-triage/bin/obs-triage weekly           # start the weekly review worke
    changed (or dropped) in the last 21 days, as slug, stage, project and title
    only (`work items --json`; an incomplete list fails the run).
 4. The review, in rounds (at most `MAX_ROUNDS` = 6, 150 minutes in all, 25
-   per round). Each round runs `codex-quota-guard` first (exit 3, limit used
-   up, skips the day) and then ONE locked-down Codex call, as
-   `codex-review-loop` starts its reviewer: `codex -a never exec
-   --ignore-user-config --ignore-rules --ephemeral -m gpt-6.2-sol -c
-   model_reasoning_effort="medium"` with a named permission profile (minimal
-   system paths readable, temporary directories denied, only a fresh work
-   directory under the state directory writable, no network for commands),
-   web search, agents, apps, plugins, MCP and the other optional features
-   off, an untrusted project, no project or skill instructions, an
-   allowlisted environment with a pinned `CODEX_HOME` (the one the guard
-   reads), `--output-schema triage-schema.json`, the prompt on standard
+   per round). Each round is ONE headless Claude call without tools:
+   `claude -p --model claude-opus-5-5 --effort medium --output-format json
+   --no-session-persistence --permission-mode dontAsk --tools "" --restricted
+   --safe-mode --disable-slash-commands --setting-sources ""
+   --strict-mcp-config --mcp-config '{"mcpServers":{}}' --json-schema
+   <triage-schema.json>`: no built-in tools (no commands, files or network),
+   no user, project or local settings, hooks, CLAUDE.md, skills, plugins,
+   slash commands or MCP servers, no saved session and no `--fallback-model`.
+   It starts in a fresh work directory under the state directory (also its
+   `CLAUDE_CODE_TMPDIR`, removed after the round) with an allowlisted
+   environment (no `ANTHROPIC_*` key, token or base URL, no `CLAUDE_CODE_*`
+   overrides) and a pinned `CLAUDE_CONFIG_DIR` (`~/.claude-katharina`, the
+   login it uses), the prompt on standard
    input; SIGTERM/SIGINT kill the process group it started. The prompt is
    the brief (`triage-brief.md`), the pack, the launchd jobs and the items
    (the same in every round, first, so the provider can cache it), then the
@@ -56,14 +64,17 @@ tools/obs-triage/bin/obs-triage weekly           # start the weekly review worke
    comes back as an error the model can react to. Results carried into later rounds stay below 600 KiB (older
    rounds' results give way first; the notes stay). The last round, or one
    started without room for queries and a final round of 20 minutes, must
-   answer; one budget covers the quota guard, the rounds and the queries,
+   answer; one budget covers the rounds and the queries,
    and a round is never started with less than a minute left (the day is
    then `skipped`). A last round that still asks for queries is filed but
    reported as `failed` ("Untersuchung nicht abgeschlossen").
-   The answer must have the schema's shape.
-5. Raw log text reaches the model provider (owner decision 2026-11-19,
-   recorded as an accepted residual risk in ops-deploy
-   `docs/services/obs_daily.md`); the brief asks the model to report secrets
+   The answer is the result event's `structured_output` and must have the
+   schema's shape; the event's `modelUsage` must name `claude-opus-5-5` and
+   no other model.
+5. Raw log text reaches the model provider, now Anthropic (owner decision
+   2026-11-19, recorded as an accepted residual risk in ops-deploy
+   `docs/services/obs_daily.md`; the provider changed with the owner's
+   2026-11-21 "wenn dann claude-katharina"); the brief asks the model to report secrets
    only as markers `[secret:<type> abc…(12)]` (see 6).
 6. Each valid finding becomes a work item `obs-<date>-<n>` (numbered over
    the day's reruns; never taken from model text, because the slug is what
@@ -133,11 +144,12 @@ tools/obs-triage/bin/obs-triage weekly           # start the weekly review worke
    lost is sent again (a repeat rather than a loss). No new item and no
    problem: no message.
 
-When Codex cannot run in any round (quota guard, missing binary, non-zero
-exit, timeout, an answer of the wrong shape) there is **no fallback to
-another model**: the
-day is `skipped` and the message says `übersprungen` with the reason (a
-fixed text and exit code; Codex's own diagnostics stay in the log). Any
+When Claude cannot run in any round (missing binary, an error result or
+non-zero exit, the usage limit (HTTP 429: "Claude-Kontingent ist
+aufgebraucht"), a timeout, an answer from another model or of the wrong
+shape) there is **no fallback to another model**: the day is `skipped` and
+the message says `übersprungen` with the reason (a fixed text with the exit
+code or HTTP status; Claude's own diagnostics stay in the log). Any
 other failure (pack, ledger list) is `failed` with its error type; details
 are in the log. macmini keeps each
 result; its status endpoint reports the triage age to Nyxmon ("Daily
@@ -186,7 +198,8 @@ only for new findings (campaign `obs-weekly`). Its report lands in
 | `OBS_TRIAGE_CTL` | `/usr/bin/python3 -I /usr/local/lib/obs-daily/obs_ctl.py --config /etc/obs-daily/config.json` |
 | `OBS_TRIAGE_STATE` | `~/.local/state/obs-triage` |
 | `OBS_TRIAGE_KATHARINA` | `~/workspaces/ws-work-planning/coordination/katharina` |
-| `OBS_TRIAGE_SSH_BIN`, `OBS_TRIAGE_WORK_BIN`, `OBS_TRIAGE_CODEX_BIN`, `OBS_TRIAGE_QUOTA_GUARD`, `OBS_TRIAGE_LAUNCHCTL` | `ssh`, `work`, `codex`, `~/projects/agent-stuff/tools/codex-quota-guard/bin/codex-quota-guard`, `launchctl` |
+| `OBS_TRIAGE_CLAUDE_CONFIG_DIR` | `~/.claude-katharina` |
+| `OBS_TRIAGE_SSH_BIN`, `OBS_TRIAGE_WORK_BIN`, `OBS_TRIAGE_CLAUDE_BIN`, `OBS_TRIAGE_LAUNCHCTL` | `ssh`, `work`, `claude`, `launchctl` |
 
 ## Studio install
 
@@ -206,4 +219,4 @@ fast-forwarded to a commit that contains this tool.
 cd tools/obs-triage && python3.14 -m unittest discover -s tests -t .
 ```
 
-Hermetic: stub `ssh`, `work`, `codex` and quota-guard scripts.
+Hermetic: stub `ssh`, `work` and `claude` scripts.

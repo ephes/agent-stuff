@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- The review runs on Claude instead of Codex: `claude-opus-5-5` (effort
+  medium) on the claude-katharina account, as one headless `claude -p` per
+  round without tools (`--tools ""`, `--restricted`, `--safe-mode`, no
+  settings, hooks, skills, plugins or MCP servers, no saved session, no
+  fallback model) and with the schema as `--json-schema`, in a fresh work
+  directory with an allowlisted environment and a pinned
+  `CLAUDE_CONFIG_DIR=~/.claude-katharina`. An answer from any other model is
+  refused. The owner stopped all OpenAI use on 2026-11-21, so the triage had
+  been skipped every day since 22.11. (and Nyxmon's "Daily evidence pack and
+  triage fresh" stayed critical). The Codex quota guard is gone; a used-up
+  Claude limit (HTTP 429) skips the day as "Claude-Kontingent ist
+  aufgebraucht (HTTP 429)", other failures with their exit code or HTTP
+  status. Input pack, prompt, schema, rounds, ledger writes and the
+  Telegram digest are unchanged; the old Codex skip reasons still pass the
+  digest check for results waiting in the outbox.
+  `OBS_TRIAGE_CODEX_BIN`, `OBS_TRIAGE_QUOTA_GUARD` and `OBS_TRIAGE_CODEX_HOME`
+  became `OBS_TRIAGE_CLAUDE_BIN` and `OBS_TRIAGE_CLAUDE_CONFIG_DIR`.
+
 - `launchd-check` skips a plist launchd has not loaded (`launchctl print`
   exit 113, "Could not find service") instead of counting it in `errors`:
   on the Studio five jobs kept unloaded on purpose (opsgate API and runner,

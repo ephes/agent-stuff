@@ -7,15 +7,16 @@ Python 3 stdlib only. Three subcommands:
     macmini built (``obs_ctl.py pack`` over root SSH: an inventory of hosts,
     services and volumes, raw log samples, changes against the baseline),
     add the Studio's own launchd picture and the ledger's items, and let
-    Codex (``gpt-6.2-sol``, medium, read-only sandbox, no network, structured
-    output) review the last 24 hours open-endedly. In up to ``MAX_ROUNDS``
+    Claude (``claude-opus-5-5``, medium effort, on the claude-katharina
+    account; no tools, no network, structured output) review the last 24
+    hours open-endedly. In up to ``MAX_ROUNDS``
     rounds the model asks for read-only Loki and InfluxDB queries, which this
     tool runs on macmini (``obs_ctl.py query``) and hands back, until it
     decides what is genuinely new and worth attention. New findings
     become ledger items (stage ``idea``); the digest of new findings goes back
     to macmini (``obs_ctl.py deliver``), which sends it through Nyxmon's
-    Telegram notifier. No new finding: no message. When Codex cannot run
-    (quota guard, error, timeout) there is no fallback to another model: the
+    Telegram notifier. No new finding: no message. When Claude cannot run
+    (usage limit, error, timeout) there is no fallback to another model: the
     day is reported as "skipped" in one short message.
 ``launchd-check``
     Every ten minutes (LaunchAgent): Studio launchd jobs in a crash loop (runs
@@ -52,10 +53,13 @@ BRIEF = HERE / "triage-brief.md"
 SCHEMA = HERE / "triage-schema.json"
 WEEKLY_BRIEF = HERE / "weekly-brief.md"
 
-MODEL = "gpt-6.2-sol"
+# Owner 2026-11-21: nothing over OpenAI any more; the claude-katharina account instead.
+MODEL = "claude-opus-5-5"
 EFFORT = "medium"
-CODEX_TIMEOUT = 25 * 60  # one round
-MAX_ROUNDS = 6  # Codex calls per day: up to five with drill-down queries, then the answer
+CLAUDE_CONFIG_DIR = Path.home() / ".claude-katharina"
+MODEL_TIMEOUT = 25 * 60  # one round
+MIN_ROUND = 60  # no round starts with less time than this
+MAX_ROUNDS = 6  # model calls per day: up to five with drill-down queries, then the answer
 TRIAGE_BUDGET = 150 * 60  # all rounds together
 FINAL_RESERVE = 20 * 60  # with less left, the next round must answer
 MAX_ROUND_QUERIES = 8
@@ -151,13 +155,6 @@ def mask_secrets(text: str) -> str:
     return _MAIL.sub("<mail>", text)
 
 
-# Features of an interactive Codex that the triage must not have (as codex-review-loop disables them).
-DISABLED_FEATURES = (
-    "apps", "browser_use", "browser_use_external", "computer_use", "goals", "hooks", "image_generation",
-    "in_app_browser", "memories", "multi_agent", "plugins", "plugin_sharing", "realtime_conversation",
-    "remote_plugin", "skill_mcp_dependency_install", "skill_search", "sleep_tool", "tool_suggest",
-    "unbounded_connection_retries", "view_image", "workspace_dependencies", "worktrees",
-)  # fmt: skip
 PROJECT = re.compile(r"[a-z0-9][a-z0-9_.-]{0,40}")  # used with fullmatch
 OWN_LABELS = re.compile(r"^(de\.wersdoerfer\.|local\.|eu\.coreso\.|org\.ops-library\.|com\.ollama\.)")
 
@@ -324,7 +321,7 @@ def launchd_changes(jobs: list[dict[str, Any]], previous: dict[str, int]) -> lis
     return changes
 
 
-# -- the Codex run ---------------------------------------------------------------------------------
+# -- the model run ---------------------------------------------------------------------------------
 
 
 def prompt(pack: dict[str, Any], items: list[dict[str, str]], launchd: dict[str, Any]) -> str:
@@ -395,21 +392,21 @@ def drill_down(queries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def investigate(base: str, report: dict[str, Any]) -> dict[str, Any]:
-    """Rounds of Codex with drill-down queries in between, within ``TRIAGE_BUDGET``; the final answer."""
+    """Rounds of Claude with drill-down queries in between, within ``TRIAGE_BUDGET``; the final answer."""
 
     started = time.monotonic()
     rounds: list[dict[str, Any]] = []
     report["rounds"] = []
     for number in range(1, MAX_ROUNDS + 1):
-        # One budget for everything (quota guard, rounds, queries). A round that may still ask for
+        # One budget for everything (rounds and queries). A round that may still ask for
         # queries must leave room for them and for a final round of FINAL_RESERVE.
         left = TRIAGE_BUDGET - (time.monotonic() - started)
         room = left - FINAL_RESERVE - QUERY_TIMEOUT
         final = number == MAX_ROUNDS or room < 5 * 60
-        timeout = int(min(CODEX_TIMEOUT, left if final else room))
-        if timeout < 60:
+        timeout = int(min(MODEL_TIMEOUT, left if final else room))
+        if timeout < MIN_ROUND:
             raise Skipped("das Zeitbudget der Untersuchung ist aufgebraucht")
-        answer = run_codex(round_prompt(base, rounds, number, final), timeout=timeout)
+        answer = run_model(round_prompt(base, rounds, number, final), timeout=timeout)
         queries = [q for q in answer.get("queries", []) if isinstance(q, dict)]
         summary = {"round": number, "seconds": round(time.monotonic() - started), "queries": len(queries)}
         report["rounds"].append(summary)
@@ -436,8 +433,8 @@ def investigate(base: str, report: dict[str, Any]) -> dict[str, Any]:
 _RUNNING: list[subprocess.Popen[str]] = []
 
 
-def _stop_codex(signum: int, _frame: Any) -> None:
-    """SIGTERM/SIGINT (launchd stopping the job): take the Codex process group down too, then exit."""
+def _stop_model(signum: int, _frame: Any) -> None:
+    """SIGTERM/SIGINT (launchd stopping the job): take the Claude process group down too, then exit."""
 
     for process in _RUNNING:
         with contextlib.suppress(ProcessLookupError):
@@ -449,118 +446,111 @@ ENV_ALLOW = ("HOME", "USER", "LOGNAME", "PATH", "SHELL", "TMPDIR", "TERM", "LANG
              "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY")  # fmt: skip
 
 
-def codex_env() -> dict[str, str]:
-    """An allowlisted environment (no OPENAI_BASE_URL or other overrides) with a pinned CODEX_HOME,
-    the same one the quota guard reads."""
+def model_env(work: Path) -> dict[str, str]:
+    """An allowlisted environment (no ``ANTHROPIC_*`` key, token or base URL, no ``CLAUDE_CODE_*``
+    overrides) with a pinned ``CLAUDE_CONFIG_DIR``: the claude-katharina login, never another."""
 
     pinned = {key: os.environ[key] for key in ENV_ALLOW if key in os.environ}
-    pinned["CODEX_HOME"] = env("OBS_TRIAGE_CODEX_HOME", str(Path.home() / ".codex"))
+    pinned["CLAUDE_CONFIG_DIR"] = env("OBS_TRIAGE_CLAUDE_CONFIG_DIR", str(CLAUDE_CONFIG_DIR))
+    pinned["CLAUDE_CODE_TMPDIR"] = str(work.resolve())
     return pinned
 
 
-def toml_string(value: str) -> str:
-    return json.dumps(value)
+def claude_argv(schema: Path) -> list[str]:
+    """A headless Claude without tools: no built-in tools (so no commands, files or network), no
+    user, project or local settings, hooks, CLAUDE.md, skills, plugins, slash commands or MCP
+    servers, no saved session, no fallback model; the answer in the schema's shape."""
 
-
-def codex_argv(work: Path, schema: Path, out: Path) -> list[str]:
-    """A locked-down, tool-poor Codex: no user config, MCP servers, plugins, apps, agents or web
-    search; commands see only ``work`` (writable) and the minimal system paths, without network."""
-
-    profile = "obs_triage"
-    entries = [(":minimal", "read"), ("/tmp", "deny"), ("/private/tmp", "deny"), ("/private/var/folders", "deny")]
-    entries.append((str(work.resolve()), "write"))
-    filesystem = "{" + ",".join(f"{toml_string(k)}={toml_string(v)}" for k, v in entries) + "}"
-    argv = [
-        env("OBS_TRIAGE_CODEX_BIN", "codex"), "-a", "never", "exec",
-        "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral",
-        "-C", str(work.resolve()), "-m", MODEL,
-        "-c", f"model_reasoning_effort={toml_string(EFFORT)}",
-        "-c", f"default_permissions={toml_string(profile)}",
-        "-c", f"permissions.{profile}.filesystem={filesystem}",
-        "-c", f"permissions.{profile}.network.enabled=false",
-        "-c", 'web_search="disabled"', "-c", "agents.enabled=false",
-        "-c", 'shell_environment_policy.inherit="core"',
-        "-c", f'projects={{{toml_string(str(work.resolve()))}={{trust_level="untrusted"}}}}',
-        "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
-        "-c", "include_apps_instructions=false", "-c", "include_collaboration_mode_instructions=false",
+    return [
+        env("OBS_TRIAGE_CLAUDE_BIN", "claude"), "-p",
+        "--model", MODEL, "--effort", EFFORT,
+        "--output-format", "json", "--no-session-persistence",
+        "--permission-mode", "dontAsk", "--tools", "", "--restricted",
+        "--safe-mode", "--disable-slash-commands", "--setting-sources", "",
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        "--json-schema", json.dumps(json.loads(schema.read_text()), separators=(",", ":")),
     ]  # fmt: skip
-    for feature in DISABLED_FEATURES:
-        argv += ["--disable", feature]
-    return argv + ["--output-schema", str(schema), "-o", str(out), "-"]
 
 
-def run_codex(text: str, timeout: int = CODEX_TIMEOUT) -> dict[str, Any]:
-    """One bounded, locked-down Codex run with structured output; Skipped on any failure to run.
-    ``timeout`` covers the quota guard too."""
+def run_model(text: str, timeout: int = MODEL_TIMEOUT) -> dict[str, Any]:
+    """One bounded headless Claude run with structured output (the prompt on standard input);
+    Skipped on any failure to run."""
 
-    deadline = time.monotonic() + timeout
-    guard = env("OBS_TRIAGE_QUOTA_GUARD", str(Path.home() / "projects/agent-stuff/tools/codex-quota-guard/bin/codex-quota-guard"))
-    try:
-        checked = subprocess.run(
-            [guard, "--quiet"], capture_output=True, text=True, timeout=60, check=False, env=codex_env()
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise Skipped(f"codex-quota-guard lief nicht ({type(error).__name__})") from None
-    if checked.returncode == 3:
-        raise Skipped("Codex-Kontingent ist aufgebraucht (codex-quota-guard)")
-    if checked.returncode != 0:
-        raise Skipped(f"codex-quota-guard lief nicht (exit {checked.returncode})")
-    timeout = int(deadline - time.monotonic())
-    if timeout < 60:
+    if timeout < MIN_ROUND:
         raise Skipped("das Zeitbudget der Untersuchung ist aufgebraucht")
     root = state_dir() / "work"
     root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="run-", dir=root) as tmp:
         work = Path(tmp)
-        out = work / "answer.json"
         # Start and registration happen with SIGTERM/SIGINT held back, so a stop signal always finds
         # the process group in _RUNNING.
         signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT})
         try:
             process = subprocess.Popen(
-                codex_argv(work, SCHEMA, out),
+                claude_argv(SCHEMA),
+                cwd=work,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 errors="backslashreplace",
                 start_new_session=True,
-                env=codex_env(),
+                env=model_env(work),
             )
             _RUNNING.append(process)
         except OSError as error:
-            raise Skipped(f"Codex startete nicht ({type(error).__name__})") from None
+            raise Skipped(f"Claude startete nicht ({type(error).__name__})") from None
         finally:
             signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
         try:
-            _, stderr = process.communicate(text, timeout=timeout)
+            stdout, stderr = process.communicate(text, timeout=timeout)
         except subprocess.TimeoutExpired:
-            # The group was created by this Popen (start_new_session): only Codex and its children are in it.
+            # The group was created by this Popen (start_new_session): only Claude and its children are in it.
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
-            raise Skipped(f"Codex brauchte für eine Runde länger als {timeout // 60} Minuten") from None
+            raise Skipped(f"Claude brauchte für eine Runde länger als {timeout // 60} Minuten") from None
         finally:
             _RUNNING.remove(process)
-        if process.returncode != 0 or not out.exists():
-            # Codex's own diagnostics stay in the log; the message carries only the exit code.
-            last = (stderr or "").strip().splitlines()[-1:] or [""]
-            log(f"codex exit {process.returncode}: {last[0][:300]}")
-            raise Skipped(f"Codex endete mit exit {process.returncode}")
-        try:
-            answer = json.loads(out.read_text())
-        except ValueError:
-            answer = None
-        valid = (
-            isinstance(answer, dict)
-            and isinstance(answer.get("findings"), list)
-            and all(isinstance(f, dict) for f in answer["findings"])
-            and isinstance(answer.get("known"), list)
-            and all(isinstance(k, dict) for k in answer["known"])
-            and isinstance(answer.get("queries", []), list)
-        )
-        if not valid:
-            raise Skipped("Codex lieferte keine gültige Antwort")
-        return dict(answer)
+    return model_answer(process.returncode, stdout or "", stderr or "")
+
+
+def model_answer(returncode: int, stdout: str, stderr: str) -> dict[str, Any]:
+    """The structured answer from ``claude -p --output-format json``, or Skipped with a fixed reason
+    (Claude's own diagnostics stay in the log; the message carries only codes)."""
+
+    try:
+        event = json.loads(stdout)
+    except ValueError:
+        event = None
+    if not isinstance(event, dict) or event.get("type") != "result":
+        last = stderr.strip().splitlines()[-1:] or [""]
+        log(f"claude exit {returncode}: {last[0][:300]}")
+        raise Skipped(f"Claude endete mit exit {returncode}")
+    if event.get("is_error") or returncode != 0:
+        status = event.get("api_error_status")
+        log(f"claude exit {returncode}: {event.get('terminal_reason')} {status}: {str(event.get('result'))[:300]}")
+        if status == 429:
+            raise Skipped("Claude-Kontingent ist aufgebraucht (HTTP 429)")
+        if isinstance(status, int) and 100 <= status <= 599:
+            raise Skipped(f"Claude meldete einen API-Fehler (HTTP {status})")
+        raise Skipped(f"Claude endete mit exit {returncode}")
+    # No fallback: the round counts only when the requested model, and no other, answered it.
+    models = event.get("modelUsage")
+    if not isinstance(models, dict) or set(models) != {MODEL}:
+        log(f"claude answered with {sorted(models) if isinstance(models, dict) else models!r}, not {MODEL}")
+        raise Skipped("Claude antwortete nicht mit dem verlangten Modell")
+    answer = event.get("structured_output")
+    valid = (
+        isinstance(answer, dict)
+        and isinstance(answer.get("findings"), list)
+        and all(isinstance(f, dict) for f in answer["findings"])
+        and isinstance(answer.get("known"), list)
+        and all(isinstance(k, dict) for k in answer["known"])
+        and isinstance(answer.get("queries", []), list)
+    )
+    if not valid:
+        raise Skipped("Claude lieferte keine gültige Antwort")
+    return dict(answer)
 
 
 class Skipped(Exception):
@@ -753,6 +743,14 @@ DAY_FORMAT = 2
 _DATE = r"[0-9]{2}\.[0-9]{2}\.[0-9]{4}"
 _EXC = r"[A-Za-z]{2,40}(?:Error|Exception|Expired)"
 _SKIP_REASONS = (
+    rf"Claude startete nicht \({_EXC}\)",
+    r"Claude brauchte für eine Runde länger als [0-9]{1,3} Minuten",
+    r"Claude endete mit exit -?[0-9]{1,3}",
+    r"Claude-Kontingent ist aufgebraucht \(HTTP 429\)",
+    r"Claude meldete einen API-Fehler \(HTTP [0-9]{3}\)",
+    r"Claude antwortete nicht mit dem verlangten Modell",
+    r"Claude lieferte keine gültige Antwort",
+    # The Codex reasons (Codex ran until 2026-11-21, skipped from 22.11. until the switch): such results may still wait in the outbox.
     rf"codex-quota-guard lief nicht \((?:{_EXC}|exit -?[0-9]{{1,3}})\)",
     r"Codex-Kontingent ist aufgebraucht \(codex-quota-guard\)",
     rf"Codex startete nicht \({_EXC}\)",
@@ -869,8 +867,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     state = state_dir()
     (state / "runs").mkdir(exist_ok=True)
     (state / "days").mkdir(exist_ok=True)
-    signal.signal(signal.SIGTERM, _stop_codex)
-    signal.signal(signal.SIGINT, _stop_codex)
+    signal.signal(signal.SIGTERM, _stop_model)
+    signal.signal(signal.SIGINT, _stop_model)
     result: dict[str, Any] = {
         "date": today, "status": "ok", "detail": "", "message": "", "new_items": [], "ran_at": int(now),
         "id": f"{today}-{time.time_ns()}-{os.getpid()}",

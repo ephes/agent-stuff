@@ -5,8 +5,9 @@
     <!-- Managed by chezmoi; edit the source template, not this file.
 
          Daily at 07:30: the observability review. Fetches macmini's evidence
-         pack (built at 06:30) over root SSH, lets read-only Codex
-         (gpt-6.2-sol, medium; no fallback model) review the day with
+         pack (built at 06:30) over root SSH, lets Claude without tools
+         (claude-opus-5-5, medium, claude-katharina account; no fallback
+         model) review the day with
          drill-down queries on macmini (up to 150 minutes), files new
          findings as work items and sends one digest through Nyxmon's
          Telegram notifier.

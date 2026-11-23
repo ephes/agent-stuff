@@ -1,4 +1,4 @@
-"""obs-triage: hermetic tests with stub ssh, work, codex and quota-guard programs."""
+"""obs-triage: hermetic tests with stub ssh, work and claude programs."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def script(path: Path, body: str) -> str:
 class Stubs:
     """Stub programs in a temporary directory, wired through the OBS_TRIAGE_* variables."""
 
-    def __init__(self, root: Path, *, pack_date: str = TODAY, quota_exit: int = 0, answer: dict | None = None) -> None:
+    def __init__(self, root: Path, *, pack_date: str = TODAY, answer: dict | None = None) -> None:
         self.root = root
         (root / "pack.json").write_text(json.dumps({"date": pack_date, "logs": {}, "metrics": {}}))
         (root / "items.json").write_text(
@@ -71,15 +71,18 @@ class Stubs:
                 f'  upsert) printf "%s\\n" "$@" >> {root}/upserts.log; [ -n "$UPSERT_FAIL" ] && exit 1; echo "$2" >> {root}/created.log ;;\n'
                 f"esac\n",
             ),
-            "OBS_TRIAGE_CODEX_BIN": script(
-                root / "codex",
-                f'printf "%s\\n" "$@" > {root}/codex-args.log\ncat > {root}/prompt.txt\n'
+            # Prints what ``claude -p --output-format json --json-schema`` prints: one result event
+            # whose ``structured_output`` is the answer (``model.txt`` overrides the reported model).
+            "OBS_TRIAGE_CLAUDE_BIN": script(
+                root / "claude",
+                f'printf "%s\\n" "$@" > {root}/claude-args.log\nenv > {root}/claude-env.log; pwd > {root}/claude-cwd.log\n'
+                f'cat > {root}/prompt.txt\n'
                 f'n=$(( $(cat {root}/rounds 2>/dev/null || echo 0) + 1 )); echo $n > {root}/rounds\n'
                 f'cp {root}/prompt.txt {root}/prompt-$n.txt\n'
-                'out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done\n'
-                f'if [ -f {root}/answer-$n.json ]; then cp {root}/answer-$n.json "$out"; else cp {root}/answer.json "$out"; fi\n',
+                f'a={root}/answer.json; [ -f {root}/answer-$n.json ] && a={root}/answer-$n.json\n'
+                f'm=$(cat {root}/model.txt 2>/dev/null || echo {ot.MODEL})\n'
+                'printf \'{"type":"result","subtype":"success","is_error":false,"modelUsage":{"%s":{}},"structured_output":%s}\' "$m" "$(cat "$a")"\n',
             ),
-            "OBS_TRIAGE_QUOTA_GUARD": script(root / "guard", f"exit {quota_exit}\n"),
         }
 
     def delivered(self) -> dict:
@@ -109,7 +112,9 @@ class RunTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def run_with(self, stubs: Stubs, *args: str, deliver_exit: int = 0, queued: bool = True) -> int:
-        env = {**stubs.env, "DELIVER_EXIT": str(deliver_exit), "QUEUED": "1" if queued else "0"}
+        env = {**stubs.env, "DELIVER_EXIT": str(deliver_exit), "QUEUED": "1" if queued else "0",
+               # Never handed on: they would replace the claude-katharina login.
+               "ANTHROPIC_API_KEY": "sk-test", "CLAUDE_CODE_OAUTH_TOKEN": "test"}  # fmt: skip
         with mock.patch.dict(os.environ, env):
             return ot.main(["run", *args])
 
@@ -120,11 +125,26 @@ class RunTests(unittest.TestCase):
 
         result = stubs.delivered()
         self.assertEqual((result["status"], result["message"], result["new_items"]), ("ok", "", []))
-        args = (self.root / "codex-args.log").read_text().split("\n")
-        for expected in ("gpt-6.2-sol", 'model_reasoning_effort="medium"', "--output-schema", "--ephemeral",
-                         "--ignore-user-config", "agents.enabled=false", "permissions.obs_triage.network.enabled=false"):
-            self.assertIn(expected, args)
-        self.assertNotIn("danger-full-access", args)
+        args = (self.root / "claude-args.log").read_text().split("\n")
+        self.assertEqual(args[:5], ["-p", "--model", "claude-opus-5-5", "--effort", "medium"])
+        for flag in ("--restricted", "--safe-mode", "--disable-slash-commands", "--strict-mcp-config",
+                     "--no-session-persistence"):  # fmt: skip
+            self.assertIn(flag, args)
+        for flag, value in (("--tools", ""), ("--setting-sources", ""), ("--output-format", "json"),
+                            ("--permission-mode", "dontAsk"), ("--mcp-config", '{"mcpServers":{}}')):  # fmt: skip
+            self.assertEqual(args[args.index(flag) + 1], value, flag)
+        self.assertEqual(json.loads(args[args.index("--json-schema") + 1]), json.loads(ot.SCHEMA.read_text()))
+        for absent in ("--fallback-model", "--dangerously-skip-permissions", "--allowedTools", "--add-dir"):
+            self.assertNotIn(absent, args)
+        environment = dict(line.split("=", 1) for line in (self.root / "claude-env.log").read_text().splitlines()
+                           if "=" in line)  # fmt: skip
+        self.assertEqual(environment["CLAUDE_CONFIG_DIR"], str(Path.home() / ".claude-katharina"))
+        self.assertNotIn("ANTHROPIC_API_KEY", environment)
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", environment)
+        cwd = Path((self.root / "claude-cwd.log").read_text().strip()).resolve()
+        self.assertEqual(cwd.parent, (self.root / "state/work").resolve())
+        self.assertEqual(environment["CLAUDE_CODE_TMPDIR"], str(cwd))
+        self.assertFalse(cwd.exists())  # the fresh work directory is gone after the round
         prompt = (self.root / "prompt.txt").read_text()
         self.assertIn("Daily observability review", prompt)
         self.assertIn('"old-thing"', prompt)
@@ -167,15 +187,35 @@ class RunTests(unittest.TestCase):
         self.assertFalse((self.root / "upserts.log").exists())
         self.assertFalse((self.root / "delivered.json").exists())
 
-    def test_exhausted_quota_skips_without_any_other_model(self) -> None:
-        stubs = Stubs(self.root, quota_exit=3)
+    def test_a_used_up_limit_skips_without_any_other_model(self) -> None:
+        stubs = Stubs(self.root)
+        script(self.root / "claude", f"cat >/dev/null; echo x >> {self.root}/rounds\n"
+               "echo '{\"type\":\"result\",\"is_error\":true,\"api_error_status\":429,\"result\":\"limit\"}'; exit 1\n")
 
         self.assertEqual(self.run_with(stubs), 0)
 
         result = stubs.delivered()
         self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["detail"], "Claude-Kontingent ist aufgebraucht (HTTP 429)")
         self.assertIn("übersprungen", result["message"])
-        self.assertFalse((self.root / "codex-args.log").exists())
+        self.assertEqual((self.root / "rounds").read_text().split(), ["x"])  # one call, no retry elsewhere
+
+    def test_another_api_error_is_a_skip_with_its_status(self) -> None:
+        stubs = Stubs(self.root)
+        script(self.root / "claude", "cat >/dev/null\n"
+               "echo '{\"type\":\"result\",\"is_error\":true,\"api_error_status\":529,\"result\":\"overloaded hunter2\"}'; exit 1\n")
+        self.assertEqual(self.run_with(stubs), 0)
+        self.assertEqual(stubs.delivered()["detail"], "Claude meldete einen API-Fehler (HTTP 529)")
+        self.assertNotIn("hunter2", stubs.delivered()["message"])
+
+    def test_an_answer_from_another_model_is_a_skip(self) -> None:
+        for model in ("claude-sonnet-5-5", f"{ot.MODEL}\":{{}},\"claude-haiku-5-5"):
+            with self.subTest(model=model):
+                (self.root / "model.txt").write_text(model)
+                stubs = Stubs(self.root, answer={"findings": [finding("brand-new-thing")], "known": [], "note": ""})
+                self.assertEqual(self.run_with(stubs), 0)
+                self.assertEqual(stubs.delivered()["detail"], "Claude antwortete nicht mit dem verlangten Modell")
+                self.assertFalse((self.root / "upserts.log").exists())
 
     def test_a_stale_pack_fails_the_day_with_a_message(self) -> None:
         stubs = Stubs(self.root, pack_date="2020-01-01")
@@ -219,11 +259,12 @@ class RunTests(unittest.TestCase):
         self.assertEqual(stubs.delivered()["status"], "skipped")
         self.assertFalse((self.root / "rounds").exists())
 
-    def test_a_missing_codex_binary_is_a_skip(self) -> None:
+    def test_a_missing_claude_binary_is_a_skip(self) -> None:
         stubs = Stubs(self.root)
-        stubs.env["OBS_TRIAGE_CODEX_BIN"] = str(self.root / "no-such-codex")
+        stubs.env["OBS_TRIAGE_CLAUDE_BIN"] = str(self.root / "no-such-claude")
         self.assertEqual(self.run_with(stubs), 0)
         self.assertEqual(stubs.delivered()["status"], "skipped")
+        self.assertEqual(stubs.delivered()["detail"], "Claude startete nicht (FileNotFoundError)")
 
     def test_an_incomplete_ledger_list_fails_closed(self) -> None:
         stubs = Stubs(self.root)
@@ -232,17 +273,31 @@ class RunTests(unittest.TestCase):
         (self.root / "items.json").write_text(json.dumps(data))
         self.assertEqual(self.run_with(stubs), 0)
         self.assertEqual(stubs.delivered()["status"], "failed")
-        self.assertFalse((self.root / "codex-args.log").exists())
+        self.assertFalse((self.root / "claude-args.log").exists())
 
-    def test_codex_failure_is_a_skip(self) -> None:
+    def test_claude_failure_is_a_skip(self) -> None:
         stubs = Stubs(self.root)
-        script(self.root / "codex", "cat >/dev/null; echo boom >&2; exit 4\n")
+        script(self.root / "claude", "cat >/dev/null; echo boom >&2; exit 4\n")
 
         self.assertEqual(self.run_with(stubs), 0)
 
         self.assertEqual(stubs.delivered()["status"], "skipped")
-        self.assertEqual(stubs.delivered()["detail"], "Codex endete mit exit 4")
+        self.assertEqual(stubs.delivered()["detail"], "Claude endete mit exit 4")
         self.assertNotIn("boom", stubs.delivered()["message"])
+
+    def test_a_round_over_its_time_is_a_skip_and_its_process_group_is_killed(self) -> None:
+        stubs = Stubs(self.root)
+        script(self.root / "claude", f"cat >/dev/null; sleep 30 & echo $! > {self.root}/child.pid; wait\n")
+        started = time.monotonic()
+        with mock.patch.dict(os.environ, stubs.env), mock.patch.object(ot, "MIN_ROUND", 0), \
+                self.assertRaises(ot.Skipped) as raised:  # fmt: skip
+            ot.run_model("x", timeout=1)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(str(raised.exception), "Claude brauchte für eine Runde länger als 0 Minuten")
+        child = int((self.root / "child.pid").read_text())
+        time.sleep(0.2)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
 
 
     def query(self, text: str, **extra: object) -> dict[str, object]:
@@ -609,6 +664,12 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(ot.digest_safe(bad)["message"], "⚠️ Obs-Triage 2026-11-19: Nachricht verworfen (nicht im Digest-Format)")
         for message in (ot.digest("2026-11-19", [finding("obs-2026-11-19-1")], [finding("obs-2026-11-19-2")]),
                         "⚠️ Obs-Triage 19.11.2026 übersprungen: Codex endete mit exit 4",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude endete mit exit 1",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude-Kontingent ist aufgebraucht (HTTP 429)",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude meldete einen API-Fehler (HTTP 529)",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude antwortete nicht mit dem verlangten Modell",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude brauchte für eine Runde länger als 25 Minuten",
+                        "⚠️ Obs-Triage 23.11.2026 übersprungen: Claude startete nicht (FileNotFoundError)",
                         "⚠️ Obs-Triage 19.11.2026 fehlgeschlagen (RuntimeError, siehe Log)",
                         "⚠️ Obs-Triage 19.11.2026 übersprungen: codex-quota-guard lief nicht (exit -15)"):  # fmt: skip
             self.assertEqual(ot.digest_safe({"date": "d", "format": 2, "message": message})["message"], message)
