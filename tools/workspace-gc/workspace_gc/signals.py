@@ -3,7 +3,7 @@
 Each source reports a status:
   ok      - read successfully
   absent  - the source does not exist on this machine (no herdr binary, no
-            work env file); tolerated
+            herdr server running, no work env file); tolerated
   skipped - turned off on the command line
   error   - it exists but could not be read
 
@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -80,6 +81,52 @@ def normalize_path(p: str) -> str:
     return os.path.realpath(p) if os.path.exists(p) else p
 
 
+_HERDR_SOCKET = re.compile(r"\bat (/[^;\n]+?);")
+
+
+def _socket_listening(path: str) -> bool | None:
+    """True if something accepts on the unix socket, False if nothing listens
+    there (no file, or connection refused), None if that cannot be told."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(2)
+    try:
+        sock.connect(path)
+    except (FileNotFoundError, ConnectionRefusedError):
+        return False
+    except OSError:
+        return None
+    else:
+        return True
+    finally:
+        sock.close()
+
+
+def _herdr_not_running(proc: subprocess.CompletedProcess) -> SourceStatus | None:
+    """The status for `herdr pane list` failing because no herdr server runs.
+
+    herdr reports that as a JSON error with code `server_not_running`. With no
+    server there are no herdr panes, so the source counts as absent (an empty
+    pane set) instead of an error. When the message names the socket, a direct
+    connect must confirm that nothing listens there. Any other failure returns
+    None and stays an error.
+    """
+    for stream in (proc.stderr, proc.stdout):
+        try:
+            data = json.loads(stream or "")
+            err = data["error"]
+            code, message = err["code"], err.get("message", "")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if code != "server_not_running" or not isinstance(message, str):
+            return None
+        m = _HERDR_SOCKET.search(message)
+        if m and _socket_listening(m.group(1)) is not False:
+            return None
+        where = f" at {m.group(1)}" if m else ""
+        return SourceStatus("absent", f"not running, treated as no panes: no herdr server{where}")
+    return None
+
+
 def read_herdr(herdr: str | None = None) -> tuple[list[str], SourceStatus]:
     exe = herdr or shutil.which("herdr")
     if not exe:
@@ -89,6 +136,9 @@ def read_herdr(herdr: str | None = None) -> tuple[list[str], SourceStatus]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return [], SourceStatus("error", type(exc).__name__)
     if proc.returncode != 0:
+        not_running = _herdr_not_running(proc)
+        if not_running:
+            return [], not_running
         return [], SourceStatus("error", f"exit {proc.returncode}: {_sanitize(proc.stderr)}")
     try:
         data = json.loads(proc.stdout)

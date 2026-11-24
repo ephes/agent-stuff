@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -10,6 +11,7 @@ import unittest
 
 from tests.helpers import GitFixture, SourceStatus, WorkRef, ok_signals
 from workspace_gc import cli, empties
+from workspace_gc.signals import read_herdr as REAL_READ_HERDR
 
 
 class Scheduled(GitFixture):
@@ -132,6 +134,39 @@ class TestScheduledApply(Scheduled):
                 self.assertEqual(data["removed"], [])
                 upsert = self.calls[0]
                 self.assertEqual(upsert[upsert.index("--owner") + 1], "jochen")
+
+    def herdr_signals(self, error_code):
+        """Signals whose herdr status comes from the real reader against a
+        stub `herdr` that fails with `error_code` and no server socket."""
+        stub = os.path.join(self.tmp, "herdr")
+        err = json.dumps({"error": {"code": error_code, "message":
+                                    f"no herdr server is running at {self.tmp}/no.sock; run it"}})
+        with open(stub, "w") as fh:
+            fh.write(f"#!/bin/sh\nprintf '%s' {shlex.quote(err)} >&2\nexit 1\n")
+        os.chmod(stub, 0o755)
+        sig = ok_signals()
+        sig.herdr_cwds, sig.status["herdr"] = REAL_READ_HERDR(stub)
+        return sig
+
+    def test_no_herdr_server_counts_as_no_panes(self):
+        cl = self.clone(self.url, "ws-a")
+        code, out, text, data = self.report("--apply", "--work-item", "w",
+                                            signals=self.herdr_signals("server_not_running"))
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.path.exists(cl))
+        self.assertIn("removed 1 checkout (", out)
+        self.assertIn("signals: herdr absent (not running, treated as no panes: no herdr server at ",
+                      text)
+        self.assertNotIn("REFUSED", text)
+
+    def test_other_herdr_error_still_refuses(self):
+        cl = self.clone(self.url, "ws-a")
+        code, out, text, data = self.report("--apply", "--work-item", "w",
+                                            signals=self.herdr_signals("timeout"))
+        self.assertEqual(code, 2)
+        self.assertTrue(os.path.isdir(cl))
+        self.assertIn("REFUSED, in-use signals incomplete: herdr: error (exit 1: ", text)
+        self.assertEqual(data["removed"], [])
 
     def test_dry_run_removes_nothing(self):
         wt = self.worktree(self.main, "ws-a", "feat/a")

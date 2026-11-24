@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- No running herdr server no longer blocks every run. Since the Studio reboot
+  of 2026-11 no herdr server ran, `herdr pane list` failed with
+  `server_not_running`, and every `report --apply` and `remove --apply` was
+  refused (2152 removable checkouts, about 709 GB, piled up). That error code
+  now means no herdr panes: herdr is reported as `absent (not running, treated
+  as no panes: ...)`, after a direct connect to the named socket confirms that
+  nothing listens there. Every other herdr failure still refuses the run.
+
 - Finished Codex work no longer piles up in `~/workspaces` (954 top-level
   directories, about 526 GB, on 2026-11-18). A closed Codex job clone or a
   finished scout round clone now needs `--codex-idle-hours` (default 6, was a

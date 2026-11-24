@@ -8,6 +8,7 @@ removable.
 
 import json
 import os
+import shlex
 import tempfile
 import unittest
 from unittest import mock
@@ -227,3 +228,117 @@ class IncompleteListKeepsCheckoutsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReadHerdrTest(unittest.TestCase):
+    """`herdr pane list` against a stub executable.
+
+    No herdr server means no herdr panes: that is an empty pane set, not an
+    incomplete signal. Every other herdr failure stays an error and blocks
+    --apply.
+    """
+
+    def setUp(self):
+        # Short directory: unix socket paths are limited to about 104 bytes.
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="hd", dir="/tmp"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, True))
+        self.sock = os.path.join(self.tmp, "herdr.sock")
+
+    def stub(self, stderr="", stdout="", code=1):
+        path = os.path.join(self.tmp, "herdr")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\n"
+                     f"printf '%s' {shlex.quote(stdout)}\n"
+                     f"printf '%s' {shlex.quote(stderr)} >&2\n"
+                     f"exit {code}\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def not_running(self, sock=None, code="server_not_running"):
+        sock = self.sock if sock is None else sock
+        msg = (f"no herdr server is running at {sock}; run `herdr` to start or attach it"
+               if sock else "no herdr server is running")
+        return json.dumps({"id": "cli:pane:list", "error": {"code": code, "message": msg}}) + "\n"
+
+    def blockers(self, status):
+        sig = Signals()
+        sig.status = {"herdr": status, "processes": SourceStatus("ok"), "work": SourceStatus("ok")}
+        return sig.apply_blockers()
+
+    def assert_no_panes(self, cwds, status):
+        self.assertEqual(cwds, [])
+        self.assertEqual(status.status, "absent", status)
+        self.assertIn("not running, treated as no panes", status.detail)
+        self.assertEqual(self.blockers(status), [])
+
+    def assert_refused(self, cwds, status):
+        self.assertEqual(cwds, [])
+        self.assertEqual(status.status, "error", status)
+        self.assertEqual(len(self.blockers(status)), 1)
+
+    def test_not_running_without_socket_file_is_no_panes(self):
+        cwds, status = sig_mod.read_herdr(self.stub(self.not_running()))
+        self.assert_no_panes(cwds, status)
+        self.assertIn(self.sock, status.detail)
+
+    def test_not_running_with_stale_socket_file_is_no_panes(self):
+        import socket
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(self.sock)
+        s.close()   # the file stays, nothing listens: connect is refused
+        self.assertTrue(os.path.exists(self.sock))
+        self.assert_no_panes(*sig_mod.read_herdr(self.stub(self.not_running())))
+
+    def test_not_running_message_without_socket_is_no_panes(self):
+        self.assert_no_panes(*sig_mod.read_herdr(self.stub(self.not_running(sock=""))))
+
+    def test_not_running_on_stdout_is_no_panes(self):
+        self.assert_no_panes(*sig_mod.read_herdr(self.stub(stdout=self.not_running())))
+
+    def test_not_running_but_socket_answers_is_refused(self):
+        import socket
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.bind(self.sock)
+        s.listen(1)
+        self.addCleanup(s.close)
+        self.assert_refused(*sig_mod.read_herdr(self.stub(self.not_running())))
+
+    def test_not_running_but_socket_unreachable_is_refused(self):
+        # The named socket sits below a regular file: connect fails with
+        # ENOTDIR, so nobody can tell whether a server listens.
+        blocker = os.path.join(self.tmp, "f")
+        open(blocker, "w").close()
+        sock = os.path.join(blocker, "herdr.sock")
+        self.assert_refused(*sig_mod.read_herdr(self.stub(self.not_running(sock=sock))))
+
+    def test_other_herdr_errors_are_refused(self):
+        cases = {
+            "other error code": self.not_running(code="timeout"),
+            "permission error": self.not_running(code="permission_denied"),
+            "plain text": "error: connection reset by peer\n",
+            "malformed json": '{"error": {"code": "server_not_running"\n',
+            "error without code": json.dumps({"error": {"message": "x"}}),
+            "error not an object": json.dumps({"error": "server_not_running"}),
+            "empty": "",
+        }
+        for name, stderr in cases.items():
+            with self.subTest(name):
+                self.assert_refused(*sig_mod.read_herdr(self.stub(stderr)))
+
+    def test_not_running_code_with_exit_zero_is_unexpected_output(self):
+        status = sig_mod.read_herdr(self.stub(stdout=self.not_running(), code=0))[1]
+        self.assertEqual(status, SourceStatus("error", "unexpected output"))
+
+    def test_timeout_is_refused(self):
+        import subprocess
+        with mock.patch.object(sig_mod.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired(["herdr"], 30)):
+            cwds, status = sig_mod.read_herdr("/bin/herdr-stub")
+        self.assert_refused(cwds, status)
+        self.assertEqual(status.detail, "TimeoutExpired")
+
+    def test_running_server_panes_are_read(self):
+        out = json.dumps({"result": {"panes": [{"cwd": self.tmp}, {"foreground_cwd": "/"}]}})
+        cwds, status = sig_mod.read_herdr(self.stub(stdout=out, code=0))
+        self.assertEqual(status.status, "ok")
+        self.assertEqual(cwds, sorted([self.tmp, "/"]))

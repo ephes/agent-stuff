@@ -438,6 +438,16 @@ item list), or was turned off
 with `--no-*`. A source that does not exist on this
 machine (no herdr, no work env file) is tolerated.
 
+No running herdr server counts as no herdr panes, not as a failed source:
+when `herdr pane list` fails with the JSON error code `server_not_running`,
+herdr is reported as `absent (not running, treated as no panes: ...)` and the
+run goes ahead with the process and work-app signals unchanged. If the error
+message names the server socket, workspace-gc connects to it first; only a
+missing socket file or a refused connection confirms that nothing listens.
+Every other herdr failure (another error code, unparsable output, a timeout,
+a socket that accepts connections or cannot be reached) still refuses the run.
+Only the default herdr session's socket is consulted, as before.
+
 `remove <path>` does not apply the idle guard by default (pass
 `--min-idle-hours`), because it is meant for a coordinator closing out an item
 right after its merge, except for a closed Codex job clone or a finished
