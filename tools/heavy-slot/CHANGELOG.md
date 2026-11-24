@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve reused lock descriptors across exec, including after a launcher
+  sets close-on-exec. Report a launch error if the descriptor cannot be made
+  inheritable.
+
 - Recheck the slot name and link count after locking. Release a lock on a
   changed slot and retry within the original wait budget.
 

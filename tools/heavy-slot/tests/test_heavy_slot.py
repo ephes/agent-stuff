@@ -194,6 +194,45 @@ class CapTest(Fixture):
         rc, out, err = self.finish(self.start("--", "sh", "-c", inner))
         self.assertEqual((rc, out), (0, "inner\n"), err)
 
+    def test_nested_call_keeps_close_on_exec_lock_across_exec(self):
+        marker = self.tmp / "started"
+        launch = """
+import os
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import heavy_slot
+
+fd = int(os.environ["HEAVY_SLOT_HELD_FD"])
+os.set_inheritable(fd, False)
+raise SystemExit(heavy_slot.main(sys.argv[2:]))
+"""
+        replacement = "import pathlib, sys, time; pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
+        nested = self.start(
+            "--", sys.executable, "-c", launch, str(TOOL),
+            "--max-wait", "0.3", "--", sys.executable, "-c", replacement, str(marker),
+        )
+        self.assertTrue(self.wait_for(lambda: marker.exists() or nested.poll() is not None))
+        self.assertTrue(marker.exists())
+        rc, _, err = self.finish(self.start("--max-wait", "0.3", "--", "true"))
+        self.assertEqual(rc, hs.EX_TEMPFAIL, err)
+
+    def test_nested_call_reports_failure_to_preserve_lock(self):
+        fd = self.hold()
+        env = dict(self.env, HEAVY_SLOT_HELD="slot-0.lock",
+                   HEAVY_SLOT_HELD_DIR=str(self.dir.resolve()), HEAVY_SLOT_HELD_FD=str(fd))
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(hs.os, "set_inheritable", side_effect=OSError("cannot change flags")),
+            mock.patch.object(hs.os, "execvp") as execvp,
+            mock.patch.object(hs, "warn") as warn,
+        ):
+            rc = hs.main(["--", "true"])
+
+        self.assertEqual(rc, hs.EX_NOEXEC)
+        execvp.assert_not_called()
+        warn.assert_called_once_with("heavy-slot: cannot run true: cannot preserve slot lock: cannot change flags")
+
     def test_nested_call_acquires_a_slot_in_another_pool(self):
         other = self.tmp / "other"
         rc, out, err = self.finish(self.start(

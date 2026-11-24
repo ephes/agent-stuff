@@ -55,6 +55,9 @@ step at once.
   `HEAVY_SLOT_HELD_FD=<inherited descriptor>`. A nested call can reuse
   admission when the slot belongs to its requested pool and the descriptor
   still holds that slot. Directory symlink aliases refer to the same pool.
+  Before exec, heavy-slot makes the descriptor inheritable for both fresh
+  and reused locks. If it cannot preserve the descriptor, it reports the
+  error and exits 127 before launching the command.
   A launcher that closes the lock descriptor makes its nested call go
   through normal acquisition, which can wait while the parent holds the slot.
 - A slot directory that cannot be created, or a pool where every slot is

@@ -204,6 +204,12 @@ def inherited_slot_fd(path: Path) -> int | None:
 def become(command: list[str], held: str, pool: str | None = None, fd: int | None = None) -> int:
     """Replace this process with ``command`` (returns only when it cannot be started)."""
 
+    if fd is not None:
+        try:
+            os.set_inheritable(fd, True)
+        except OSError as exc:
+            warn(f"heavy-slot: cannot run {command[0]}: cannot preserve slot lock: {exc}")
+            return EX_NOEXEC
     os.environ["HEAVY_SLOT_HELD"] = held
     if pool is None:
         os.environ.pop("HEAVY_SLOT_HELD_DIR", None)
@@ -341,7 +347,6 @@ def main(argv: list[str] | None = None) -> int:
         pass
     if announced:
         warn(f"heavy-slot: got {path.name} after {time.monotonic() - started:.0f} s")
-    os.set_inheritable(high, True)  # the command (same pid after exec) and its children keep the lock
     rc = become(command, path.name, pool, high)
     os.close(high)
     return rc
