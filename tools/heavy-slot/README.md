@@ -29,8 +29,10 @@ step at once.
 - A slot must be a regular file with exactly one filesystem link.
   heavy-slot rejects symlinks, hard-linked files and special files as
   unusable slots and continues trying the other slots. `--status` lists
-  rejected entries as `unavailable` and
-  reads holder metadata from the same descriptor it checks for a lock.
+  rejected entries as `unavailable` and reads holder metadata from the same
+  descriptor it checks for a lock. After probing, it verifies that the slot
+  name still points to that file. Changed entries show as `unavailable`, and
+  waiter diagnostics omit their holder metadata.
 - After acquiring a lock, heavy-slot checks that the slot name still points
   to the locked file and that the file still has one link. If this check
   fails because the entry changed, heavy-slot releases the lock and retries

@@ -1,4 +1,5 @@
 import fcntl
+import io
 import os
 import shlex
 import shutil
@@ -404,7 +405,7 @@ class SlotFileTest(Fixture):
         rc, out, _ = self.finish(self.start("--status"))
         self.assertEqual((rc, out), (0, "slot-0.lock\tunavailable\n"))
 
-    def test_holder_reads_the_probed_inode_if_the_path_is_replaced(self):
+    def test_holder_omits_the_detached_lock_metadata(self):
         path = self.dir / "slot-0.lock"
         self.hold()
         flock = fcntl.flock
@@ -415,7 +416,28 @@ class SlotFileTest(Fixture):
             return flock(fd, operation)
 
         with mock.patch.object(fcntl, "flock", side_effect=replace_then_flock):
-            self.assertEqual(hs.holder(path), "pid 1 since 00:00:00: test holder")
+            self.assertEqual(hs.holder(path), "")
+
+    def test_status_marks_replaced_held_and_free_slots_unavailable(self):
+        self.hold()
+        (self.dir / "slot-1.lock").touch()
+        paths = hs.slot_paths(self.dir, 2)
+        open_slot = hs.open_slot
+
+        def open_then_replace(path, flags):
+            fd = open_slot(path, flags)
+            path.rename(path.with_suffix(".detached"))
+            path.write_text("replacement contents")
+            return fd
+
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(hs, "open_slot", side_effect=open_then_replace),
+            mock.patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(hs.main(["--slots", "2", "--status"]), 0)
+
+        self.assertEqual(stdout.getvalue().splitlines(), [f"{path.name}\tunavailable" for path in paths])
 
     def test_fifo_slot_is_rejected_without_blocking(self):
         self.dir.mkdir()

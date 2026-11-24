@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify the slot name after probing its lock and holder metadata. Report
+  changed slots as unavailable and omit their holder lines from wait warnings.
+
 - Preserve reused lock descriptors across exec, including after a launcher
   sets close-on-exec. Report a launch error if the descriptor cannot be made
   inheritable.

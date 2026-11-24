@@ -144,19 +144,24 @@ def slot_state(path: Path, *, read_holder: bool = False) -> tuple[bool, str]:
         fd = open_slot(path, os.O_RDONLY)
     except FileNotFoundError:
         return False, ""
+    held = False
+    line = ""
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        if read_holder:
-            try:
-                with open(fd, encoding="utf-8", errors="replace", closefd=False) as stream:
-                    return True, single_line(stream.read(200))
-            except OSError:
-                pass  # The lock probe succeeded even if the holder line is unreadable.
-        return True, ""
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            held = True
+            if read_holder:
+                try:
+                    with open(fd, encoding="utf-8", errors="replace", closefd=False) as stream:
+                        line = single_line(stream.read(200))
+                except OSError:
+                    pass  # The lock probe succeeded even if the holder line is unreadable.
+        if not slot_matches(fd, path):
+            raise OSError(errno.ESTALE, "slot changed during probe", str(path))
+        return held, line
     finally:
         os.close(fd)
-    return False, ""
 
 
 def is_held(path: Path) -> bool:
