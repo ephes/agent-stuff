@@ -226,10 +226,6 @@ class IncompleteListKeepsCheckoutsTest(unittest.TestCase):
         self.assertFalse(any("work item list incomplete" in r for r in co.reasons))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ReadHerdrTest(unittest.TestCase):
     """`herdr pane list` against a stub executable.
 
@@ -342,3 +338,7 @@ class ReadHerdrTest(unittest.TestCase):
         cwds, status = sig_mod.read_herdr(self.stub(stdout=out, code=0))
         self.assertEqual(status.status, "ok")
         self.assertEqual(cwds, sorted([self.tmp, "/"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
