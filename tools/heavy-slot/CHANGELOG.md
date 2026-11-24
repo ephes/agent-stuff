@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Recheck the slot name and link count after locking. Release a lock on a
+  changed slot and retry within the original wait budget.
+
 - Skip unusable slots and keep using the remaining capacity. If all slots
   are unusable, retain the warning and unguarded execution.
 

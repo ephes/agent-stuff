@@ -98,8 +98,18 @@ def open_slot(path: Path, flags: int) -> int:
     return fd
 
 
+def slot_matches(fd: int, path: Path) -> bool:
+    """Check that the descriptor still names the pool's regular single-link file."""
+    opened = os.fstat(fd)
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(current.st_mode) and current.st_nlink == 1 and os.path.samestat(opened, current)
+
+
 def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
-    """Lock the first free usable slot, wait if busy, or raise if none are usable."""
+    """Lock the first free usable slot, retry contention or replacement, or raise on storage failure."""
 
     retry = False
     unavailable = None
@@ -111,6 +121,7 @@ def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
             continue
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            matches = slot_matches(fd, path)
         except BlockingIOError:
             retry = True
         except OSError as exc:
@@ -119,7 +130,9 @@ def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
             os.close(fd)
             raise
         else:
-            return fd, path
+            if matches:
+                return fd, path
+            retry = True
         os.close(fd)
     if not retry and unavailable is not None:
         raise unavailable
@@ -179,9 +192,7 @@ def inherited_slot_fd(path: Path) -> int | None:
         fd = int(os.environ.get("HEAVY_SLOT_HELD_FD", ""))
         if fd <= 2:
             return None
-        inherited = os.fstat(fd)
-        current = path.lstat()
-        if not stat.S_ISREG(current.st_mode) or current.st_nlink != 1 or not os.path.samestat(inherited, current):
+        if not slot_matches(fd, path):
             return None
         # A separately opened descriptor to the same inode does not share an existing lock.
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

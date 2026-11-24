@@ -31,6 +31,10 @@ step at once.
   unusable slots and continues trying the other slots. `--status` lists
   rejected entries as `unavailable` and
   reads holder metadata from the same descriptor it checks for a lock.
+- After acquiring a lock, heavy-slot checks that the slot name still points
+  to the locked file and that the file still has one link. If this check
+  fails because the entry changed, heavy-slot releases the lock and retries
+  within the original wait budget.
 - The slot stays taken as long as any process holding that descriptor
   lives: the command and the children it starts without closing inherited
   descriptors (shell children do; Python's `subprocess` closes them by
@@ -38,7 +42,7 @@ step at once.
   way, also `kill -9`, so a slot never stays stale. A daemon started from a
   shell inside the slot keeps the slot until it stops; `--status` then shows
   the original holder line.
-- No free usable slot while a slot is held: one line on stderr (`no free slot, waiting (holders:
+- When acquisition needs to retry: one line on stderr (`no free slot, waiting (holders:
   …)`), then a retry every 2 s (every quarter of `--max-wait` when that is
   shorter). The last sleep is capped at the remaining wait time. A slot
   acquired after `--max-wait` seconds (e.g. by a waiter that was suspended) is given back:

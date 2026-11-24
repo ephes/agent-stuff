@@ -266,6 +266,61 @@ raise SystemExit(subprocess.call(command, pass_fds=pass_fds))
         self.assertEqual((rc, out), (0, "later\n"))
 
 class SlotFileTest(Fixture):
+    def test_replaced_slot_cannot_admit_a_command_on_the_detached_lock(self):
+        self.dir.mkdir()
+        path = self.dir / "slot-0.lock"
+        detached = self.dir / "detached.lock"
+        path.write_text("original contents")
+        flock = fcntl.flock
+        elapsed = 0.0
+
+        def replace_then_flock(fd, operation):
+            if not detached.exists():
+                path.rename(detached)
+                self.hold()
+            return flock(fd, operation)
+
+        def sleep(seconds):
+            nonlocal elapsed
+            elapsed += seconds
+
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(fcntl, "flock", side_effect=replace_then_flock),
+            mock.patch.object(hs.time, "monotonic", side_effect=lambda: elapsed),
+            mock.patch.object(hs.time, "sleep", side_effect=sleep),
+            mock.patch.object(hs, "warn"),
+            mock.patch.object(hs, "become", return_value=0) as become,
+        ):
+            rc = hs.main(["--max-wait", "1", "--", "true"])
+
+        self.assertEqual(rc, hs.EX_TEMPFAIL)
+        become.assert_not_called()
+        self.assertEqual(elapsed, 1.0)
+        self.assertEqual(detached.read_text(), "original contents")
+        self.assertFalse(hs.is_held(detached))
+
+    def test_slot_hard_linked_after_open_must_be_retried(self):
+        self.dir.mkdir()
+        path = self.dir / "slot-0.lock"
+        alias = self.tmp / "alias"
+        flock = fcntl.flock
+
+        def link_then_flock(fd, operation):
+            alias.hardlink_to(path)
+            return flock(fd, operation)
+
+        with mock.patch.object(fcntl, "flock", side_effect=link_then_flock):
+            acquired = hs.try_acquire([path])
+        if acquired is not None:
+            self.addCleanup(os.close, acquired[0])
+        self.assertIsNone(acquired)
+
+        alias.unlink()
+        fd, acquired_path = hs.try_acquire([path])
+        self.addCleanup(os.close, fd)
+        self.assertEqual(acquired_path, path)
+
     def test_invalid_slot_leaves_healthy_slots_usable(self):
         self.hold("slot-1.lock")
         (self.dir / "slot-0.lock").mkdir()
