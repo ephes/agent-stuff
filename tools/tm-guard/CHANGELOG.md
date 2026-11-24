@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Refuse to start a probe if the acquired run lock no longer matches the
+  state directory's lock file.
+- Bound local JSON state reads and treat non-regular or oversized files as
+  missing state.
+
 - Preserve exact byte and file counts in reports and progress tracking.
   Reject fractional counts.
 - Treat status with an invalid `Running` flag as unreadable. Accept

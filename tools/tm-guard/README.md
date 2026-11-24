@@ -17,8 +17,8 @@ tools/tm-guard/bin/tm-guard --dry-run  # print the report; no progress state, no
 tools/tm-guard/bin/tm-guard -v         # log the summary line even when unchanged
 ```
 
-Exit 0 report kept on macmini, 1 report failed (logged), 3 another run holds
-the lock. Log: `~/Library/Logs/tm-guard.log` (one line per change of the
+Exit 0 report kept on macmini, 1 report failed (logged), 3 run lock
+unavailable. Log: `~/Library/Logs/tm-guard.log` (one line per change of the
 summary, and every failure). State: `~/.local/state/tm-guard/`.
 
 ## What one cycle does
@@ -87,13 +87,17 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
 The probe never touches the backup volume or `/Volumes`, and every command
 it runs has a hard limit, so the whole cycle ends within about 5 minutes
 even when everything hangs; launchd does not start a second copy while one
-runs, and a manual run alongside exits 3.
+runs, and a manual run alongside exits 3. The probe also exits 3 if it cannot
+lock a regular `run.lock` file or if the pathname no longer names that file
+after acquisition.
 
 The probe syncs the ownership record and its directory before allowing
 `tmutil` to start. A publication failure closes the gate and reports a
 probe error. Progress state uses the same durable JSON publication. A
 live recorded process still blocks a new run when its timestamp is
 unreadable. The diagnostic shows `unknown time` in that case.
+Local JSON state reads accept regular files up to 64 KiB. Oversized,
+non-regular or unreadable files use the missing-state fallback.
 
 ## Nyxmon rules
 

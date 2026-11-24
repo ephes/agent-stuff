@@ -39,6 +39,7 @@ import plistlib
 import re
 import select
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,7 @@ BAND_TIMEOUT = 60
 REPORT_TIMEOUT = 100  # obs_ctl.py waits up to 60 s for its lock plus 20 s for the write
 KILL_GRACE = 5.0  # after SIGKILL: how long the child gets to be reaped before it counts as hung
 MAX_OUTPUT = 1024 * 1024
+MAX_STATE_BYTES = 64 * 1024
 MAX_HUNG = 20
 PHASE = re.compile(r"[^A-Za-z0-9_. -]")
 SAFE_PATH = re.compile(r"/[A-Za-z0-9_./-]+")
@@ -236,8 +238,19 @@ def ps_name(pid: int) -> str:
 
 def read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STATE_BYTES:
+                return None
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                raw = handle.read(MAX_STATE_BYTES + 1)
+        finally:
+            os.close(fd)
+        if len(raw) > MAX_STATE_BYTES:
+            return None
+        return json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -264,15 +277,23 @@ def write_atomic(path: Path, data: Any) -> None:
 
 @contextlib.contextmanager
 def run_lock(state: Path) -> Iterator[bool]:
-    state.mkdir(parents=True, exist_ok=True)
-    fd = os.open(state / "run.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    path = state / "run.lock"
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | os.O_NOFOLLOW, 0o600)
+    except OSError:
+        yield False
+        return
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
-        yield True
+            opened = os.fstat(fd)
+            held = False
+            if stat.S_ISREG(opened.st_mode):
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = os.path.samestat(opened, path.lstat())
+        except OSError:
+            held = False
+        yield held
     finally:
         os.close(fd)
 
@@ -606,7 +627,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     state = state_dir()
     with run_lock(state) as held:
         if not held:
-            log("another run holds the lock")
+            log("run lock unavailable")
             return 3
         now = int(time.time())
         result = cycle(state, now)

@@ -6,6 +6,7 @@ import json
 import os
 import plistlib
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -204,6 +205,30 @@ class TrackTests(unittest.TestCase):
     def test_a_foreign_state_format_starts_over(self) -> None:
         state, stalled = tg.track({"format": 99, "running": True, "progress_epoch": 0}, "ok", self.fields(), NOW, NOW)
         self.assertEqual((stalled, state["format"]), (0, tg.STATE_FORMAT))
+
+
+class StateReadTests(unittest.TestCase):
+    def test_fifo_is_missing_state_without_a_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            os.mkfifo(state)
+            result = subprocess.run(
+                [sys.executable, "-c", "import sys, tm_guard; from pathlib import Path; "
+                 "assert tm_guard.read_json(Path(sys.argv[1])) is None", str(state)],
+                cwd=Path(tg.__file__).parent,
+                timeout=2,
+            )
+            self.assertEqual(result.returncode, 0)
+
+    def test_oversized_valid_json_is_missing_but_small_state_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            progress, _ = tg.track(None, "ok", {"running": True}, NOW, NOW)
+            tg.write_atomic(state, progress)
+            self.assertEqual(tg.read_json(state), progress)
+            with state.open("ab") as handle:
+                handle.write(b" " * (64 * 1024))
+            self.assertIsNone(tg.read_json(state))
 
 
 class BoundedTests(unittest.TestCase):
@@ -585,6 +610,27 @@ class CycleTests(Base):
         with tg.run_lock(self.state) as held:
             self.assertTrue(held)
             self.assertEqual(self.run_check(), 3)
+
+    def test_a_displaced_lock_refuses_the_probe(self) -> None:
+        flock = tg.fcntl.flock
+        for replace_directory in (False, True):
+            with self.subTest(replace_directory=replace_directory):
+                lock = self.state / "run.lock"
+
+                def rotate_before_flock(fd: int, flags: int) -> None:
+                    if replace_directory:
+                        self.state.rename(self.tmp / "old-state")
+                        self.state.mkdir()
+                    else:
+                        lock.rename(self.state / "old.lock")
+                    lock.touch()
+                    flock(fd, flags)
+
+                with mock.patch.object(tg.fcntl, "flock", side_effect=rotate_before_flock):
+                    self.assertEqual(self.run_check(), 3)
+                self.assertEqual(self.tmutil_calls(), 0)
+                self.assertFalse((self.state / "state.json").exists())
+                self.assertFalse((self.tmp / "sent.json").exists())
 
     def test_auto_backup_values(self) -> None:
         for raw, expected in (("1\n", True), ("0\n", False), ("", None)):
