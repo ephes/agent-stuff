@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Skip unusable slots and keep using the remaining capacity. If all slots
+  are unusable, retain the warning and unguarded execution.
+
 - Bind nested admission to the requested slot pool, including symlink
   aliases of its directory.
 - Validate the inherited lock descriptor before reusing admission. Acquire
@@ -15,8 +18,7 @@
   not repeatedly probed in the final milliseconds.
 
 - Admit only regular single-link slot files and read status metadata from
-  the same descriptor used to check the lock. Unusable slots use the
-  existing warning and unguarded execution behavior.
+  the same descriptor used to check the lock.
 
 - Use the executable basename as the default slot label. Keep labels on a
   single bounded line in slot files and diagnostics. Explicit labels remain

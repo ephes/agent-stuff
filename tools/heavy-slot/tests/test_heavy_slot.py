@@ -107,7 +107,7 @@ class CapTest(Fixture):
         fcntl.flock(fd, fcntl.LOCK_UN)
         rc, out, err = self.finish(p)
         self.assertEqual((rc, out), (0, "ran\n"))
-        self.assertIn("all 1 slots busy, waiting (holders: pid 1 since 00:00:00: test holder)", err)
+        self.assertIn("no free slot, waiting (holders: pid 1 since 00:00:00: test holder)", err)
         self.assertIn("got slot-0.lock", err)
 
     def test_gives_up_after_max_wait(self):
@@ -266,6 +266,26 @@ raise SystemExit(subprocess.call(command, pass_fds=pass_fds))
         self.assertEqual((rc, out), (0, "later\n"))
 
 class SlotFileTest(Fixture):
+    def test_invalid_slot_leaves_healthy_slots_usable(self):
+        self.hold("slot-1.lock")
+        (self.dir / "slot-0.lock").mkdir()
+        command = ("--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"')
+        rc, out, err = self.finish(self.start(*command, HEAVY_SLOTS="3"))
+        self.assertEqual((rc, out, err), (0, "slot-2.lock\n", ""))
+
+        rc, out, err = self.finish(self.start("--max-wait", "0.1", *command, HEAVY_SLOTS="2"))
+        self.assertEqual((rc, out), (hs.EX_TEMPFAIL, ""))
+        self.assertIn("no free slot", err)
+        self.assertNotIn("WITHOUT a slot", err)
+
+    def test_all_invalid_slots_allow_unguarded_execution(self):
+        self.dir.mkdir()
+        (self.dir / "slot-0.lock").mkdir()
+        (self.dir / "slot-1.lock").symlink_to("missing")
+        rc, out, err = self.finish(self.start("--", "sh", "-c", 'echo "$HEAVY_SLOT_HELD"', HEAVY_SLOTS="2"))
+        self.assertEqual((rc, out), (0, "none\n"))
+        self.assertIn("running WITHOUT a slot", err)
+
     def test_aliases_leave_target_untouched(self):
         self.dir.mkdir()
         path = self.dir / "slot-0.lock"

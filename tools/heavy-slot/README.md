@@ -28,7 +28,8 @@ step at once.
   a tool timeout, `kill`) and exits with its own status.
 - A slot must be a regular file with exactly one filesystem link.
   heavy-slot rejects symlinks, hard-linked files and special files as
-  unusable slots. `--status` lists rejected entries as `unavailable` and
+  unusable slots and continues trying the other slots. `--status` lists
+  rejected entries as `unavailable` and
   reads holder metadata from the same descriptor it checks for a lock.
 - The slot stays taken as long as any process holding that descriptor
   lives: the command and the children it starts without closing inherited
@@ -37,7 +38,7 @@ step at once.
   way, also `kill -9`, so a slot never stays stale. A daemon started from a
   shell inside the slot keeps the slot until it stops; `--status` then shows
   the original holder line.
-- All slots busy: one line on stderr (`all 3 slots busy, waiting (holders:
+- No free usable slot while a slot is held: one line on stderr (`no free slot, waiting (holders:
   …)`), then a retry every 2 s (every quarter of `--max-wait` when that is
   shorter). The last sleep is capped at the remaining wait time. A slot
   acquired after `--max-wait` seconds (e.g. by a waiter that was suspended) is given back:
@@ -52,8 +53,8 @@ step at once.
   still holds that slot. Directory symlink aliases refer to the same pool.
   A launcher that closes the lock descriptor makes its nested call go
   through normal acquisition, which can wait while the parent holds the slot.
-- Slot directory not usable (cannot be created or written, e.g. a sandbox
-  without it as a writable root) before the deadline: a `WARNING … running WITHOUT a slot` line,
+- A slot directory that cannot be created, or a pool where every slot is
+  unusable before the deadline, produces a `WARNING … running WITHOUT a slot` line,
   and the command runs (`HEAVY_SLOT_HELD=none`). Nested calls after an
   unguarded launch try to acquire a slot using their own settings. Warnings go to stderr
   and are lost when the caller closed it. The cap is a load brake;

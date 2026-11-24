@@ -99,19 +99,30 @@ def open_slot(path: Path, flags: int) -> int:
 
 
 def try_acquire(paths: list[Path]) -> tuple[int, Path] | None:
-    """An open fd holding the first free slot's lock, or None when all are taken."""
+    """Lock the first free usable slot, wait if busy, or raise if none are usable."""
 
+    retry = False
+    unavailable = None
     for path in paths:
-        fd = open_slot(path, os.O_RDWR | os.O_CREAT)
+        try:
+            fd = open_slot(path, os.O_RDWR | os.O_CREAT)
+        except OSError as exc:
+            unavailable = exc
+            continue
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            os.close(fd)
-            continue
+            retry = True
+        except OSError as exc:
+            unavailable = exc
         except BaseException:
             os.close(fd)
             raise
-        return fd, path
+        else:
+            return fd, path
+        os.close(fd)
+    if not retry and unavailable is not None:
+        raise unavailable
     return None
 
 
@@ -288,11 +299,11 @@ def main(argv: list[str] | None = None) -> int:
         if got:
             break
         if max_wait and waited >= max_wait:
-            warn(f"heavy-slot: no free slot after {waited:.0f} s (all {slots} held); not run: {label}")
+            warn(f"heavy-slot: no free slot after {waited:.0f} s; not run: {label}")
             return EX_TEMPFAIL
         if not announced:
             held = "; ".join(h for h in (holder(p) for p in paths) if h)
-            warn(f"heavy-slot: all {slots} slots busy, waiting (holders: {held or 'unknown'})")
+            warn(f"heavy-slot: no free slot, waiting (holders: {held or 'unknown'})")
             announced = True
         if max_wait:
             remaining = max_wait - (time.monotonic() - started)
