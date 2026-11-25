@@ -55,27 +55,29 @@ def acquire(path: str, wait: float = 0.0, poll: float = 5.0) -> RunLock:
     while True:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
             try:
-                holder = os.pread(fd, 200, 0).decode("utf-8", "replace").strip()
-            except OSError:
-                holder = ""
-            os.close(fd)
-            left = deadline - time.monotonic()
-            if left <= 0:
-                raise Busy(f"another workspace-gc run holds {path}"
-                           + (f" ({holder})" if holder else "")
-                           + (f"; waited {wait:g}s" if wait > 0 else ""))
-            time.sleep(min(poll, left))
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                try:
+                    holder = os.pread(fd, 200, 0).decode("utf-8", "replace").strip()
+                except OSError:
+                    holder = ""
+            else:
+                try:
+                    os.ftruncate(fd, 0)
+                    stamp = f"pid {os.getpid()}, started {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
+                    os.pwrite(fd, stamp.encode(), 0)
+                except OSError:
+                    pass  # the lock itself is what matters
+                return RunLock(path, fd)
         except BaseException:
-            os.close(fd)
+            with suppress(OSError):
+                os.close(fd)
             raise
-    try:
-        os.ftruncate(fd, 0)
-        os.pwrite(fd, f"pid {os.getpid()}, started {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
-                  .encode(), 0)
-    except OSError:
-        pass  # the lock itself is what matters
-    return RunLock(path, fd)
+        os.close(fd)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise Busy(f"another workspace-gc run holds {path}"
+                       + (f" ({holder})" if holder else "")
+                       + (f"; waited {wait:g}s" if wait > 0 else ""))
+        time.sleep(min(poll, left))

@@ -134,6 +134,18 @@ class TestRunLock(unittest.TestCase):
             close.assert_called_once()
         runlock.acquire(self.path).release()
 
+    def test_interrupted_holder_stamp_releases_lock(self):
+        with mock.patch.object(runlock.os, "pwrite", side_effect=KeyboardInterrupt) as stamp:
+            with self.assertRaises(KeyboardInterrupt):
+                runlock.acquire(self.path)
+        stamp.assert_called_once()
+        try:
+            runlock.acquire(self.path).release()
+        except runlock.Busy:
+            # Clean up the leaked descriptor if the regression returns.
+            os.close(stamp.call_args.args[0])
+            raise
+
     def test_lock_of_a_dead_holder_is_free(self):
         import subprocess
         import sys

@@ -6,6 +6,9 @@
   cause a later release to touch a reused descriptor. Preserve the unlock
   error if closing also reports an OS error.
 
+- Release the run lock before propagating an interruption while writing
+  holder details, so a surviving caller can acquire it again.
+
 - No running herdr server no longer blocks every run. Since the Studio reboot
   of 2026-11 no herdr server ran, `herdr pane list` failed with
   `server_not_running`, and every `report --apply` and `remove --apply` was

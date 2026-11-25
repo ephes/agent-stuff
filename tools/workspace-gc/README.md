@@ -383,7 +383,9 @@ walked all of `~/workspaces` and `~/projects` again for borrowed objects,
   `~/.local/state/workspace-gc/workspace-gc.lock`): `report` and every
   `--apply` take an exclusive `flock` before reading anything. A second run
   that finds it held prints `BUSY, nothing done: another workspace-gc run
-  holds ... (pid N, started ...)`, writes no report and exits 3. `remove`
+  holds ... (pid N, started ...)`, writes no report and exits 3. The holder
+  details are best-effort. A process interrupt while writing them closes the
+  lock descriptor before propagating. `remove`
   first waits for it, up to `--lock-wait SECONDS` (finite,
   default 1800; 0 for `scan` and `report`; never longer than what is left of
   `--max-runtime`), checking every 5 seconds: before 2026-11-18 a
