@@ -5,6 +5,7 @@ import json
 import os
 import time
 import unittest
+from contextlib import suppress
 from unittest import mock
 
 from tests.helpers import GitFixture, ok_signals, sh
@@ -91,6 +92,47 @@ class TestRunLock(unittest.TestCase):
         finally:
             first.release()
         runlock.acquire(self.path).release()  # free again after release
+
+    def test_release_after_close_error_leaves_reused_descriptor_open(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        lock = runlock.acquire(self.path)
+        real_close = os.close
+        reused_fd = None
+
+        def close_then_fail(fd):
+            nonlocal reused_fd
+            real_close(fd)
+            reused_fd = os.dup2(read_fd, fd)
+            raise OSError("close failed")
+
+        try:
+            with mock.patch.object(runlock.os, "close", side_effect=close_then_fail):
+                with self.assertRaisesRegex(OSError, "close failed"):
+                    lock.release()
+            lock.release()
+            os.write(write_fd, b"x")
+            self.assertEqual(os.read(reused_fd, 1), b"x")
+        finally:
+            if reused_fd is not None:
+                with suppress(OSError):
+                    os.close(reused_fd)
+
+    def test_release_preserves_unlock_error_when_close_also_fails(self):
+        lock = runlock.acquire(self.path)
+        real_close = os.close
+
+        def close_then_fail(fd):
+            real_close(fd)
+            raise OSError("close failed")
+
+        with mock.patch.object(runlock.fcntl, "flock", side_effect=OSError("unlock failed")), \
+             mock.patch.object(runlock.os, "close", side_effect=close_then_fail) as close:
+            with self.assertRaisesRegex(OSError, "unlock failed"):
+                lock.release()
+            close.assert_called_once()
+        runlock.acquire(self.path).release()
 
     def test_lock_of_a_dead_holder_is_free(self):
         import subprocess

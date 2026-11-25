@@ -390,7 +390,9 @@ walked all of `~/workspaces` and `~/projects` again for borrowed objects,
   runner's or clerk's removal that met the daily run failed at once and left
   the checkout behind (`LEFT ... BUSY` in hundreds of Codex reports). The
   kernel releases the lock when the holder exits, however it exits, so a
-  killed run leaves nothing to clean up. A dry-run `scan` takes no lock.
+  killed run leaves nothing to clean up. Lock release attempts to close its
+  descriptor once, even if unlocking fails. If both operations report OS
+  errors, release reports the unlock error. A dry-run `scan` takes no lock.
 
 ## Removal guards
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import fcntl
 import os
 import time
+from contextlib import suppress
 
 
 class Busy(Exception):
@@ -26,12 +27,19 @@ class RunLock:
         self._fd = fd
 
     def release(self) -> None:
-        if self._fd >= 0:
-            try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
-            finally:
-                os.close(self._fd)
-                self._fd = -1
+        fd = self._fd
+        if fd < 0:
+            return
+        # Even a failed close can free the descriptor number for reuse.
+        self._fd = -1
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except BaseException:
+            with suppress(OSError):
+                os.close(fd)
+            raise
+        else:
+            os.close(fd)
 
     def __enter__(self):
         return self

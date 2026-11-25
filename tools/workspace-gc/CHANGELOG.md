@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Retire the run lock descriptor before releasing it so a failed close cannot
+  cause a later release to touch a reused descriptor. Preserve the unlock
+  error if closing also reports an OS error.
+
 - No running herdr server no longer blocks every run. Since the Studio reboot
   of 2026-11 no herdr server ran, `herdr pane list` failed with
   `server_not_running`, and every `report --apply` and `remove --apply` was
