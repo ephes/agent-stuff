@@ -306,6 +306,33 @@ raise SystemExit(subprocess.call(command, pass_fds=pass_fds))
         self.assertEqual((rc, out), (0, "later\n"))
 
 class SlotFileTest(Fixture):
+    def test_nested_call_requires_the_replacement_slot_after_lock_confirmation(self):
+        inherited_fd = self.hold()
+        path = self.dir / "slot-0.lock"
+        detached = self.dir / "detached.lock"
+        env = dict(self.env, HEAVY_SLOT_HELD=path.name,
+                   HEAVY_SLOT_HELD_DIR=str(self.dir.resolve()), HEAVY_SLOT_HELD_FD=str(inherited_fd))
+        flock = fcntl.flock
+
+        def replace_after_flock(fd, operation):
+            flock(fd, operation)
+            if fd == inherited_fd:
+                path.rename(detached)
+                self.hold()
+
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(fcntl, "flock", side_effect=replace_after_flock),
+            mock.patch.object(hs.time, "monotonic", side_effect=[0.0, 1.0]),
+            mock.patch.object(hs, "warn"),
+            mock.patch.object(hs, "become", return_value=0) as become,
+        ):
+            rc = hs.main(["--max-wait", "1", "--", "true"])
+
+        self.assertEqual(rc, hs.EX_TEMPFAIL)
+        become.assert_not_called()
+        self.assertTrue(hs.is_held(detached))
+
     def test_replaced_slot_cannot_admit_a_command_on_the_detached_lock(self):
         self.dir.mkdir()
         path = self.dir / "slot-0.lock"

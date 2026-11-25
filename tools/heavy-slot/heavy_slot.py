@@ -201,9 +201,9 @@ def inherited_slot_fd(path: Path) -> int | None:
             return None
         # A separately opened descriptor to the same inode does not share an existing lock.
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd if slot_matches(fd, path) else None
     except (OSError, ValueError, OverflowError):
         return None
-    return fd
 
 
 def become(command: list[str], held: str, pool: str | None = None, fd: int | None = None) -> int:

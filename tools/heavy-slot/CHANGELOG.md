@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Recheck the slot name after confirming an inherited lock. If the entry
+  changed, acquire normally and leave the outer command's descriptor alone.
+
 - Verify the slot name after probing its lock and holder metadata. Report
   changed slots as unavailable and omit their holder lines from wait warnings.
 
