@@ -107,6 +107,7 @@ class ParseTests(unittest.TestCase):
                 "total_bytes": 4000,
                 "total_files": 40,
                 "state_changed": "2026-11-20T10:00:00",
+                "destination_id": RUNNING["DestinationID"].lower(),
             },
         )
 
@@ -193,6 +194,18 @@ class TrackTests(unittest.TestCase):
         state, stalled = tg.track(state, "ok", self.fields(), NOW, NOW + 7200)
         self.assertEqual(stalled, 0)
 
+    def test_a_new_backup_after_idle_can_make_progress_with_older_bands(self) -> None:
+        running, _ = tg.track(None, "ok", self.fields(), NOW, NOW)
+        idle, _ = tg.track(running, "ok", {"running": False}, NOW, NOW + 300)
+        for first_band in (NOW - 900, None):
+            with self.subTest(first_band=first_band):
+                state, stalled = tg.track(idle, "ok", self.fields(), first_band, NOW + 600)
+                self.assertEqual((state["band_max"], stalled), (first_band, 0))
+                state, stalled = tg.track(state, "ok", self.fields(), NOW - 900, NOW + 900)
+                self.assertEqual((state["band_max"], stalled), (NOW - 900, 300))
+                _, stalled = tg.track(state, "ok", self.fields(), NOW - 600, NOW + 1200)
+                self.assertEqual(stalled, 0)
+
     def test_a_silent_tmutil_carries_the_count_on(self) -> None:
         state, _ = tg.track(None, "ok", self.fields(), NOW, NOW)
         state, stalled = tg.track(state, "timeout", {}, NOW, NOW + 7200)
@@ -201,6 +214,22 @@ class TrackTests(unittest.TestCase):
         # Bands still written while tmutil hangs: progress.
         state, stalled = tg.track(state, "hung", {}, NOW + 7000, NOW + 7500)
         self.assertEqual(stalled, 0)
+
+    def test_a_clock_rollback_restarts_stall_accounting(self) -> None:
+        state, _ = tg.track(None, "ok", self.fields(), NOW, NOW)
+        state, stalled = tg.track(state, "ok", self.fields(), NOW, NOW + 600)
+        self.assertEqual(stalled, 600)
+        for rolled_back in (NOW - 3600, NOW + 300):
+            with self.subTest(rolled_back=rolled_back):
+                rebased, stalled = tg.track(state, "timeout", {}, None, rolled_back)
+                self.assertEqual(stalled, 0)
+                self.assertEqual(rebased["progress_epoch"], rolled_back)
+                self.assertTrue(rebased["running"])
+                self.assertEqual(rebased["fingerprint"], state["fingerprint"])
+                rebased, stalled = tg.track(rebased, "ok", self.fields(), NOW, rolled_back + 300)
+                self.assertEqual(stalled, 300)
+                _, stalled = tg.track(rebased, "ok", self.fields(bytes=2000), NOW, rolled_back + 600)
+                self.assertEqual(stalled, 0)
 
     def test_a_foreign_state_format_starts_over(self) -> None:
         state, stalled = tg.track({"format": 99, "running": True, "progress_epoch": 0}, "ok", self.fields(), NOW, NOW)
@@ -319,6 +348,24 @@ class CycleTests(Base):
                     self.assertEqual(self.run_check(), 0)
                 report = self.sent()
                 self.assertEqual((report["bytes"], report["stalled_seconds"]), (count, 0))
+
+    def test_only_an_admitted_destination_change_resets_the_band_baseline(self) -> None:
+        old = "a0000000-0000-4000-8000-000000000001"
+        new = "b0000000-0000-4000-8000-000000000002"
+        for offset, destination, band, expected in (
+            (0, old.upper(), NOW, NOW),
+            (300, old, NOW - 1200, NOW),
+            (600, "invalid", NOW - 1200, NOW),
+            (900, new, NOW - 1200, NOW - 1200),
+            (1200, new, NOW - 900, NOW - 900),
+        ):
+            with self.subTest(destination=destination, offset=offset):
+                self.set_status({**RUNNING, "DestinationID": destination})
+                (self.tmp / "band").write_text(f"{band}\n")
+                with mock.patch.object(time, "time", return_value=NOW + offset):
+                    self.assertEqual(self.run_check(), 0)
+                self.assertEqual(tg.read_json(self.state / "state.json")["band_max"], expected)
+        self.assertEqual(self.sent()["stalled_seconds"], 0)
 
     def test_a_failed_band_read_fails_the_cross_check_only_while_running(self) -> None:
         (self.tmp / "band.fail").write_text("")

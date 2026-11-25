@@ -74,12 +74,16 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
 5. **Progress tracking** (`state.json`): a running backup makes progress
    when the phase, a counter, the percent, `Stopping` or
    `DateOfStateChange` changes, or a band write is newer than the newest one
-   seen so far. Byte and file counts are kept as exact integers from zero up to (but
+   seen in the current backup generation. The band baseline is reset when a
+   backup starts after confirmed idle or when the `tmutil` destination UUID
+   changes. Byte and file counts are kept as exact integers from zero up to (but
    excluding) 10¹⁶. Fractional and out-of-range counts are unavailable.
    `stalled_seconds` is the time since the last progress (0
    when no backup runs; a backup that was not running in the previous cycle
    starts at 0). While `tmutil` does not answer, the count carries on from
-   the last known progress, and band writes still count.
+   the last known progress, and band writes still count. A wall-clock step
+   back past the previous poll restarts the stall timer and keeps the last
+   known backup status.
 6. **The report** goes to macmini as root over SSH (100 s; `obs_ctl.py`
    waits up to 60 s for its lock). The progress state is kept even when the
    report fails.

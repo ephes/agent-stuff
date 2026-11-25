@@ -63,6 +63,7 @@ MAX_HUNG = 20
 PHASE = re.compile(r"[^A-Za-z0-9_. -]")
 SAFE_PATH = re.compile(r"/[A-Za-z0-9_./-]+")
 SAFE_HOST = re.compile(r"[A-Za-z0-9_.@-]+")
+DESTINATION_UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 STATE_FORMAT = 1
 
 
@@ -366,8 +367,12 @@ def _flag(value: Any) -> bool | None:
     return None
 
 
+def _destination_id(value: Any) -> str | None:
+    return value.lower() if isinstance(value, str) and DESTINATION_UUID.fullmatch(value) else None
+
+
 def parse_status(raw: bytes) -> dict[str, Any]:
-    """The fields of ``tmutil status -X`` this probe reports; ``ValueError`` when it is not a plist dict."""
+    """Status fields for reporting and tracking; ``ValueError`` when the plist is unreadable."""
 
     try:
         data = plistlib.loads(raw)
@@ -401,6 +406,7 @@ def parse_status(raw: bytes) -> dict[str, Any]:
         "total_bytes": _count(field("totalBytes")),
         "total_files": _count(field("totalFiles")),
         "state_changed": changed.isoformat() if isinstance(changed, datetime) else str(changed or "")[:40],
+        "destination_id": _destination_id(data.get("DestinationID")),
     }
 
 
@@ -530,32 +536,48 @@ def track(previous: Any, tmutil: str, fields: dict[str, Any], band: int | None, 
     """The new progress state and ``stalled_seconds``.
 
     Progress is any change of the fingerprint or a band write newer than the
-    newest seen so far. A backup that was not running last time starts
-    counting now. While ``tmutil`` does not answer, the count carries on from
-    the last known progress (the tmutil rule alerts on its own).
+    newest seen for this backup generation. A backup that was not running
+    last time starts counting now. While ``tmutil`` does not answer, the
+    count carries on from the last known progress (the tmutil rule alerts
+    on its own).
     """
 
     prev = previous if isinstance(previous, dict) and previous.get("format") == STATE_FORMAT else {}
     seen = prev.get("band_max") if isinstance(prev.get("band_max"), int) else None
-    newer_band = band is not None and seen is not None and band > seen
-    band_max = max(b for b in (seen, band) if b is not None) if (seen, band) != (None, None) else None
     progress_epoch = prev.get("progress_epoch") if isinstance(prev.get("progress_epoch"), int) else now
+    previous_epoch = prev.get("epoch")
+    if type(previous_epoch) is int and now < previous_epoch:
+        progress_epoch = now
     running = prev.get("running") is True
     fingerprint = prev.get("fingerprint")
+    destination_id = _destination_id(prev.get("destination_id"))
     if tmutil == "ok":
         running_now = bool(fields.get("running"))
+        # A stored fingerprint distinguishes confirmed idle from an unknown initial status.
+        new_backup = running_now and prev.get("running") is False and isinstance(fingerprint, list)
+        current_destination = fields.get("destination_id")
+        destination_changed = (
+            current_destination is not None and destination_id is not None and current_destination != destination_id
+        )
+        if new_backup or destination_changed:
+            seen = None
+        if new_backup or current_destination is not None:
+            destination_id = current_destination
         new_fingerprint = [fields.get(key) for key in FINGERPRINT]
-        if not running_now or not running or new_fingerprint != fingerprint or newer_band:
+        if not running_now or not running or new_fingerprint != fingerprint:
             progress_epoch = now
         running, fingerprint = running_now, new_fingerprint
-    elif running and newer_band:
-        progress_epoch = now
+    if band is not None and (seen is None or band > seen):
+        if running and seen is not None:
+            progress_epoch = now
+        seen = band
     stalled = max(0, now - progress_epoch) if running else 0
     state = {
         "format": STATE_FORMAT,
         "running": running,
         "fingerprint": fingerprint,
-        "band_max": band_max,
+        "band_max": seen,
+        "destination_id": destination_id,
         "progress_epoch": progress_epoch,
         "epoch": now,
     }
