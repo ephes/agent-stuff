@@ -82,8 +82,8 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
    when no backup runs; a backup that was not running in the previous cycle
    starts at 0). While `tmutil` does not answer, the count carries on from
    the last known progress, and band writes still count. A wall-clock step
-   back past the previous poll restarts the stall timer and keeps the last
-   known backup status.
+   back past the previous poll restarts the stall timer and the band
+   baseline and keeps the last known backup status.
 6. **The report** goes to macmini as root over SSH (100 s; `obs_ctl.py`
    waits up to 60 s for its lock). The progress state is kept even when the
    report fails.

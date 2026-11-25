@@ -231,6 +231,17 @@ class TrackTests(unittest.TestCase):
                 _, stalled = tg.track(rebased, "ok", self.fields(bytes=2000), NOW, rolled_back + 600)
                 self.assertEqual(stalled, 0)
 
+    def test_band_writes_after_a_clock_rollback_count_while_tmutil_is_silent(self) -> None:
+        state, _ = tg.track(None, "ok", self.fields(), NOW + 3000, NOW)
+        state, _ = tg.track(state, "ok", self.fields(), NOW + 3000, NOW + 3600)
+        rolled_back = NOW - 3600
+        state, stalled = tg.track(state, "timeout", {}, rolled_back - 60, rolled_back)
+        self.assertEqual((state["band_max"], stalled), (rolled_back - 60, 0))
+        state, stalled = tg.track(state, "timeout", {}, rolled_back + 500, rolled_back + 600)
+        self.assertEqual((state["band_max"], stalled), (rolled_back + 500, 0))
+        _, stalled = tg.track(state, "hung", {}, rolled_back + 500, rolled_back + 1200)
+        self.assertEqual(stalled, 600)
+
     def test_a_foreign_state_format_starts_over(self) -> None:
         state, stalled = tg.track({"format": 99, "running": True, "progress_epoch": 0}, "ok", self.fields(), NOW, NOW)
         self.assertEqual((stalled, state["format"]), (0, tg.STATE_FORMAT))

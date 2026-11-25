@@ -547,7 +547,9 @@ def track(previous: Any, tmutil: str, fields: dict[str, Any], band: int | None, 
     progress_epoch = prev.get("progress_epoch") if isinstance(prev.get("progress_epoch"), int) else now
     previous_epoch = prev.get("epoch")
     if type(previous_epoch) is int and now < previous_epoch:
+        # Band mtimes seen before the step come from the old clock; rebase both.
         progress_epoch = now
+        seen = None
     running = prev.get("running") is True
     fingerprint = prev.get("fingerprint")
     destination_id = _destination_id(prev.get("destination_id"))

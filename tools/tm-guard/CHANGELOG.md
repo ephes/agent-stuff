@@ -6,8 +6,8 @@
   state directory's lock file.
 - Bound local JSON state reads and treat non-regular or oversized files as
   missing state.
-- Restart stall timing after a backward clock step while preserving the
-  last known backup status.
+- Restart stall timing and the band-write baseline after a backward clock
+  step while preserving the last known backup status.
 - Reset the band-write baseline after confirmed idle or a change of Time
   Machine destination UUID.
 
