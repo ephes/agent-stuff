@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Close a newly acquired slot descriptor when command launch fails, including
+  when launch setup raises an exception.
+
 - Recheck the slot name after confirming an inherited lock. If the entry
   changed, acquire normally and leave the outer command's descriptor alone.
 

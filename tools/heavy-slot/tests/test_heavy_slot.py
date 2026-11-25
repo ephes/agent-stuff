@@ -1,3 +1,4 @@
+import contextlib
 import fcntl
 import io
 import os
@@ -530,6 +531,28 @@ class RunTest(Fixture):
         finally:
             os.close(w)
         self.assertEqual(p.returncode, 127)
+
+    def test_exception_during_launch_closes_the_new_lock(self):
+        failure = RuntimeError("flush failed")
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch("sys.stdout") as stdout,
+            mock.patch.object(hs.os, "execvp") as execvp,
+        ):
+            stdout.flush.side_effect = failure
+            with self.assertRaises(RuntimeError) as raised:
+                hs.main(["--", "true"])
+            fd = int(os.environ["HEAVY_SLOT_HELD_FD"])
+            try:
+                self.assertIs(raised.exception, failure)
+                execvp.assert_not_called()
+                self.assertFalse(hs.is_held(self.dir / "slot-0.lock"))
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            finally:
+                # Clean up even when the test exposes the descriptor leak.
+                with contextlib.suppress(OSError):
+                    os.close(fd)
 
     def test_closed_stderr_while_waiting_keeps_the_lock_file_clean(self):
         fd = self.hold()

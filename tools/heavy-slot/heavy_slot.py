@@ -352,9 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         pass
     if announced:
         warn(f"heavy-slot: got {path.name} after {time.monotonic() - started:.0f} s")
-    rc = become(command, path.name, pool, high)
-    os.close(high)
-    return rc
+    try:
+        return become(command, path.name, pool, high)
+    finally:
+        os.close(high)
 
 
 if __name__ == "__main__":

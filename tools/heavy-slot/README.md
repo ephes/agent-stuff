@@ -82,8 +82,10 @@ step at once.
   inherited descriptor drops the slot early. SIGPIPE and SIGXFSZ get their
   default disposition back (Python ignores them).
 - Exit codes of heavy-slot itself: 75 no slot in time, 127 the command
-  cannot be started, 2 usage error. The holder line is information only: if
-  it cannot be written (disk full), the command still runs.
+  cannot be started, 2 usage error. A failed launch releases a newly
+  acquired slot even if launch setup raises and the Python caller keeps
+  running. The holder line is information only: if it cannot be written
+  (disk full), the command still runs.
 - heavy-slot does not renice the command; the runners start their workers
   with `nice -n 5` (see below).
 
