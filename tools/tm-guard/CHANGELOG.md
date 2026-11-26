@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep a confirmed remote report successful when the local summary cache
+  write fails, and log a warning.
 - Refuse to start a probe if the acquired run lock no longer matches the
   state directory's lock file.
 - Bound local JSON state reads. Treat unreadable progress and summary files

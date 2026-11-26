@@ -678,6 +678,31 @@ class CycleTests(Base):
         self.assertEqual(self.run_check(), 1)
         self.assertTrue((self.state / "state.json").exists())
 
+    def test_a_confirmed_report_survives_summary_cache_write_failure(self) -> None:
+        cache = self.state / "last-summary.json"
+        progress = self.state / "state.json"
+        write = tg.write_atomic
+
+        def confirm(report):
+            self.assertEqual(tg.read_json(progress)["epoch"], report["probe_epoch"])
+            return True, ""
+
+        def fail_cache_write(path, data):
+            if path == cache:
+                raise OSError("disk full")
+            write(path, data)
+
+        with mock.patch.object(tg, "send", side_effect=confirm) as send, mock.patch.object(tg, "log") as log:
+            with mock.patch.object(tg, "write_atomic", side_effect=fail_cache_write):
+                self.assertEqual(self.run_check(), 0)
+            send.assert_called_once()
+            self.assertTrue(progress.is_file())
+            self.assertFalse(cache.exists())
+            log.assert_any_call("warning: could not write last-summary.json (disk full)")
+
+            self.assertEqual(self.run_check(), 0)
+            self.assertEqual(tg.read_json(cache)["line"], tg.summary(send.call_args.args[0]))
+
     def test_dry_run_writes_and_sends_nothing(self) -> None:
         self.assertEqual(self.run_check("--dry-run"), 0)
         self.assertFalse((self.tmp / "sent.json").exists())

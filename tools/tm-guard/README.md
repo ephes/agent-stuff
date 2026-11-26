@@ -86,7 +86,9 @@ summary, and every failure). State: `~/.local/state/tm-guard/`.
    baseline and keeps the last known backup status.
 6. **The report** goes to macmini as root over SSH (100 s; `obs_ctl.py`
    waits up to 60 s for its lock). The progress state is kept even when the
-   report fails.
+   report fails. After macmini confirms the report, a local write failure
+   for the log deduplication cache (`last-summary.json`) logs a warning and
+   keeps exit status 0. A later cycle can refresh the cache.
 
 The probe never touches the backup volume or `/Volumes`, and every command
 it runs has a hard limit, so the whole cycle ends within about 5 minutes

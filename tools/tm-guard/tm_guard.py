@@ -682,7 +682,10 @@ def cmd_check(args: argparse.Namespace) -> int:
         # One log line per change (and every failure), not one per five minutes.
         if not isinstance(last, dict) or last.get("line") != line or args.verbose:
             log(line)
-            write_atomic(state / "last-summary.json", {"line": line, "epoch": now})
+            try:
+                write_atomic(state / "last-summary.json", {"line": line, "epoch": now})
+            except OSError as error:
+                log(f"warning: could not write last-summary.json ({error})")
         return 0
 
 
