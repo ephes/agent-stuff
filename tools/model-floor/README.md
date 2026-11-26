@@ -13,7 +13,8 @@ tools/model-floor/bin/model-floor-check path/to/run.sh path/to/COMMON.md   # sin
 ```
 
 Output: one line per finding, `path:line: id: text`. Exit 0 clean, 1 findings,
-2 a path that does not exist or a Git enumeration error.
+2 a path that does not exist, invalid allowlist configuration or a Git
+enumeration error.
 Diagnostic paths escape backslashes (except on Windows, where they separate
 path components), non-printable characters and undecodable filename bytes
 (shown as filesystem surrogate escapes such as `\udcff`).
@@ -47,6 +48,11 @@ Model ids in history name what ran at that time and stay as written:
 - a line carrying `model-floor: allow` (a test fixture that proves an old id
   is refused);
 - a file whose first five lines carry `model-floor: allow-file`.
+
+The optional `.model-floor-allow` must be a readable regular UTF-8 file
+of at most 65,536 bytes with at most 256 glob entries. Blank lines and
+comments do not count toward the entry limit. Invalid configuration exits
+with status 2 before any files under that directory are scanned.
 
 At the top of a git checkout only tracked and new, not ignored files are
 scanned (`git ls-files --cached --others --exclude-standard`), so local

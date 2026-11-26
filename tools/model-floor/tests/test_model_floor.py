@@ -98,6 +98,40 @@ class TestScan(unittest.TestCase):
         found = sorted((f[0], f[1]) for f in model_floor.scan(self.root))
         self.assertEqual(found, [("t/test_a.py", 2), ("t/test_c.py", 7)])
 
+    def test_allowlist_is_optional_and_accepts_globs_at_the_limit(self):
+        self.write("history/old.md", "gpt-6.1\n")
+        self.assertEqual(self.run_main(self.root)[0], 1)
+        self.write(".model-floor-allow", "# comment\n\nkeep/*\nhistory/* # old models\n")
+        with patch.object(model_floor, "MAX_ALLOW_GLOBS", 2, create=True):
+            self.assertEqual(self.run_main(self.root), (0, "", ""))
+
+    def test_invalid_allowlist_reports_incomplete_configuration(self):
+        self.write("active.md", "gpt-6.1\n")
+        path = os.path.join(self.root, ".model-floor-allow")
+        for data, detail in (
+            (b"#" * 65_537, "65536 bytes"),
+            (b"# invalid UTF-8: \xff\n", "UTF-8"),
+            (b"keep/*\nhistory/*\nactive.md\n", "2 globs"),
+        ):
+            with self.subTest(detail=detail):
+                with open(path, "wb") as fh:
+                    fh.write(data)
+                with patch.object(model_floor, "MAX_ALLOW_GLOBS", 2, create=True):
+                    rc, out, err = self.run_main(self.root)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(".model-floor-allow", err)
+                self.assertIn(detail, err)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "requires a FIFO")
+    def test_allowlist_fifo_reports_incomplete_configuration_without_blocking(self):
+        os.mkfifo(os.path.join(self.root, ".model-floor-allow"))
+        cmd = [sys.executable, os.path.join(REPO, "tools/model-floor/bin/model-floor-check"), self.root]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn(".model-floor-allow", result.stderr)
+        self.assertIn("regular file", result.stderr)
+
     def test_main_exit_codes(self):
         self.write("a.toml", 'model = "gpt-6.2-sol"\n')
         self.assertEqual(self.run_main(self.root)[0], 0)

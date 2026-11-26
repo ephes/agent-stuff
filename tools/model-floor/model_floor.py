@@ -18,10 +18,11 @@ whole tree is walked.
 
 Unnumbered ids (`gpt-daybreak-blue-latest`, `codex-auto-review`) carry no
 generation and are not reported. Exit 0 when clean, 1 with one line per
-finding, 2 on a usage or Git enumeration error.
+finding, 2 on a usage, allowlist or Git enumeration error.
 """
 import argparse
 import fnmatch
+import io
 import os
 import re
 import stat
@@ -41,6 +42,8 @@ DEFAULT_HISTORY = (
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".tox",
              ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 MAX_BYTES = 2_000_000
+MAX_ALLOW_BYTES = 65_536
+MAX_ALLOW_GLOBS = 256
 
 # `gpt-6.1-sol`, `GPT-6 Sol`, `openai/gpt-5.6`, `gpt-4o`: "gpt-" and a major  # model-floor: allow
 # version, an optional ".minor", and no further digit or dot-digit after it.
@@ -77,17 +80,33 @@ def old_ids(line):
     return found
 
 
+class ScanInputError(RuntimeError):
+    """An input needed for a complete scan could not be processed."""
+
+    def __init__(self, path, detail):
+        self.path = path
+        super().__init__(detail)
+
+
 def load_allow_globs(root):
     globs = list(DEFAULT_HISTORY)
     path = os.path.join(root, ALLOW_FILE_NAME)
     try:
-        with open(path, encoding="utf-8") as fh:
-            for raw in fh:
-                line = raw.split("#", 1)[0].strip()
-                if line:
-                    globs.append(line)
+        data = _read_regular_file(path, MAX_ALLOW_BYTES)
+        text = data.decode("utf-8")
     except FileNotFoundError:
-        pass
+        return globs
+    except UnicodeDecodeError as exc:
+        raise ScanInputError(path, "allowlist must be UTF-8") from exc
+    except OSError as exc:
+        raise ScanInputError(path, f"cannot read allowlist: {exc.strerror}") from exc
+
+    for raw in io.StringIO(text, newline=None):
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            if len(globs) == len(DEFAULT_HISTORY) + MAX_ALLOW_GLOBS:
+                raise ScanInputError(path, f"allowlist exceeds {MAX_ALLOW_GLOBS} globs")
+            globs.append(line)
     return globs
 
 
@@ -100,22 +119,32 @@ def _open_nonblocking(path, flags):
     return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
 
 
+def _read_regular_file(path, max_bytes):
+    """Read at most max_bytes from an opened regular file."""
+    data = bytearray()
+    with open(path, "rb", buffering=0, opener=_open_nonblocking) as fh:
+        info = os.fstat(fh.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ScanInputError(path, "expected a regular file")
+        if info.st_size > max_bytes:
+            raise ScanInputError(path, f"file exceeds {max_bytes} bytes")
+        while len(data) <= max_bytes:
+            chunk = fh.read(max_bytes + 1 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+    if len(data) > max_bytes:
+        raise ScanInputError(path, f"file exceeds {max_bytes} bytes")
+    return data
+
+
 def scan_file(path):
     """Findings `(line_number, id, line)` in one text file."""
-    data = bytearray()
     try:
-        with open(path, "rb", buffering=0, opener=_open_nonblocking) as fh:
-            info = os.fstat(fh.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
-                return []
-            while len(data) <= MAX_BYTES:
-                chunk = fh.read(MAX_BYTES + 1 - len(data))
-                if not chunk:
-                    break
-                data.extend(chunk)
-    except OSError:
+        data = _read_regular_file(path, MAX_BYTES)
+    except (OSError, ScanInputError):
         return []
-    if len(data) > MAX_BYTES or b"\0" in data[:8192]:
+    if b"\0" in data[:8192]:
         return []
     text = data.decode("utf-8", errors="replace")
     lines = text.splitlines()
@@ -212,6 +241,9 @@ def main(argv=None):
                         for rel, n, m, line in scan(target, args.allow)]
             except GitEnumerationError as exc:
                 print(f"model-floor-check: {_display_path(target)}: {exc}", file=sys.stderr)
+                return 2
+            except ScanInputError as exc:
+                print(f"model-floor-check: {_display_path(exc.path)}: {exc}", file=sys.stderr)
                 return 2
         elif os.path.isfile(target):
             hits = [(target, n, m, line) for n, m, line in scan_file(target)]

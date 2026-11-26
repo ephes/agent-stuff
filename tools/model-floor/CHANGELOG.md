@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject unreadable, nonregular or invalid UTF-8 allowlists and bound their
+  size and glob count before scanning.
 - Skip nonregular files without blocking and enforce the 2 MB limit even
   when a file grows during the scan.
 - Report failed or timed-out Git enumeration as a scan error. Keep the
