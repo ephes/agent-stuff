@@ -237,20 +237,26 @@ def ps_name(pid: int) -> str:
 # -- state -----------------------------------------------------------------------------------------
 
 
+def _read_json(path: Path, *, flags: int = 0) -> Any:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("expected a regular file")
+        if info.st_size > MAX_STATE_BYTES:
+            raise ValueError("file exceeds the state size limit")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_STATE_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_STATE_BYTES:
+        raise ValueError("file exceeds the state size limit")
+    return json.loads(raw.decode("utf-8"))
+
+
 def read_json(path: Path) -> Any:
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STATE_BYTES:
-                return None
-            with os.fdopen(fd, "rb", closefd=False) as handle:
-                raw = handle.read(MAX_STATE_BYTES + 1)
-        finally:
-            os.close(fd)
-        if len(raw) > MAX_STATE_BYTES:
-            return None
-        return json.loads(raw.decode("utf-8"))
+        return _read_json(path)
     except (OSError, ValueError, RecursionError):
         return None
 
@@ -299,7 +305,7 @@ def run_lock(state: Path) -> Iterator[bool]:
         os.close(fd)
 
 
-def still_hung(entries: Any) -> list[dict[str, Any]]:
+def still_hung(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The recorded ``tmutil`` children that may still live.
 
     With a recorded UTC start time (``lstart_utc``, ``ps_lstart`` taken
@@ -312,11 +318,7 @@ def still_hung(entries: Any) -> list[dict[str, Any]]:
     """
 
     alive: list[dict[str, Any]] = []
-    if not isinstance(entries, list):
-        return alive
-    for entry in entries[:MAX_HUNG]:
-        if not isinstance(entry, dict) or not isinstance(entry.get("pid"), int):
-            continue
+    for entry in entries:
         now = ps_lstart(entry["pid"])
         if now == GONE:
             continue
@@ -423,9 +425,20 @@ def read_tmutil(state: Path) -> tuple[str, str, dict[str, Any]]:
     """(``ok``/``timeout``/``hung``/``error``, detail, parsed fields)."""
 
     hung_path = state / "hung.json"
-    recorded = read_json(hung_path)
+    try:
+        recorded = _read_json(hung_path, flags=os.O_NOFOLLOW)
+        if not isinstance(recorded, list) or len(recorded) > MAX_HUNG or any(
+            not isinstance(entry, dict) or type(entry.get("pid")) is not int or entry["pid"] <= 0
+            for entry in recorded
+        ):
+            raise ValueError("invalid ownership records")
+    except FileNotFoundError:
+        recorded = []
+    except (OSError, ValueError, RecursionError) as error:
+        detail = f"cannot read hung.json. Verify any earlier tmutil exited before clearing the receipt. {error}"
+        return "error", detail, {}
     alive = still_hung(recorded)
-    if recorded is not None and alive != recorded:
+    if alive != recorded:
         write_atomic(hung_path, alive)
     if alive:
         first = alive[0]

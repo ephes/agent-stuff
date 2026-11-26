@@ -492,6 +492,25 @@ class CycleTests(Base):
         self.assertIn("by an earlier probe", self.sent()["tmutil_detail"])
         self.assertEqual(self.tmutil_calls(), 0)
 
+    def test_an_unreadable_ownership_record_blocks_tmutil_without_overwriting_it(self) -> None:
+        self.state.mkdir()
+        receipt = self.state / "hung.json"
+        for contents in (b"[{", b"null", b'[{"pid": 0}]', b" " * (tg.MAX_STATE_BYTES + 1)):
+            with self.subTest(contents=contents[:20]):
+                receipt.write_bytes(contents)
+                with mock.patch.object(tg, "bounded", wraps=tg.bounded) as runner:
+                    status, detail, fields = tg.read_tmutil(self.state)
+                self.assertEqual(receipt.read_bytes(), contents)
+                runner.assert_not_called()
+                self.assertEqual((status, fields), ("error", {}))
+                self.assertIn("hung.json", detail)
+                self.assertIn("Verify", detail)
+
+    def test_missing_ownership_record_allows_one_probe(self) -> None:
+        self.assertFalse((self.state / "hung.json").exists())
+        status, _, fields = tg.read_tmutil(self.state)
+        self.assertEqual((status, fields["running"], self.tmutil_calls()), ("ok", False, 1))
+
     def test_a_live_record_with_a_bad_timestamp_still_blocks_tmutil(self) -> None:
         lstart = "Fri Nov 20 11:00:00 2026"
         (self.tmp / "ps").write_text(lstart + "\n")

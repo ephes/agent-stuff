@@ -4,8 +4,8 @@
 
 - Refuse to start a probe if the acquired run lock no longer matches the
   state directory's lock file.
-- Bound local JSON state reads and treat non-regular or oversized files as
-  missing state.
+- Bound local JSON state reads. Treat unreadable progress and summary files
+  as missing. Preserve unreadable ownership receipts and block new probes.
 - Restart stall timing and the band-write baseline after a backward clock
   step while preserving the last known backup status.
 - Reset the band-write baseline after confirmed idle or a change of Time

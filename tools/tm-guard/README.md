@@ -101,7 +101,10 @@ probe error. Progress state uses the same durable JSON publication. A
 live recorded process still blocks a new run when its timestamp is
 unreadable. The diagnostic shows `unknown time` in that case.
 Local JSON state reads accept regular files up to 64 KiB. Oversized,
-non-regular or unreadable files use the missing-state fallback.
+non-regular or unreadable progress and summary files use the missing-state
+fallback. An unreadable or invalid `hung.json` stays in place and blocks
+`tmutil` with a probe error. Verify that any earlier probe's `tmutil` has
+exited before clearing the receipt. An absent receipt allows the probe to run.
 
 ## Nyxmon rules
 
