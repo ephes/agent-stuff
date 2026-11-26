@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import model_floor
 
@@ -163,6 +163,59 @@ class TestScan(unittest.TestCase):
                        check=True)
         found = sorted(f[0] for f in model_floor.scan(self.root))
         self.assertEqual(found, ["kept.md", "new.md"])
+
+    def test_unreadable_file_reports_incomplete_for_git_and_explicit_scans(self):
+        rel = "kept\nconfig.toml"
+        self.write(rel, "model = gpt-6.1\n")
+        path = os.path.join(self.root, rel)
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        subprocess.run(["git", "-C", self.root, "add", "--", rel], check=True)
+
+        def deny_config(filename, *args, **kwargs):
+            if filename == path:
+                raise PermissionError(errno.EACCES, "Permission denied", filename)
+            return open(filename, *args, **kwargs)
+
+        for target in (self.root, path):
+            with self.subTest(target=target):
+                with patch.object(model_floor, "open", side_effect=deny_config, create=True):
+                    rc, out, err = self.run_main(target)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn(r"kept\nconfig.toml", err)
+                self.assertIn("Permission denied", err)
+                self.assertEqual(len(err.splitlines()), 1)
+
+    def test_read_failure_after_successful_open_reports_incomplete(self):
+        self.write("config.toml", "model = gpt-6.1\n")
+        path = os.path.join(self.root, "config.toml")
+
+        def fail_read(filename, *args, **kwargs):
+            fh = open(filename, *args, **kwargs)
+            if filename == path:
+                fh.read = Mock(side_effect=FileNotFoundError(errno.ENOENT, "Read failed"))
+            return fh
+
+        with patch.object(model_floor, "open", side_effect=fail_read, create=True):
+            rc, out, err = self.run_main(self.root)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("config.toml", err)
+        self.assertIn("Read failed", err)
+
+    def test_git_scan_still_skips_deletions_and_ignored_binary_files(self):
+        self.write("staged.toml", "model = gpt-6.1\n")
+        self.write("deleted.toml", "model = gpt-6.1\n")
+        self.write(".gitignore", "ignored.bin\n")
+        ignored = os.path.join(self.root, "ignored.bin")
+        with open(ignored, "wb") as fh:
+            fh.write(b"\0gpt-6.1")
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        git = ["git", "-C", self.root]
+        subprocess.run(git + ["add", ".gitignore", "staged.toml", "deleted.toml"], check=True)
+        subprocess.run(git + ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                              "commit", "-qm", "fixture"], check=True)
+        subprocess.run(git + ["rm", "-q", "staged.toml"], check=True)
+        os.unlink(os.path.join(self.root, "deleted.toml"))
+        self.assertEqual(self.run_main(self.root), (0, "", ""))
 
     def test_git_enumeration_errors_are_reported_without_falling_back(self):
         subprocess.run(["git", "init", "-q", self.root], check=True)

@@ -18,7 +18,7 @@ whole tree is walked.
 
 Unnumbered ids (`gpt-daybreak-blue-latest`, `codex-auto-review`) carry no
 generation and are not reported. Exit 0 when clean, 1 with one line per
-finding, 2 on a usage, allowlist or Git enumeration error.
+finding, 2 on a usage error or incomplete scan.
 """
 import argparse
 import fnmatch
@@ -88,14 +88,20 @@ class ScanInputError(RuntimeError):
         super().__init__(detail)
 
 
+class FileAdmissionError(ValueError):
+    """An opened file does not meet the type or size requirements."""
+
+
 def load_allow_globs(root):
     globs = list(DEFAULT_HISTORY)
     path = os.path.join(root, ALLOW_FILE_NAME)
     try:
-        data = _read_regular_file(path, MAX_ALLOW_BYTES)
+        data = _read_regular_file(path, MAX_ALLOW_BYTES, missing_ok=True)
+        if data is None:
+            return globs
         text = data.decode("utf-8")
-    except FileNotFoundError:
-        return globs
+    except FileAdmissionError as exc:
+        raise ScanInputError(path, str(exc)) from exc
     except UnicodeDecodeError as exc:
         raise ScanInputError(path, "allowlist must be UTF-8") from exc
     except OSError as exc:
@@ -119,32 +125,50 @@ def _open_nonblocking(path, flags):
     return os.open(path, flags | getattr(os, "O_NONBLOCK", 0))
 
 
-def _read_regular_file(path, max_bytes):
-    """Read at most max_bytes from an opened regular file."""
+def _read_regular_file(path, max_bytes, *, missing_ok=False):
+    """Read an opened regular file within max_bytes, or return None if absent."""
+    try:
+        fh = open(path, "rb", buffering=0, opener=_open_nonblocking)
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise
+    except OSError as exc:
+        # Some nonregular files (such as sockets) cannot be opened at all.
+        try:
+            mode = os.stat(path).st_mode
+        except OSError:
+            raise exc from None
+        if not stat.S_ISREG(mode):
+            raise FileAdmissionError("expected a regular file") from exc
+        raise
+
     data = bytearray()
-    with open(path, "rb", buffering=0, opener=_open_nonblocking) as fh:
+    with fh:
         info = os.fstat(fh.fileno())
         if not stat.S_ISREG(info.st_mode):
-            raise ScanInputError(path, "expected a regular file")
+            raise FileAdmissionError("expected a regular file")
         if info.st_size > max_bytes:
-            raise ScanInputError(path, f"file exceeds {max_bytes} bytes")
+            raise FileAdmissionError(f"file exceeds {max_bytes} bytes")
         while len(data) <= max_bytes:
             chunk = fh.read(max_bytes + 1 - len(data))
             if not chunk:
                 break
             data.extend(chunk)
     if len(data) > max_bytes:
-        raise ScanInputError(path, f"file exceeds {max_bytes} bytes")
+        raise FileAdmissionError(f"file exceeds {max_bytes} bytes")
     return data
 
 
-def scan_file(path):
+def scan_file(path, *, missing_ok=False):
     """Findings `(line_number, id, line)` in one text file."""
     try:
-        data = _read_regular_file(path, MAX_BYTES)
-    except (OSError, ScanInputError):
+        data = _read_regular_file(path, MAX_BYTES, missing_ok=missing_ok)
+    except FileAdmissionError:
         return []
-    if b"\0" in data[:8192]:
+    except OSError as exc:
+        raise ScanInputError(path, f"cannot read file: {exc.strerror}") from exc
+    if data is None or b"\0" in data[:8192]:
         return []
     text = data.decode("utf-8", errors="replace")
     lines = text.splitlines()
@@ -206,7 +230,7 @@ def scan(root, extra_allow=()):
         rel = os.path.relpath(path, root)
         if is_allowed_path(rel, globs):
             continue
-        for number, model_id, line in scan_file(path):
+        for number, model_id, line in scan_file(path, missing_ok=True):
             findings.append((rel, number, model_id, line))
     return findings
 
@@ -223,6 +247,13 @@ def _display_path(path):
                    for char in path)
 
 
+def _print_scan_error(path, detail):
+    display = _display_path(path)
+    if len(display) > 512:
+        display = f"{display[:250]}...{display[-259:]}"
+    print(f"model-floor-check: {display}: {detail}", file=sys.stderr)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="model-floor-check",
@@ -235,21 +266,29 @@ def main(argv=None):
     args = p.parse_args(argv)
     total = 0
     for target in args.paths:
-        if os.path.isdir(target):
-            try:
+        try:
+            mode = os.stat(target).st_mode
+        except FileNotFoundError:
+            _print_scan_error(target, "no such file or directory")
+            return 2
+        except OSError as exc:
+            _print_scan_error(target, f"cannot inspect path: {exc.strerror}")
+            return 2
+
+        try:
+            if stat.S_ISDIR(mode):
                 hits = [(os.path.join(target, rel), n, m, line)
                         for rel, n, m, line in scan(target, args.allow)]
-            except GitEnumerationError as exc:
-                print(f"model-floor-check: {_display_path(target)}: {exc}", file=sys.stderr)
+            elif stat.S_ISREG(mode):
+                hits = [(target, n, m, line) for n, m, line in scan_file(target)]
+            else:
+                _print_scan_error(target, "expected a regular file or directory")
                 return 2
-            except ScanInputError as exc:
-                print(f"model-floor-check: {_display_path(exc.path)}: {exc}", file=sys.stderr)
-                return 2
-        elif os.path.isfile(target):
-            hits = [(target, n, m, line) for n, m, line in scan_file(target)]
-        else:
-            print(f"model-floor-check: no such file or directory: {_display_path(target)}",
-                  file=sys.stderr)
+        except GitEnumerationError as exc:
+            _print_scan_error(target, exc)
+            return 2
+        except ScanInputError as exc:
+            _print_scan_error(exc.path, exc)
             return 2
         for path, number, model_id, line in hits:
             print(f"{_display_path(path)}:{number}: {model_id}: {line[:200]}")

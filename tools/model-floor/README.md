@@ -13,11 +13,12 @@ tools/model-floor/bin/model-floor-check path/to/run.sh path/to/COMMON.md   # sin
 ```
 
 Output: one line per finding, `path:line: id: text`. Exit 0 clean, 1 findings,
-2 a path that does not exist, invalid allowlist configuration or a Git
-enumeration error.
+2 a usage error or incomplete scan, such as an invalid allowlist, a
+Git enumeration failure or a file that could not be read.
 Diagnostic paths escape backslashes (except on Windows, where they separate
 path components), non-printable characters and undecodable filename bytes
 (shown as filesystem surrogate escapes such as `\udcff`).
+Error diagnostics limit the displayed path to 512 characters.
 
 ## What counts
 
@@ -64,6 +65,9 @@ Elsewhere the whole tree is walked, skipping `.git`, virtual environments,
 `node_modules` and caches. Both scans check for regular files on the opened
 handle and skip binary files and files over 2 MB, including files that grow
 past the limit during the read.
+Files missing when a directory scan tries to open them are skipped. Other
+open errors and read errors report the affected path and exit 2. Explicit
+file targets also exit 2 if they disappear before opening.
 
 ## Tests
 
