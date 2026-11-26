@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Exit 2 with the affected path when opening or reading a scan input fails.
-  Keep skipping files already absent when a directory scan opens them.
+  Keep skipping files already absent when a directory scan opens them and
+  symlinks that do not resolve, such as loops.
 - Reject unreadable, nonregular or invalid UTF-8 allowlists and bound their
   size and glob count before scanning.
 - Skip nonregular files without blocking and enforce the 2 MB limit even

@@ -21,6 +21,7 @@ generation and are not reported. Exit 0 when clean, 1 with one line per
 finding, 2 on a usage error or incomplete scan.
 """
 import argparse
+import errno
 import fnmatch
 import io
 import os
@@ -44,6 +45,8 @@ SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".tox",
 MAX_BYTES = 2_000_000
 MAX_ALLOW_BYTES = 65_536
 MAX_ALLOW_GLOBS = 256
+# A symlink whose target fails with these names no file (dangling or looping).
+UNRESOLVED_LINK_ERRNOS = {errno.ELOOP, errno.ENOENT, errno.ENOTDIR}
 
 # `gpt-6.1-sol`, `GPT-6 Sol`, `openai/gpt-5.6`, `gpt-4o`: "gpt-" and a major  # model-floor: allow
 # version, an optional ".minor", and no further digit or dot-digit after it.
@@ -134,10 +137,19 @@ def _read_regular_file(path, max_bytes, *, missing_ok=False):
             return None
         raise
     except OSError as exc:
-        # Some nonregular files (such as sockets) cannot be opened at all.
+        # Some nonregular files (such as sockets) cannot be opened at all,
+        # and a symlink that does not resolve (such as a loop) names none.
         try:
             mode = os.stat(path).st_mode
-        except OSError:
+        except OSError as stat_exc:
+            if stat_exc.errno not in UNRESOLVED_LINK_ERRNOS:
+                raise exc from None
+            try:
+                mode = os.lstat(path).st_mode
+            except OSError:
+                raise exc from None
+            if stat.S_ISLNK(mode):
+                raise FileAdmissionError("expected a regular file") from exc
             raise exc from None
         if not stat.S_ISREG(mode):
             raise FileAdmissionError("expected a regular file") from exc

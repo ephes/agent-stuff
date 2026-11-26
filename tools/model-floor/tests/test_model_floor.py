@@ -205,12 +205,13 @@ class TestScan(unittest.TestCase):
         self.write("staged.toml", "model = gpt-6.1\n")
         self.write("deleted.toml", "model = gpt-6.1\n")
         self.write(".gitignore", "ignored.bin\n")
-        ignored = os.path.join(self.root, "ignored.bin")
-        with open(ignored, "wb") as fh:
-            fh.write(b"\0gpt-6.1")
+        for name in ("ignored.bin", "tracked.bin"):
+            with open(os.path.join(self.root, name), "wb") as fh:
+                fh.write(b"\0gpt-6.1")
         subprocess.run(["git", "init", "-q", self.root], check=True)
         git = ["git", "-C", self.root]
-        subprocess.run(git + ["add", ".gitignore", "staged.toml", "deleted.toml"], check=True)
+        subprocess.run(git + ["add", ".gitignore", "staged.toml", "deleted.toml", "tracked.bin"],
+                       check=True)
         subprocess.run(git + ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                               "commit", "-qm", "fixture"], check=True)
         subprocess.run(git + ["rm", "-q", "staged.toml"], check=True)
@@ -328,6 +329,31 @@ class TestScan(unittest.TestCase):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("b-kept:1: gpt-6.1:", result.stdout)
+
+    def test_unresolvable_symlinks_are_skipped_in_fallback_and_git_scans(self):
+        os.symlink("loop", os.path.join(self.root, "loop"))
+        os.symlink("missing", os.path.join(self.root, "dangling"))
+        self.write("kept.md", "gpt-6.1\n")
+        expected = (os.path.join(self.root, "kept.md") + ":1: gpt-6.1: gpt-6.1\n",
+                    "model-floor-check: 1 id(s) below GPT-6.2\n")
+        self.assertEqual(self.run_main(self.root), (1, *expected))
+        subprocess.run(["git", "init", "-q", self.root], check=True)
+        subprocess.run(["git", "-C", self.root, "add", "loop", "dangling", "kept.md"], check=True)
+        self.assertEqual(self.run_main(self.root), (1, *expected))
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root bypasses permissions")
+    def test_symlink_into_unsearchable_directory_reports_incomplete(self):
+        self.write("locked/a.toml", "model = gpt-6.1\n")
+        os.symlink(os.path.join("locked", "a.toml"), os.path.join(self.root, "link.toml"))
+        locked = os.path.join(self.root, "locked")
+        os.chmod(locked, 0)
+        try:
+            # The fallback walk cannot list locked/, so only the link is opened.
+            rc, out, err = self.run_main(self.root)
+        finally:
+            os.chmod(locked, 0o700)
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("link.toml: cannot read file:", err)
 
     def test_binary_files_are_skipped(self):
         with open(os.path.join(self.root, "blob.bin"), "wb") as fh:

@@ -65,7 +65,8 @@ Elsewhere the whole tree is walked, skipping `.git`, virtual environments,
 `node_modules` and caches. Both scans check for regular files on the opened
 handle and skip binary files and files over 2 MB, including files that grow
 past the limit during the read.
-Files missing when a directory scan tries to open them are skipped. Other
+Files missing when a directory scan tries to open them are skipped, as are
+symlinks that do not resolve (dangling or looping). Other
 open errors and read errors report the affected path and exit 2. Explicit
 file targets also exit 2 if they disappear before opening.
 
