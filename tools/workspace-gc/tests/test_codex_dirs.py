@@ -224,17 +224,28 @@ class TestRunLockWait(unittest.TestCase):
         finally:
             first.release()
 
-    def test_remove_waits_by_default_report_does_not(self):
+    def test_remove_and_report_wait_by_default_scan_does_not(self):
+        # 2026-11-26 20:00 the scheduled report --apply exited BUSY within
+        # 146 ms because a runner's single-path remove held the lock.
+        self.assertEqual(cli.DEFAULT_REPORT_LOCK_WAIT, 600.0)
         held = runlock.acquire(self.path)
         try:
             out = __import__("io").StringIO()
             with mock.patch.object(runlock, "acquire", wraps=runlock.acquire) as acq, \
-                    mock.patch.object(cli, "DEFAULT_REMOVE_LOCK_WAIT", 0.2):
+                    mock.patch.object(cli, "DEFAULT_REMOVE_LOCK_WAIT", 0.2), \
+                    mock.patch.object(cli, "DEFAULT_REPORT_LOCK_WAIT", 0.1):
                 code = cli.main(["remove", "--apply", "/nonexistent", "--lock-file", self.path,
                                  "--no-herdr", "--no-processes", "--no-work"], out=out)
                 self.assertEqual(code, cli.EXIT_BUSY, out.getvalue())
                 self.assertEqual(acq.call_args.kwargs["wait"], 0.2)
-                code = cli.main(["report", "--out-dir", self.dir, "--lock-file", self.path,
+                for argv in (["report"], ["report", "--apply"]):
+                    code = cli.main(argv + ["--out-dir", self.dir, "--root", self.dir,
+                                            "--main-root", self.dir, "--lock-file", self.path,
+                                            "--no-herdr", "--no-processes", "--no-work"], out=out)
+                    self.assertEqual(code, cli.EXIT_BUSY)
+                    self.assertEqual(acq.call_args.kwargs["wait"], 0.1)
+                code = cli.main(["scan", "--apply", "--root", self.dir, "--main-root", self.dir,
+                                 "--lock-file", self.path,
                                  "--no-herdr", "--no-processes", "--no-work"], out=out)
                 self.assertEqual(code, cli.EXIT_BUSY)
                 self.assertEqual(acq.call_args.kwargs["wait"], 0.0)

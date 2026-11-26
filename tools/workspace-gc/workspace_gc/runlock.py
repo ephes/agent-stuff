@@ -1,12 +1,13 @@
 """A run lock, so a new run never piles up behind (or next to) a hung one.
 
 `acquire(path)` takes a non-blocking exclusive flock on `path` and writes the
-holder's pid and start time into it. The kernel drops the lock when the
-holder exits, however it exits, so a crashed or killed run never leaves a
-stale lock behind. A second run that finds the lock held gives up at once,
+holder's pid and the time it took the lock into it. The kernel drops the lock
+when the holder exits, however it exits, so a crashed or killed run never
+leaves a stale lock behind. A second run that finds the lock held gives up at once,
 or, with `wait` seconds, retries every `poll` seconds until the lock is free
-or the wait is over (`remove` waits by default, so a runner's or clerk's
-removal is not skipped just because the daily run is busy).
+or the wait is over (`remove` and `report` wait by default, so a runner's or
+clerk's removal is not skipped just because the daily run is busy, and the
+daily run is not skipped because such a removal is under way).
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ def acquire(path: str, wait: float = 0.0, poll: float = 5.0) -> RunLock:
             else:
                 try:
                     os.ftruncate(fd, 0)
-                    stamp = f"pid {os.getpid()}, started {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
+                    stamp = f"pid {os.getpid()}, locked since {time.strftime('%Y-%m-%dT%H:%M:%S%z')}\n"
                     os.pwrite(fd, stamp.encode(), 0)
                 except OSError:
                     pass  # the lock itself is what matters

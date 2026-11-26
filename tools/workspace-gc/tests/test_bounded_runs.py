@@ -377,6 +377,21 @@ class TestBoundedApply(GitFixture):
         self.assertEqual(code, 1, out)
         self.assertIn("stopped early: run time limit reached", out)
 
+    def test_report_waits_for_a_short_removal_to_finish(self):
+        out_dir = os.path.join(self.tmp, "state")
+        held = runlock.acquire(os.path.join(self.tmp, "workspace-gc.lock"))
+        self.addCleanup(held.release)
+        # The holder (a runner's single-path remove) finishes only after the
+        # report's first attempt found the lock held.
+        with mock.patch.object(runlock.time, "sleep", side_effect=lambda _s: held.release()) \
+                as sleep:
+            code, out = self.cli("report", "--apply", "--out-dir", out_dir,
+                                 default_lock_wait=True)
+        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("BUSY", out)
+        self.assertTrue(os.path.exists(os.path.join(out_dir, "latest.txt")))
+
     def test_report_is_busy_while_another_run_holds_the_lock(self):
         out_dir = os.path.join(self.tmp, "state")
         cl = self.clone(self.url, "ws-cl")
@@ -385,7 +400,7 @@ class TestBoundedApply(GitFixture):
             code, out = self.cli("report", "--apply", "--out-dir", out_dir)
             self.assertEqual(code, cli.EXIT_BUSY)
             self.assertIn("BUSY, nothing done", out)
-            self.assertIn(f"pid {os.getpid()}", out)
+            self.assertIn(f"pid {os.getpid()}, locked since ", out)
             code, out = self.cli("remove", "--apply", cl)
             self.assertEqual(code, cli.EXIT_BUSY)
             # a dry-run scan needs no lock

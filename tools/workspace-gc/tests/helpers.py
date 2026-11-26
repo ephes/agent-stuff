@@ -137,7 +137,7 @@ class GitFixture(unittest.TestCase):
     def by_path(self, inv):
         return {c.path: c for c in inv.checkouts}
 
-    def cli(self, *argv, signals=None):
+    def cli(self, *argv, signals=None, default_lock_wait=False):
         import io
         from workspace_gc import cli
         out = io.StringIO()
@@ -145,7 +145,7 @@ class GitFixture(unittest.TestCase):
                 "--keep-file", os.path.join(self.tmp, "no-keep-file"), "--no-sizes"]
         if "--lock-file" not in argv:
             base += ["--lock-file", os.path.join(self.tmp, "workspace-gc.lock")]
-        if "--lock-wait" not in argv:
+        if "--lock-wait" not in argv and not default_lock_wait:
             base += ["--lock-wait", "0"]   # a held lock is BUSY at once in tests
         if "--regenerable-file" not in argv:
             base += ["--regenerable-file", os.path.join(self.tmp, "no-regenerable-file")]

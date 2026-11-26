@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The scheduled run no longer skips itself because a short removal holds the
+  run lock. On 2026-11-26 the 20:00 run and a manual restart at 20:45 each
+  exited `BUSY, nothing done` within a fraction of a second, because a
+  runner's or clerk's single-path `remove --apply` had taken the lock in the
+  same second, and the stale workspace directories stayed. `report` now waits
+  up to 600 seconds for the lock by default (`--lock-wait`, was 0; `remove`
+  still waits 1800, `scan --apply` 0). The holder note in the lock file and in
+  the `BUSY` line now reads `locked since` instead of `started`: it is the time
+  the holder took the lock, which misled the diagnosis.
+
 - Retire the run lock descriptor before releasing it so a failed close cannot
   cause a later release to touch a reused descriptor. Preserve the unlock
   error if closing also reports an OS error.

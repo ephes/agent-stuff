@@ -305,8 +305,11 @@ top-level directories under the roots and their approximate size.
 ## The scheduled job
 
 The Studio runs `workspace-gc report --apply --out-dir
-~/.local/state/workspace-gc --work-item workspace-gc-report` every day at 08:00
-(LaunchAgent `de.wersdoerfer.workspace-gc`, managed in the owner's dotfiles).
+~/.local/state/workspace-gc --work-item workspace-gc-report --lock-wait 600`
+every day at 08:00, 14:00 and 20:00 (LaunchAgent `de.wersdoerfer.workspace-gc`,
+managed in the owner's dotfiles). `--lock-wait 600` is the `report` default
+now; the job passes it explicitly because it runs whatever
+`~/projects/agent-stuff` has checked out, which may predate that default.
 Daily, because a class D checkout becomes class A once it has been idle for 48
 hours. The job
 
@@ -382,15 +385,18 @@ walked all of `~/workspaces` and `~/projects` again for borrowed objects,
 - **Run lock** (`--lock-file`, default
   `~/.local/state/workspace-gc/workspace-gc.lock`): `report` and every
   `--apply` take an exclusive `flock` before reading anything. A second run
-  that finds it held prints `BUSY, nothing done: another workspace-gc run
-  holds ... (pid N, started ...)`, writes no report and exits 3. The holder
-  details are best-effort. A process interrupt while writing them closes the
-  lock descriptor before propagating. `remove`
-  first waits for it, up to `--lock-wait SECONDS` (finite,
-  default 1800; 0 for `scan` and `report`; never longer than what is left of
-  `--max-runtime`), checking every 5 seconds: before 2026-11-18 a
-  runner's or clerk's removal that met the daily run failed at once and left
-  the checkout behind (`LEFT ... BUSY` in hundreds of Codex reports). The
+  first waits for it, up to `--lock-wait SECONDS` (finite; default 1800 for
+  `remove`, 600 for `report`, 0 for `scan --apply`; never longer than what is
+  left of `--max-runtime`), checking every 5 seconds. If it is still held then,
+  the run prints `BUSY, nothing done: another workspace-gc run holds ... (pid
+  N, locked since ...)`, writes no report and exits 3; the time is when that
+  holder took the lock, not when it started. The holder details are
+  best-effort. A process interrupt while writing them closes the lock
+  descriptor before propagating. Why the waits: before 2026-11-18 a runner's
+  or clerk's removal that met the daily run failed at once and left the
+  checkout behind (`LEFT ... BUSY` in hundreds of Codex reports); until
+  2026-11-26 the scheduled `report --apply` gave up at once when such a
+  removal held the lock for a few seconds, and skipped the whole run. The
   kernel releases the lock when the holder exits, however it exits, so a
   killed run leaves nothing to clean up. Lock release attempts to close its
   descriptor once, even if unlocking fails. If both operations report OS

@@ -33,6 +33,7 @@ DEFAULT_WORK_LEDGER = os.path.join(HOME, "projects", "work-ledger")
 COMMANDS = ("scan", "remove", "report")
 DEFAULT_MIN_IDLE = 48.0
 DEFAULT_REMOVE_LOCK_WAIT = 1800.0   # seconds; the daily run usually holds it for minutes
+DEFAULT_REPORT_LOCK_WAIT = 600.0    # seconds; a runner's or clerk's single-path remove takes seconds
 DEFAULT_LOCK_FILE = os.path.join(HOME, ".local", "state", "workspace-gc", "workspace-gc.lock")
 DEFAULT_STEP_TIMEOUT = 600.0
 DEFAULT_MAX_RUNTIME = 180.0
@@ -104,7 +105,8 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--lock-wait", type=_finite, default=None, metavar="SECONDS",
                    help="wait up to this long for a held run lock before exiting "
                         f"{EXIT_BUSY} (default {DEFAULT_REMOVE_LOCK_WAIT:g} for remove, "
-                        "0 for scan and report; never past --max-runtime)")
+                        f"{DEFAULT_REPORT_LOCK_WAIT:g} for report, 0 for scan; "
+                        "never past --max-runtime)")
 
 
 def _idle(p: argparse.ArgumentParser, default: float) -> None:
@@ -485,7 +487,8 @@ def main(argv: list[str] | None = None, *, signals: sig_mod.Signals | None = Non
         try:
             wait = a.lock_wait
             if wait is None:
-                wait = DEFAULT_REMOVE_LOCK_WAIT if a.cmd == "remove" else 0.0
+                wait = {"remove": DEFAULT_REMOVE_LOCK_WAIT,
+                        "report": DEFAULT_REPORT_LOCK_WAIT}.get(a.cmd, 0.0)
             # Never wait past the run's own deadline (--max-runtime).
             if _clock(a).deadline is not None:
                 wait = min(wait, max(_clock(a).deadline - budget._now(), 0.0))
