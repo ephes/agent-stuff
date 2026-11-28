@@ -2,8 +2,11 @@
 
 Inventories the git checkouts agents leave under `~/workspaces` and removes only
 the ones that are provably safe to lose, plus the empty workspace directories
-that removed checkouts leave behind. Dry run by default. Python 3 stdlib only,
-no dependencies.
+that removed checkouts leave behind. Dry run by default. Python 3.11 or newer,
+stdlib only, no dependencies. When `python3` on the PATH is older (atlas: the
+login PATH finds `/usr/bin/python3`, 3.9), `bin/workspace-gc` runs itself again
+under the newest `python3.N` on the PATH (N from 20 down to 11), and stops with
+an error before inspecting anything when none is installed.
 
 ```sh
 ~/projects/agent-stuff/tools/workspace-gc/bin/workspace-gc            # text report (dry run)
@@ -525,7 +528,7 @@ a pattern (for example `REPO:go/`).
 
 ```sh
 cd ~/projects/agent-stuff/tools/workspace-gc
-python3 -m unittest discover -s tests -t .
+python3.14 -m unittest discover -s tests -t .   # 3.11 or newer
 ```
 
 The tests build temporary repositories. A private `GIT_CONFIG_GLOBAL` rewrites

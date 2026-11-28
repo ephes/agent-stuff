@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 import os
+import shutil
 import sys
+
+# Removal deletes through directory descriptors (shutil.rmtree(dir_fd=...)),
+# which needs Python 3.11. On atlas the login PATH finds /usr/bin/python3
+# (3.9) first; there a clone removal raised TypeError after its first
+# top-level files were already deleted. So run under a newer interpreter, or
+# stop before anything is inspected or removed.
+# The marker stops a second re-run, should a python3.1x name start an older
+# interpreter after all.
+if sys.version_info < (3, 11):
+    if not os.environ.get("WORKSPACE_GC_REEXEC"):
+        for minor in range(20, 10, -1):   # python3.20 down to python3.11
+            exe = shutil.which(f"python3.{minor}")
+            if exe:
+                os.environ["WORKSPACE_GC_REEXEC"] = "1"
+                os.execv(exe, [exe, os.path.realpath(__file__), *sys.argv[1:]])
+    sys.exit(f"workspace-gc: needs Python 3.11 or newer, this is {sys.version.split()[0]}; "
+             "install python3.14 or run the script with it")
 
 # Make the tool root importable when run as a standalone script.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))

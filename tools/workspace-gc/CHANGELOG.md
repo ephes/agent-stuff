@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- A removal under an old Python no longer deletes a clone half-way. On atlas
+  the login PATH finds `/usr/bin/python3` (3.9) first, whose `shutil.rmtree`
+  has no `dir_fd`: on 2026-11-27 `remove --apply` of finished cast-react
+  clones unlinked their first top-level files (`LICENSE`, `justfile`,
+  `uv.lock`) and then stopped with `TypeError: rmtree() got an unexpected
+  keyword argument 'dir_fd'`, leaving dirty clones (class C) behind.
+  `bin/workspace-gc` now needs Python 3.11: under an older `python3` it runs
+  itself again with the newest `python3.N` on the PATH (N from 20 down to
+  11; once: `WORKSPACE_GC_REEXEC` marks the re-run), and exits
+  with an error before any inspection when none is there. The README's test
+  command now names `python3.14`.
+
 - The scheduled run no longer skips itself because a short removal holds the
   run lock. On 2026-11-26 the 20:00 run and a manual restart at 20:45 each
   exited `BUSY, nothing done` within a fraction of a second, because a
